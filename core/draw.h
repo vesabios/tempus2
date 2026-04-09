@@ -248,130 +248,123 @@ static inline void draw_quad_textured(DrawCtx *d,
     draw__tri(d, base, base+2, base+3);
 }
 
-// ---- Text rendering (using font_atlas.h data) ----
+// ---- Text rendering (SDF glyph data, normalized metrics) ----
+// All glyph metrics are normalized (divide by bake_size). Multiply by desired
+// pixel size at render time. This lets one atlas work at any display size.
 
-// Draw a string at (x,y) — top-left origin
-static inline float draw_text(DrawCtx *d, int font_id, float x, float y, const char *s) {
+// Draw a string at (x,y) with given pixel size. weight = SDF_WEIGHT_*.
+static inline float draw_text_ex(DrawCtx *d, int weight, float size,
+                                 float x, float y, const char *s) {
     float cursor = x;
-    float ascent = font_ascent[font_id];
+    float ascent = sdf_nascent[weight] * size;
     for (; *s; s++) {
-        int ci = *s - FONT_FIRST_CHAR;
-        if (ci < 0 || ci >= FONT_NUM_CHARS) {
-            cursor += font_glyphs[font_id][0].advance; // space width for unknown
+        int ci = *s - SDF_FIRST_CHAR;
+        if (ci < 0 || ci >= SDF_NUM_CHARS) {
+            cursor += sdf_glyphs[weight][0].nadvance * size;
             continue;
         }
-        const FontGlyph *g = &font_glyphs[font_id][ci];
-        if (g->w > 0 && g->h > 0) {
+        const SdfGlyph *g = &sdf_glyphs[weight][ci];
+        if (g->nw > 0 && g->nh > 0) {
             draw_quad_textured(d,
-                cursor + g->xoff, y + ascent + g->yoff,
-                g->w, g->h,
-                g->x0, g->y0, g->x1, g->y1);
+                cursor + g->nxoff * size, y + ascent + g->nyoff * size,
+                g->nw * size, g->nh * size,
+                g->u0, g->v0, g->u1, g->v1);
         }
-        cursor += g->advance;
+        cursor += g->nadvance * size;
     }
     return cursor - x;
 }
 
-// Draw a string centered at (cx,cy)
+// Compat wrapper: draw_text(d, FONT_clock, x, y, s)
+// FONT_clock etc. expand to integer font_id — but now these map to old-style
+// indexes (0-6). We map them to SDF weights + sizes.
+static const struct { int weight; float size; } _font_compat[] = {
+    { SDF_WEIGHT_BLACK,  18.0f }, // 0 = logo
+    { SDF_WEIGHT_LIGHT,  48.0f }, // 1 = event
+    { SDF_WEIGHT_MEDIUM, 24.0f }, // 2 = month
+    { SDF_WEIGHT_HEAVY,  14.0f }, // 3 = seconds
+    { SDF_WEIGHT_LIGHT,  48.0f }, // 4 = minutes
+    { SDF_WEIGHT_MEDIUM, 38.0f }, // 5 = clock
+    { SDF_WEIGHT_MEDIUM, 18.0f }, // 6 = date
+};
+
+static inline float draw_text(DrawCtx *d, int font_id, float x, float y, const char *s) {
+    return draw_text_ex(d, _font_compat[font_id].weight, _font_compat[font_id].size, x, y, s);
+}
+
 static inline void draw_text_centered(DrawCtx *d, int font_id, float cx, float cy, const char *s) {
-    float w = font_measure_width(font_id, s);
-    float h = font_sizes[font_id];
-    draw_text(d, font_id, cx - w * 0.5f, cy - h * 0.5f, s);
+    int w_id = _font_compat[font_id].weight;
+    float sz = _font_compat[font_id].size;
+    float tw = sdf_measure_width(w_id, s) * sz;
+    draw_text_ex(d, w_id, sz, cx - tw * 0.5f, cy - sz * 0.5f, s);
 }
 
-// Draw a single glyph at (x,y), return advance
-static inline float draw_glyph(DrawCtx *d, int font_id, float x, float y, char ch) {
-    int ci = ch - FONT_FIRST_CHAR;
-    if (ci < 0 || ci >= FONT_NUM_CHARS) return 0;
-    const FontGlyph *g = &font_glyphs[font_id][ci];
-    float ascent = font_ascent[font_id];
-    if (g->w > 0 && g->h > 0) {
-        draw_quad_textured(d,
-            x + g->xoff, y + ascent + g->yoff,
-            g->w, g->h,
-            g->x0, g->y0, g->x1, g->y1);
-    }
-    return g->advance;
-}
-
-// Draw curved text along the calendar wheel
+// Curved text along an arc
 static inline void draw_text_curved(DrawCtx *d, int font_id,
                                     float cx, float cy, float radius,
-                                    float center_angle, // radians, 0=top
+                                    float center_angle,
                                     const char *s, float spacing) {
-    // Measure total width
-    int len = 0;
+    int w_id = _font_compat[font_id].weight;
+    float sz = _font_compat[font_id].size;
+
+    // Measure total advance in pixels
     float total_w = 0;
     for (const char *p = s; *p; p++) {
-        int ci = *p - FONT_FIRST_CHAR;
-        if (ci >= 0 && ci < FONT_NUM_CHARS)
-            total_w += font_glyphs[font_id][ci].advance * spacing;
-        len++;
+        int ci = *p - SDF_FIRST_CHAR;
+        if (ci >= 0 && ci < SDF_NUM_CHARS)
+            total_w += sdf_glyphs[w_id][ci].nadvance * sz * spacing;
     }
 
-    // Convert pixel width to arc angle
     float circumference = 2.0f * (float)M_PI * radius;
     float total_angle = total_w / circumference * 2.0f * (float)M_PI;
 
-    // Should we flip text? (bottom half of wheel)
     float norm_angle = fmodf(center_angle, 2.0f * (float)M_PI);
     if (norm_angle < 0) norm_angle += 2.0f * (float)M_PI;
     bool flip = (norm_angle > M_PI * 0.5f && norm_angle < M_PI * 1.5f);
 
-    float angle;
-    if (flip)
-        angle = center_angle + total_angle * 0.5f;
-    else
-        angle = center_angle - total_angle * 0.5f;
+    float angle = flip
+        ? center_angle + total_angle * 0.5f
+        : center_angle - total_angle * 0.5f;
 
-    float ascent = font_ascent[font_id];
-    float font_h = font_sizes[font_id];
+    float ascent = sdf_nascent[w_id] * sz;
 
     for (const char *p = s; *p; p++) {
-        int ci = *p - FONT_FIRST_CHAR;
-        if (ci < 0 || ci >= FONT_NUM_CHARS) continue;
-        const FontGlyph *g = &font_glyphs[font_id][ci];
-        float adv = g->advance * spacing;
+        int ci = *p - SDF_FIRST_CHAR;
+        if (ci < 0 || ci >= SDF_NUM_CHARS) continue;
+        const SdfGlyph *g = &sdf_glyphs[w_id][ci];
+        float adv = g->nadvance * sz * spacing;
         float char_angle = adv / circumference * 2.0f * (float)M_PI;
 
-        float a;
-        if (flip)
-            a = angle - char_angle * 0.5f;
-        else
-            a = angle + char_angle * 0.5f;
+        float a = flip
+            ? angle - char_angle * 0.5f
+            : angle + char_angle * 0.5f;
 
-        // Position on circle
         float px = cx + sinf(a) * radius;
         float py = cy - cosf(a) * radius;
 
-        if (g->w > 0 && g->h > 0) {
-            // For each glyph, we draw a rotated quad
-            // We need 4 corners of the glyph rect, rotated by the angle
-            float gx = -g->w * 0.5f;
-            float gy;
-            if (flip)
-                gy = -font_h + ascent + g->yoff;
-            else
-                gy = ascent + g->yoff;
+        if (g->nw > 0 && g->nh > 0) {
+            float gw = g->nw * sz;
+            float gh = g->nh * sz;
+            float gx = -gw * 0.5f;
+            float gy = flip
+                ? -sz + ascent + g->nyoff * sz
+                : ascent + g->nyoff * sz;
 
             float rot = flip ? (a + (float)M_PI) : a;
             float cs = cosf(rot), sn = sinf(rot);
 
             float corners[4][2] = {
-                { gx,          gy },
-                { gx + g->w,   gy },
-                { gx + g->w,   gy + g->h },
-                { gx,          gy + g->h },
+                { gx,      gy },
+                { gx + gw, gy },
+                { gx + gw, gy + gh },
+                { gx,      gy + gh },
+            };
+            float uvs[4][2] = {
+                { g->u0, g->v0 }, { g->u1, g->v0 },
+                { g->u1, g->v1 }, { g->u0, g->v1 },
             };
 
             int base = d->num_verts;
-            float uvs[4][2] = {
-                { g->x0, g->y0 },
-                { g->x1, g->y0 },
-                { g->x1, g->y1 },
-                { g->x0, g->y1 },
-            };
-
             for (int i = 0; i < 4; i++) {
                 float rx = corners[i][0] * cs - corners[i][1] * sn;
                 float ry = corners[i][0] * sn + corners[i][1] * cs;
@@ -381,10 +374,8 @@ static inline void draw_text_curved(DrawCtx *d, int font_id,
             draw__tri(d, base, base+2, base+3);
         }
 
-        if (flip)
-            angle -= char_angle;
-        else
-            angle += char_angle;
+        if (flip) angle -= char_angle;
+        else      angle += char_angle;
     }
 }
 

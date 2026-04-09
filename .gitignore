@@ -9,6 +9,11 @@ assets/font_atlas.h
 
 # Vendored headers are tracked (sokol, stb)
 
+# Test artifacts
+test_*.png
+shot.png
+tools/test_glyphs
+
 # OS junk
 .DS_Store
 *.o

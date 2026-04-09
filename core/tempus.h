@@ -58,6 +58,12 @@ typedef struct {
     double frac_secs;           // fractional seconds (ms precision)
     double percent_of_day;      // 0..1
 
+    // Debug override: when true, derive date/time from normalized sliders
+    bool   time_override;
+    int    override_year;
+    double override_year_pct;   // 0..1 position within year → month/day
+    double override_day_pct;    // 0..1 position within day → hour/min/sec
+
     // Calendar years (previous, current, next — for yule boundaries)
     CalendarYear last_year;
     CalendarYear this_year;
@@ -262,14 +268,75 @@ static inline void tempus_update(Tempus *t, double now_secs) {
     if (t->rotation_arc < 1.0)
         t->rotation_arc += 0.0015;
 
-    // Read wall clock with sub-second precision (C11 timespec_get)
-    struct timespec ts;
-    timespec_get(&ts, TIME_UTC);
-    struct tm *tm = localtime(&ts.tv_sec);
-    t->hours = tm->tm_hour;
-    t->mins  = tm->tm_min;
-    t->secs  = tm->tm_sec;
-    t->frac_secs = ts.tv_nsec / 1000000000.0;
+    if (t->time_override) {
+        // Derive date from year + normalized year position (0..1)
+        t->year = t->override_year;
+        int days_total = cal_days_in_year(t->year);
+        double ypct = t->override_year_pct;
+        if (ypct < 0) ypct = 0;
+        if (ypct > 0.9999) ypct = 0.9999;
+        int day_of_year = (int)(ypct * days_total); // 0-based
+        // Walk months to find month/day
+        int accum = 0;
+        t->month = 1;
+        t->day = 1;
+        for (int m = 1; m <= 12; m++) {
+            int dm = cal_days_in_month(m, t->year);
+            if (accum + dm > day_of_year) {
+                t->month = m;
+                t->day = day_of_year - accum + 1;
+                break;
+            }
+            accum += dm;
+        }
+
+        // Derive time from normalized day position (0..1)
+        double dpct = t->override_day_pct;
+        if (dpct < 0) dpct = 0;
+        if (dpct > 0.9999) dpct = 0.9999;
+        int total_secs = (int)(dpct * 86400.0);
+        t->hours = total_secs / 3600;
+        t->mins  = (total_secs % 3600) / 60;
+        t->secs  = total_secs % 60;
+        t->frac_secs = 0;
+
+        // Recalculate calendar data if year changed
+        double new_jd = cal_jd_noon(t->year, t->month, t->day);
+        if (new_jd != t->jd_current) {
+            t->jd_current = new_jd;
+            cal_year_init(&t->last_year, t->year - 1);
+            cal_year_init(&t->this_year, t->year);
+            cal_year_init(&t->next_year, t->year + 1);
+            t->jd_newyear  = t->last_year.jd_yule;
+            t->jd_nextyear = t->this_year.jd_yule;
+            for (int i = 0; i < 12; i++)
+                t->jd_months[i] = cal_jd_noon(t->year, i + 1, 1);
+            t->jd_months[12] = cal_jd_noon(t->year + 1, 1, 1);
+            t->jd_events[0] = t->this_year.jd_imbolc;
+            t->jd_events[1] = t->this_year.jd_ostara;
+            t->jd_events[2] = t->this_year.jd_beltane;
+            t->jd_events[3] = t->this_year.jd_litha;
+            t->jd_events[4] = t->this_year.jd_lammas;
+            t->jd_events[5] = t->this_year.jd_mabon;
+            t->jd_events[6] = t->this_year.jd_samhain;
+            t->jd_events[7] = t->this_year.jd_yule;
+            tempus_recalc_day(t);
+
+            // Recalc sunrise/sunset for new date/location
+            sunset_set_date(&t->sunset_calc, t->year, t->month, t->day);
+            t->sunrise_mins = sunset_calc_sunrise(&t->sunset_calc);
+            t->sunset_mins  = sunset_calc_sunset(&t->sunset_calc);
+        }
+    } else {
+        // Read wall clock with sub-second precision (C11 timespec_get)
+        struct timespec ts;
+        timespec_get(&ts, TIME_UTC);
+        struct tm *tm = localtime(&ts.tv_sec);
+        t->hours = tm->tm_hour;
+        t->mins  = tm->tm_min;
+        t->secs  = tm->tm_sec;
+        t->frac_secs = ts.tv_nsec / 1000000000.0;
+    }
 
     // Percent of day
     t->percent_of_day = ((double)t->hours * 3600.0 + (double)t->mins * 60.0

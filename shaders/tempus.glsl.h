@@ -1,5 +1,5 @@
 // tempus.glsl.h — Inline shader source for the 2D batch renderer
-// These are GLSL 3.30 core shaders embedded as C strings.
+// SDF text rendering with fwidth-based antialiasing.
 
 #ifndef TEMPUS_GLSL_H
 #define TEMPUS_GLSL_H
@@ -24,7 +24,12 @@ static const char *fs_src =
     "uniform sampler2D u_tex;\n"
     "out vec4 frag_color;\n"
     "void main() {\n"
-    "    float alpha = texture(u_tex, v_uv).r;\n"
+    "    float d = texture(u_tex, v_uv).r;\n"
+    "    // SDF threshold: edge at 128/255, AA via fwidth\n"
+    "    float edge = 0.502;\n"  // 128/255
+    "    float fw = fwidth(d);\n"
+    "    float w = clamp(fw * 0.35, 0.001, 0.1);\n"  // tighter smoothing
+    "    float alpha = smoothstep(edge - w, edge + w, d);\n"
     "    frag_color = v_color * vec4(1.0, 1.0, 1.0, alpha);\n"
     "}\n";
 
