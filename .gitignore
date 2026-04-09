@@ -1,0 +1,14 @@
+# Build artifacts
+tempus
+tempus_debug
+tools/bake_font
+
+# Generated files (rebuilt by `make atlas`)
+assets/font_atlas.png
+assets/font_atlas.h
+
+# Vendored headers are tracked (sokol, stb)
+
+# OS junk
+.DS_Store
+*.o
