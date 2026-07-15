@@ -44,6 +44,9 @@ typedef struct {
     // Sun
     float sun_size;
 
+    // Second hand: continuous sweep (needs high frame rate) or per-second tick
+    bool sweep_seconds;
+
     // Colors
     DrawColor clear;
     DrawColor logo_text;
@@ -67,6 +70,8 @@ typedef struct {
     DrawColor sunrise_lit;
     DrawColor globe_light;
     DrawColor globe_shadow;
+    DrawColor globe_grid;        // graticule lines (alpha = line strength)
+    DrawColor globe_terminator;  // day/night hairline (alpha = line strength)
 } RenderStyle;
 
 static inline RenderStyle style_default(void) {
@@ -89,6 +94,7 @@ static inline RenderStyle style_default(void) {
     s.minutes_width = 12.0f;  s.minutes_start = 60.0f;  s.minutes_end = 250.0f;
     s.hours_width = 20.0f;    s.hours_start = 60.0f;    s.hours_end = 200.0f;
     s.sun_size = 7.0f;
+    s.sweep_seconds = true;
     s.clear           = dc(0, 0, 0);
     s.logo_text       = dc(0.3f, 0.3f, 0.3f);
     s.dark_blue       = dc(0, 0.1f, 0.2f);
@@ -109,8 +115,10 @@ static inline RenderStyle style_default(void) {
     s.clock_lines     = dc(0.2f, 0.2f, 0.2f);
     s.sunrise_handle  = dc_u8(168, 95, 0);
     s.sunrise_lit     = dc_u8(64, 26, 18);
-    s.globe_light     = dc_u8(59, 13, 22);
-    s.globe_shadow    = dc_u8(22, 0, 17);
+    s.globe_light     = dc_u8(92, 26, 30);
+    s.globe_shadow    = dc_u8(16, 0, 13);
+    s.globe_grid      = dca(0.42f, 0.40f, 0.38f, 0.30f);
+    s.globe_terminator = dca(0.65f, 0.42f, 0.20f, 0.55f);
     return s;
 }
 

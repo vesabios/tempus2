@@ -2,6 +2,8 @@
 tempus
 tempus_debug
 tools/bake_font
+build/
+web/
 
 # Generated files (rebuilt by `make atlas`)
 assets/font_atlas.png

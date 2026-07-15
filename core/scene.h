@@ -21,6 +21,27 @@ typedef enum {
     TRANS_ZOOM,
 } TransitionKind;
 
+// ---- Pacing ----
+// The scene reports the frame rate it currently needs; shells map this onto
+// their presentation mechanism (swap interval, timer period, animation
+// interval). Idle clock ≠ GPU fan.
+
+typedef struct {
+    double animate_fps;   // transitions, tweens, time warps
+    double sweep_fps;     // sweeping second hand, otherwise idle
+    double tick_fps;      // ticking second hand, otherwise idle
+    double ambient_fps;   // slowest views only (calendar/solar idle)
+} PacePolicy;
+
+static inline PacePolicy pace_default(void) {
+    return (PacePolicy){
+        .animate_fps = 60.0,
+        .sweep_fps   = 20.0,
+        .tick_fps    = 4.0,
+        .ambient_fps = 1.0,
+    };
+}
+
 // ---- Scene ----
 
 #define SCENE_MAX_LAYERS  4
@@ -55,8 +76,8 @@ struct Scene {
 
     // Shared systems
     TweenPool   tweens;
-    TimeWarp    warp;
     RenderStyle style;
+    PacePolicy  pace;
 };
 
 // Now Scene is defined — include view function implementations
@@ -128,8 +149,8 @@ static inline void scene_transition_to(Scene *sc, ViewId to,
 static inline void scene_init(Scene *sc, const Tempus *t) {
     memset(sc, 0, sizeof(Scene));
     tween_pool_init(&sc->tweens);
-    timewarp_init(&sc->warp);
     sc->style = style_default();
+    sc->pace = pace_default();
     sc->dwell_duration = 10.0;
 
     sc->views[VIEW_CLOCK].state    = &sc->clock_state;
@@ -155,7 +176,18 @@ static inline void scene_init_views(Scene *sc, const Tempus *t) {
 
 static inline void scene_update(Scene *sc, const Tempus *t, double dt) {
     tween_update_all(&sc->tweens, dt);
-    timewarp_update(&sc->warp, dt);
+
+    // Sync/update per-view TimeViews
+    for (int i = 0; i < VIEW_COUNT; i++) {
+        View *v = &sc->views[i];
+        if (!v->state) continue;
+        TimeView *tv = (TimeView *)v->state; // TimeView is first field
+        if (tv->synced) {
+            timeview_sync(tv, t);
+        } else {
+            timeview_update(tv, dt);
+        }
+    }
 
     if (sc->transitioning) {
         View *from = &sc->views[sc->trans_from];
@@ -212,6 +244,32 @@ static inline void scene_render(const Scene *sc, DrawCtx *d, const Tempus *t) {
 
 static inline void scene_event(Scene *sc, const Tempus *t, int key) {
     (void)sc; (void)t; (void)key;
+}
+
+// ---- Pacing query ----
+// The frame rate the scene needs right now. Shells are free to render
+// faster (e.g. vsync-locked), but only need to *update* at this rate.
+
+static inline double scene_desired_fps(const Scene *sc) {
+    if (sc->transitioning || tween_any_active(&sc->tweens))
+        return sc->pace.animate_fps;
+
+    double fps = sc->pace.ambient_fps;
+    for (int i = 0; i < sc->num_layers; i++) {
+        const View *v = &sc->views[sc->layers[i]];
+        if (!v->state || v->opacity <= 0.001) continue;
+
+        const TimeView *tv = (const TimeView *)v->state; // first field
+        if (!tv->synced || tv->warp.active)
+            return sc->pace.animate_fps;
+
+        if (v->id == VIEW_CLOCK) {
+            double f = sc->style.sweep_seconds ? sc->pace.sweep_fps
+                                               : sc->pace.tick_fps;
+            if (f > fps) fps = f;
+        }
+    }
+    return fps;
 }
 
 #endif // SCENE_H

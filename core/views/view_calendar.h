@@ -23,6 +23,7 @@ typedef struct {
 } CachedTick;              // 8 bytes
 
 struct CalendarViewState {
+    TimeView tv;  // must be first field
     double  zoom;
     double  target_zoom;
 
@@ -46,8 +47,9 @@ static inline void cal__fc(double pct, float r, float *x, float *y) {
 static void cal__rebuild_ticks(CalendarViewState *st, const Tempus *t,
                                const RenderStyle *s) {
     (void)s;
+    const TimeView *tv = &st->tv;
     int total = (int)floor(t->total_days);
-    if (cal_is_leap_year(t->year)) total++;
+    if (cal_is_leap_year(tv->year)) total++;
     if (total > CAL_MAX_TICKS) total = CAL_MAX_TICKS;
 
     float theta_inc = 1.0f / (float)t->total_days;
@@ -58,7 +60,7 @@ static void cal__rebuild_ticks(CalendarViewState *st, const Tempus *t,
 
     for (int x = 0; x < total && st->num_ticks < CAL_MAX_TICKS; x++) {
         float theta = start_theta + theta_inc * x;
-        bool is_today = (month == t->month - 1 && day == t->day - 1);
+        bool is_today = (month == tv->month - 1 && day == tv->day - 1);
 
         uint8_t kind;
         if (month == 1 && day == 28)
@@ -74,8 +76,8 @@ static void cal__rebuild_ticks(CalendarViewState *st, const Tempus *t,
         if (day >= t->days_in_month[month]) { month++; day = 0; }
     }
 
-    st->cached_day = t->day;
-    st->cached_year = t->year;
+    st->cached_day = tv->day;
+    st->cached_year = tv->year;
 }
 
 static void cal__render_glyphs(DrawCtx *d, const Tempus *t, const RenderStyle *s,
@@ -139,15 +141,17 @@ static void calendar_exit(void *buf, const Tempus *t, Scene *sc) {
 static void calendar_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     CalendarViewState *st = (CalendarViewState *)buf;
     (void)dt;
-    if (st->cached_day != t->day || st->cached_year != t->year)
+    if (st->cached_day != st->tv.day || st->cached_year != st->tv.year)
         cal__rebuild_ticks(st, t, &sc->style);
 }
 
 static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
                             const RenderStyle *s) {
     const CalendarViewState *st = (const CalendarViewState *)buf;
+    const TimeView *tv = &st->tv;
     double blend = st->zoom;
-    double year_pct = tempus_year_pct(t);
+    double year_pct = (tv->jd_current - t->jd_newyear) / t->total_days
+                    + tv->percent_of_day / t->total_days;
 
     float radius = s->calendar_base_radius + (float)(blend * s->zoom_in_radius);
 
@@ -166,7 +170,7 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
             float ef = (float)tempus_jd_to_wheel_pct(t, t->jd_events[i]);
             float angle = ef * 2.0f * (float)M_PI;
             draw_text_curved(d, FONT_event, 0, 0, radius - 10.0f,
-                           angle, tempus_event_name(t, i), 1.0f);
+                           angle, tempus_event_name(t, i), 4.0f);
         }
     }
 
@@ -200,7 +204,7 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
     d->tx = save_tx; d->ty = save_ty;
 
     // Month arc
-    int cur_month = t->month - 1;
+    int cur_month = tv->month - 1;
     {
         float arc_r = radius + (float)tempus_mix(s->month_arc_radius_a, s->month_arc_radius_b, blend);
         float arc_w = (float)tempus_mix(s->month_arc_width_a, s->month_arc_width_b, blend);
@@ -219,7 +223,7 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
     // Month names
     {
         float text_r = radius + (float)tempus_mix(s->month_text_radius_a, s->month_text_radius_b, blend);
-        float text_mix = (float)tempus_mix(0.2, 1.6, blend);
+        float text_mix = (float)tempus_mix(2.0, 5.0, blend);
         float outer_mix = (float)tempus_mix(0.1, 0.6, blend);
 
         float stx = d->tx, sty = d->ty;
@@ -241,7 +245,7 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
     {
         float pointer_r = radius + (float)tempus_mix(
             s->wheel_pointer_offset_a, s->wheel_pointer_offset_b, blend);
-        double pos = tempus_jd_to_wheel_pct(t, t->jd_current + t->percent_of_day);
+        double pos = tempus_jd_to_wheel_pct(t, tv->jd_current + tv->percent_of_day);
         float px, py;
         cal__fc(pos, pointer_r, &px, &py);
 

@@ -6,6 +6,7 @@
 #include "../view.h"
 
 struct ClockViewState {
+    TimeView tv;  // must be first field
     double opacity;
 };
 
@@ -39,8 +40,12 @@ static void clock_update(void *buf, const Tempus *t, double dt, Scene *sc) {
 }
 
 static void clock_render(const void *buf, DrawCtx *d, const Tempus *t, const RenderStyle *s) {
-    (void)buf;
-    double real_secs = ((double)t->secs + t->frac_secs) / 60.0;
+    const ClockViewState *st = (const ClockViewState *)buf;
+    (void)t;
+    const TimeView *tv = &st->tv;
+    double real_secs = s->sweep_seconds
+        ? ((double)tv->secs + tv->frac_secs) / 60.0
+        : (double)tv->secs / 60.0;
 
     // Logo
     draw_set_color(d, s->logo_text);
@@ -72,7 +77,7 @@ static void clock_render(const void *buf, DrawCtx *d, const Tempus *t, const Ren
 
     // Hour hand
     {
-        float angle = (float)(t->percent_of_day * 2.0 * M_PI * 2.0);
+        float angle = (float)(tv->percent_of_day * 2.0 * M_PI * 2.0);
         float dx = sinf(angle), dy = -cosf(angle);
         float px = -dy, py = dx;
         float hw = s->hours_width * 0.5f;
@@ -92,7 +97,7 @@ static void clock_render(const void *buf, DrawCtx *d, const Tempus *t, const Ren
 
     // Minute hand
     {
-        float m = ((float)t->mins + (float)real_secs) / 60.0f;
+        float m = ((float)tv->mins + (float)real_secs) / 60.0f;
         float angle = (float)(m * M_PI * 2.0);
         float dx = sinf(angle), dy = -cosf(angle);
         float px = -dy, py = dx;

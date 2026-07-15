@@ -12,6 +12,7 @@
 #include "calendar.h"
 #include "sunset.h"
 #include "spa.h"
+#include "timeview.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -23,29 +24,31 @@ typedef struct {
     double latitude;
     double longitude;
     double timezone;        // hours from GMT (e.g. -8 for PST)
+    bool   timezone_auto;   // derive timezone from the system clock (w/ DST)
     double elevation;       // meters
     bool   use_alternate_names;
 } TempusConfig;
 
 static inline TempusConfig tempus_default_config(void) {
     return (TempusConfig){
-        .latitude  = 37.7,
-        .longitude = -122.4,
-        .timezone  = -8.0,
-        .elevation = 1830.14,
+        .latitude  = 52.52,      // Berlin, DE
+        .longitude = 13.405,
+        .timezone  = 1.0,        // fallback when timezone_auto is off
+        .timezone_auto = true,
+        .elevation = 34.0,       // meters
         .use_alternate_names = true,
     };
 }
 
-// ---- Display modes ----
-
-enum {
-    TMODE_ZOOM_OUT = 0,     // calendar zooms out from detail
-    TMODE_SIMULATOR = 1,    // solar position animation
-    TMODE_ZOOM_IN = 2,      // calendar zooms into detail
-    TMODE_DETAIL = 3,       // hold on zoomed-in view
-    TMODE_COUNT = 4,
-};
+// Current UTC offset of the system clock in hours, DST included.
+// Portable: reinterpret the UTC field breakdown as local time and diff.
+static inline double tempus_system_tz_offset(void) {
+    time_t now = time(NULL);
+    struct tm utc_tm = *gmtime(&now);
+    utc_tm.tm_isdst = -1;
+    time_t utc_as_local = mktime(&utc_tm);
+    return difftime(now, utc_as_local) / 3600.0;
+}
 
 // ---- Main state ----
 
@@ -88,21 +91,8 @@ typedef struct {
     double   zenith;
     bool     solar_dirty;
 
-    // Solar position simulator
-    bool   simulator_running;
-    int    simulator_minutes;
-    double simulator_length;    // 24*60
-
-    // Display mode
-    int    mode;
-    double mode_timer;
-    double mode_length;
-    double rotation_arc;
-    double rotation_timer;
-
     // Tracking for recalculation
     int    last_mins;
-    int    last_hours;
 
     // Elapsed time
     double elapsed;
@@ -197,9 +187,9 @@ static inline void tempus_recalc_day(Tempus *t) {
 static inline void tempus_init(Tempus *t, TempusConfig cfg) {
     memset(t, 0, sizeof(Tempus));
     t->config = cfg;
-    t->simulator_length = 24.0 * 60.0;
+    if (t->config.timezone_auto)
+        t->config.timezone = tempus_system_tz_offset();
     t->last_mins = -1;
-    t->last_hours = -1;
 
     // Get current time
     time_t now_t = time(NULL);
@@ -248,11 +238,18 @@ static inline void tempus_init(Tempus *t, TempusConfig cfg) {
     spa_calculate(&t->solar);
     t->zenith = t->solar.zenith;
 
-    // Mode
-    t->mode = 0;
-    t->mode_timer = 0;
-    t->mode_length = 10.0;
-    t->rotation_arc = 0;
+}
+
+// Change observer location at runtime: re-seed sunrise/sunset and force
+// solar recalculation on the next update.
+static inline void tempus_set_location(Tempus *t, double lat, double lon) {
+    t->config.latitude = lat;
+    t->config.longitude = lon;
+    sunset_init(&t->sunset_calc, lat, lon, (int)t->config.timezone);
+    sunset_set_date(&t->sunset_calc, t->year, t->month, t->day);
+    t->sunrise_mins = sunset_calc_sunrise(&t->sunset_calc);
+    t->sunset_mins  = sunset_calc_sunset(&t->sunset_calc);
+    t->solar_dirty = true;
 }
 
 // ---- Update (called each frame) ----
@@ -260,13 +257,9 @@ static inline void tempus_init(Tempus *t, TempusConfig cfg) {
 static inline void tempus_update(Tempus *t, double now_secs) {
     double delta = now_secs - t->last_elapsed;
     t->last_elapsed = now_secs;
-    if (delta < 0 || delta > 1.0) delta = 0; // guard against first frame / jumps
+    if (delta < 0 || delta > 1.0) delta = 0;
 
     t->elapsed = now_secs;
-    t->mode_timer += delta;
-    t->rotation_timer += delta * t->rotation_arc;
-    if (t->rotation_arc < 1.0)
-        t->rotation_arc += 0.0015;
 
     if (t->time_override) {
         // Derive date from year + normalized year position (0..1)
@@ -275,8 +268,7 @@ static inline void tempus_update(Tempus *t, double now_secs) {
         double ypct = t->override_year_pct;
         if (ypct < 0) ypct = 0;
         if (ypct > 0.9999) ypct = 0.9999;
-        int day_of_year = (int)(ypct * days_total); // 0-based
-        // Walk months to find month/day
+        int day_of_year = (int)(ypct * days_total);
         int accum = 0;
         t->month = 1;
         t->day = 1;
@@ -300,7 +292,7 @@ static inline void tempus_update(Tempus *t, double now_secs) {
         t->secs  = total_secs % 60;
         t->frac_secs = 0;
 
-        // Recalculate calendar data if year changed
+        // Recalculate calendar data if date changed
         double new_jd = cal_jd_noon(t->year, t->month, t->day);
         if (new_jd != t->jd_current) {
             t->jd_current = new_jd;
@@ -322,7 +314,6 @@ static inline void tempus_update(Tempus *t, double now_secs) {
             t->jd_events[7] = t->this_year.jd_yule;
             tempus_recalc_day(t);
 
-            // Recalc sunrise/sunset for new date/location
             sunset_set_date(&t->sunset_calc, t->year, t->month, t->day);
             t->sunrise_mins = sunset_calc_sunrise(&t->sunset_calc);
             t->sunset_mins  = sunset_calc_sunset(&t->sunset_calc);
@@ -342,67 +333,69 @@ static inline void tempus_update(Tempus *t, double now_secs) {
     t->percent_of_day = ((double)t->hours * 3600.0 + (double)t->mins * 60.0
                         + (double)t->secs + t->frac_secs) / 86400.0;
 
-    // Recalculate solar when hour changes
-    if (t->last_hours != t->hours) {
-        t->solar_dirty = true;
-        t->last_hours = t->hours;
-    }
-
-    // Simulator
-    if (t->simulator_running) {
-        t->simulator_minutes += 6;
-        if (t->simulator_minutes >= (int)t->simulator_length) {
-            t->simulator_running = false;
-            t->simulator_minutes = 0;
-        }
-    }
-
-    double sim_pct = (double)t->simulator_minutes / t->simulator_length;
-    int smooth_mins = (int)(tempus_ease_in_out_quad(sim_pct) * t->simulator_length);
-
-    int new_mins = t->mins + smooth_mins;
-    int new_hours = t->hours + new_mins / 60;
-    new_hours %= 24;
-    new_mins %= 60;
-
     // Recalculate solar when minute changes
-    if (t->last_mins != new_mins) {
-        tempus__fill_spa(&t->solar, t, new_hours, new_mins, SPA_ALL);
+    if (t->last_mins != t->mins || t->solar_dirty) {
+        if (t->config.timezone_auto)
+            // While scrubbing manual time, interpret the clock as local
+            // mean solar time at the configured longitude — so "midnight"
+            // on the slider means the sun is opposite this location, even
+            // when the machine's timezone is somewhere else entirely.
+            t->config.timezone = t->time_override
+                ? t->config.longitude / 15.0
+                : tempus_system_tz_offset();
+        tempus__fill_spa(&t->solar, t, t->hours, t->mins, SPA_ALL);
         spa_calculate(&t->solar);
         t->zenith = t->solar.zenith;
-        t->last_mins = new_mins;
-    }
-
-    // Mode cycling
-    if (t->mode_timer > t->mode_length) {
-        t->mode_timer = 0;
-        t->mode = (t->mode + 1) % TMODE_COUNT;
-        if (t->mode == TMODE_SIMULATOR) {
-            t->simulator_running = true;
-            t->simulator_minutes = 0;
-        }
-        t->mode_length = 10.0;
+        t->last_mins = t->mins;
+        t->solar_dirty = false;
     }
 }
 
 // ---- Derived values for rendering ----
 
-// blend_val: 0 = zoomed out (full wheel), 1 = zoomed in (detail)
-static inline double tempus_blend_val(const Tempus *t) {
-    switch (t->mode) {
-        case TMODE_ZOOM_OUT:
-            return 1.0 - tempus_ease_in_out_quint(
-                tempus_clamp(t->mode_timer / 10.0, 0.0, 1.0));
-        case TMODE_SIMULATOR:
-            return 0.0;
-        case TMODE_ZOOM_IN:
-            return tempus_ease_in_out_quint(
-                tempus_clamp(t->mode_timer / 10.0, 0.0, 1.0));
-        case TMODE_DETAIL:
-            return 1.0;
-        default:
-            return 0.0;
-    }
+// Sync a TimeView from the master clock
+static inline void timeview_sync(TimeView *tv, const Tempus *t) {
+    tv->year = t->year;
+    tv->month = t->month;
+    tv->day = t->day;
+    tv->hours = t->hours;
+    tv->mins = t->mins;
+    tv->secs = t->secs;
+    tv->frac_secs = t->frac_secs;
+    tv->percent_of_day = t->percent_of_day;
+    tv->day_pct = t->percent_of_day;
+    tv->jd_current = t->jd_current;
+
+    // Compute year_pct from day of year
+    int doy = 0;
+    for (int m = 1; m < t->month; m++)
+        doy += cal_days_in_month(m, t->year);
+    doy += t->day - 1;
+    tv->year_pct = (double)doy / cal_days_in_year(t->year);
+}
+
+// Fill SPA from a TimeView + config (for per-view solar calculations)
+static inline void timeview_fill_spa(spa_data *spa, const TimeView *tv,
+                                     const TempusConfig *cfg, int func) {
+    memset(spa, 0, sizeof(spa_data));
+    spa->year          = tv->year;
+    spa->month         = tv->month;
+    spa->day           = tv->day;
+    spa->hour          = tv->hours;
+    spa->minute        = tv->mins;
+    spa->second        = tv->secs;
+    spa->timezone      = cfg->timezone;
+    spa->delta_ut1     = 0;
+    spa->delta_t       = 67;
+    spa->longitude     = cfg->longitude;
+    spa->latitude      = cfg->latitude;
+    spa->elevation     = cfg->elevation;
+    spa->pressure      = 820;
+    spa->temperature   = 11;
+    spa->slope         = 0;
+    spa->azm_rotation  = 0;
+    spa->atmos_refract = 0.5667;
+    spa->function      = func;
 }
 
 static inline double tempus_year_pct(const Tempus *t) {

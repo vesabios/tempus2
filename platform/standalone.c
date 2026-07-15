@@ -1,8 +1,14 @@
 // standalone.c — Sokol standalone entry point for Tempus
 
+#if !defined(__APPLE__)
 #define _POSIX_C_SOURCE 199309L
+#endif
 #define SOKOL_IMPL
+#if defined(__EMSCRIPTEN__)
+#define SOKOL_GLES3
+#else
 #define SOKOL_GLCORE
+#endif
 #include "../lib/sokol_app.h"
 #include "../lib/sokol_gfx.h"
 #include "../lib/sokol_glue.h"
@@ -22,8 +28,20 @@
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "../lib/stb_image.h"
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include "../lib/stb_image_write.h"
+
+#if defined(__EMSCRIPTEN__)
+#include <GLES3/gl3.h>
+#elif defined(__APPLE__)
+#include <OpenGL/gl3.h>
+#else
+#include <GL/gl.h>
+#endif
+#include <stdlib.h>
 
 #include "../core/scene.h"
+#include "../core/globe.h"
 #include "../shaders/tempus.glsl.h"
 
 // ---- Globals ----
@@ -41,6 +59,122 @@ static sg_image        g_atlas_img;
 static sg_view         g_atlas_view;
 static sg_sampler      g_sampler;
 static sg_pass_action  g_pass_action;
+
+// Globe (3D earth instrument)
+static sg_pipeline     g_globe_pip;
+static sg_buffer       g_globe_vbuf;
+static sg_buffer       g_globe_ibuf;
+
+typedef struct {
+    float rot[16];      // earth -> view rotation (column-major mat4)
+    float place[4];     // cx, cy, radius (world), pad
+    float screen[4];    // w/2, h/2, pad, pad
+} GlobeVsUniforms;
+
+typedef struct {
+    float light[4];
+    float day[4];
+    float night[4];
+    float grid[4];
+    float term[4];
+} GlobeFsUniforms;
+
+// Dev harness: TEMPUS_SHOT=<path> renders N frames, dumps a PNG, exits.
+static const char     *g_shot_path = NULL;
+static int             g_shot_countdown = 0;
+
+// Pacing: vsync drives the frame callback, but update/rebuild work only
+// runs at scene_desired_fps(). Skipped frames re-present existing buffers.
+static double          g_time = 0;
+static double          g_last_update = -1.0e9;
+static double          g_boost_until = 0;       // input → brief full rate
+static double          g_desired_fps = 60.0;    // for debug display
+static bool            g_pace_log = false;      // TEMPUS_PACE_LOG=1
+static int             g_updates_this_sec = 0;
+static double          g_pace_log_timer = 0;
+
+static void save_shot(const char *path) {
+    int w = sapp_width(), h = sapp_height();
+    unsigned char *pixels = malloc((size_t)w * h * 4);
+    unsigned char *flipped = malloc((size_t)w * h * 4);
+    if (!pixels || !flipped) { free(pixels); free(flipped); return; }
+    glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    for (int y = 0; y < h; y++)
+        memcpy(flipped + (size_t)y * w * 4,
+               pixels + (size_t)(h - 1 - y) * w * 4, (size_t)w * 4);
+    stbi_write_png(path, w, h, 4, flipped, w * 4);
+    free(pixels);
+    free(flipped);
+    fprintf(stderr, "wrote %s (%dx%d)\n", path, w, h);
+}
+
+// ---- Config persistence (key=value file) ----
+
+// sweep_seconds lives in scene style, which isn't initialized until after
+// config load — stash it and apply post scene_init
+static int g_cfg_sweep_override = -1;
+
+// Optional IANA timezone (e.g. Europe/Berlin): runs the entire instrument
+// — clock hands included — in the configured location's time via the
+// system tz database (DST-correct). Empty = machine local time.
+static char g_cfg_tz_name[64] = "";
+
+#if !defined(__EMSCRIPTEN__)
+static void config_file_path(char *buf, size_t n) {
+    const char *override = getenv("TEMPUS_CONFIG");
+    if (override) {
+        snprintf(buf, n, "%s", override);
+        return;
+    }
+    const char *home = getenv("HOME");
+    snprintf(buf, n, "%s/.config/tempus.conf", home ? home : ".");
+}
+
+static void config_load(TempusConfig *cfg) {
+    char path[512];
+    config_file_path(path, sizeof(path));
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    char line[256];
+    while (fgets(line, sizeof(line), f)) {
+        char key[64];
+        double val;
+        if (sscanf(line, "timezone_name = %63s", g_cfg_tz_name) == 1) continue;
+        if (sscanf(line, "%63[a-z_] = %lf", key, &val) != 2) continue;
+        if      (strcmp(key, "latitude") == 0)  cfg->latitude = val;
+        else if (strcmp(key, "longitude") == 0) cfg->longitude = val;
+        else if (strcmp(key, "elevation") == 0) cfg->elevation = val;
+        else if (strcmp(key, "timezone") == 0)  cfg->timezone = val;
+        else if (strcmp(key, "timezone_auto") == 0) cfg->timezone_auto = val != 0;
+        else if (strcmp(key, "alternate_names") == 0) cfg->use_alternate_names = val != 0;
+        else if (strcmp(key, "sweep_seconds") == 0) g_cfg_sweep_override = (val != 0) ? 1 : 0;
+    }
+    fclose(f);
+}
+
+static void config_save(const TempusConfig *cfg) {
+    char path[512];
+    config_file_path(path, sizeof(path));
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        fprintf(stderr, "tempus: could not write %s\n", path);
+        return;
+    }
+    fprintf(f, "latitude = %.6f\n", cfg->latitude);
+    fprintf(f, "longitude = %.6f\n", cfg->longitude);
+    fprintf(f, "elevation = %.2f\n", cfg->elevation);
+    fprintf(f, "timezone = %.2f\n", cfg->timezone);
+    fprintf(f, "timezone_auto = %d\n", cfg->timezone_auto ? 1 : 0);
+    fprintf(f, "alternate_names = %d\n", cfg->use_alternate_names ? 1 : 0);
+    fprintf(f, "sweep_seconds = %d\n", g_scene.style.sweep_seconds ? 1 : 0);
+    if (g_cfg_tz_name[0])
+        fprintf(f, "timezone_name = %s\n", g_cfg_tz_name);
+    fclose(f);
+}
+#else
+static void config_load(TempusConfig *cfg) { (void)cfg; }
+static void config_save(const TempusConfig *cfg) { (void)cfg; }
+#endif
 
 // ---- Load font atlas ----
 
@@ -142,22 +276,56 @@ static void debug_gui(void) {
                      g_draw.num_verts, g_draw.num_indices);
             nk_label(ctx, buf, NK_TEXT_LEFT);
 
+            // Pacing (debug panel itself forces full rate — hide it with D
+            // and use TEMPUS_PACE_LOG=1 to observe idle pacing)
+            snprintf(buf, sizeof(buf), "Pace: %.0f fps (%.0f when hidden)",
+                     g_desired_fps, scene_desired_fps(&g_scene));
+            nk_label(ctx, buf, NK_TEXT_LEFT);
+            nk_layout_row_dynamic(ctx, 25, 1);
+            int sweep = g_scene.style.sweep_seconds;
+            nk_checkbox_label(ctx, "Sweep second hand", &sweep);
+            g_scene.style.sweep_seconds = sweep;
+
+            nk_layout_row_dynamic(ctx, 10, 1);
+            nk_spacing(ctx, 1);
+
+            // Calendar zoom
+            nk_layout_row_dynamic(ctx, 20, 1);
+            char zl[64];
+            snprintf(zl, sizeof(zl), "Zoom: %.3f", g_scene.calendar_state.zoom);
+            nk_label(ctx, zl, NK_TEXT_LEFT);
+            nk_layout_row_dynamic(ctx, 20, 1);
+            float zf = (float)g_scene.calendar_state.zoom;
+            nk_slider_float(ctx, 0.0f, &zf, 1.0f, 0.001f);
+            g_scene.calendar_state.zoom = zf;
+
             nk_layout_row_dynamic(ctx, 10, 1);
             nk_spacing(ctx, 1);
 
             // Actions
             nk_layout_row_dynamic(ctx, 30, 2);
             if (nk_button_label(ctx, "Solar Warp"))
-                timewarp_start(&g_scene.warp, 8640.0, 8.0, EASE_IN_OUT_QUAD, 1.5, 1.5);
+                timeview_start_day_warp(&g_scene.solar_state.tv, 8640.0, 8.0, EASE_IN_OUT_QUAD, 1.5, 1.5);
             if (nk_button_label(ctx, "Toggle Names"))
                 g_tempus.config.use_alternate_names = !g_tempus.config.use_alternate_names;
 
             // Latitude/Longitude
             nk_layout_row_dynamic(ctx, 25, 1);
-            nk_label(ctx, "Location:", NK_TEXT_LEFT);
+            snprintf(buf, sizeof(buf), "Location (UTC%+.1f%s):",
+                     g_tempus.config.timezone,
+                     g_tempus.config.timezone_auto ? " auto" : "");
+            nk_label(ctx, buf, NK_TEXT_LEFT);
             nk_layout_row_dynamic(ctx, 25, 2);
-            nk_property_double(ctx, "#Lat", -90, &g_tempus.config.latitude, 90, 0.1, 0.1);
-            nk_property_double(ctx, "#Lon", -180, &g_tempus.config.longitude, 180, 0.1, 0.1);
+            double lat = g_tempus.config.latitude;
+            double lon = g_tempus.config.longitude;
+            nk_property_double(ctx, "#Lat", -90, &lat, 90, 0.1, 0.1);
+            nk_property_double(ctx, "#Lon", -180, &lon, 180, 0.1, 0.1);
+            if (lat != g_tempus.config.latitude || lon != g_tempus.config.longitude)
+                tempus_set_location(&g_tempus, lat, lon);
+
+            nk_layout_row_dynamic(ctx, 30, 1);
+            if (nk_button_label(ctx, "Save Config"))
+                config_save(&g_tempus.config);
         }
         nk_end(ctx);
     }
@@ -178,6 +346,13 @@ static void init(void) {
 
     // Initialize Tempus core state
     TempusConfig cfg = tempus_default_config();
+    config_load(&cfg);
+#if !defined(__EMSCRIPTEN__) && !defined(_WIN32)
+    if (g_cfg_tz_name[0]) {
+        setenv("TZ", g_cfg_tz_name, 1);
+        tzset();
+    }
+#endif
     tempus_init(&g_tempus, cfg);
 
     // Set override defaults to current time as normalized values
@@ -196,6 +371,9 @@ static void init(void) {
     scene_register_view(&g_scene, VIEW_CALENDAR,  &calendar_vtable);
     scene_register_view(&g_scene, VIEW_SOLAR,     &solar_vtable);
     scene_init_views(&g_scene, &g_tempus);
+
+    if (g_cfg_sweep_override >= 0)
+        g_scene.style.sweep_seconds = g_cfg_sweep_override != 0;
 
     g_scene.cycle_len = 0;
 
@@ -285,59 +463,214 @@ static void init(void) {
             .clear_value = { 0.0f, 0.0f, 0.0f, 1.0f },
         },
     };
+
+    // Globe mesh + pipeline
+    {
+        static GlobeMesh mesh;
+        globe_mesh_build(&mesh);
+
+        g_globe_vbuf = sg_make_buffer(&(sg_buffer_desc){
+            .data = SG_RANGE(mesh.verts),
+            .usage.vertex_buffer = true,
+        });
+        g_globe_ibuf = sg_make_buffer(&(sg_buffer_desc){
+            .data = SG_RANGE(mesh.indices),
+            .usage.index_buffer = true,
+        });
+
+        sg_shader globe_shd = sg_make_shader(&(sg_shader_desc){
+            .vertex_func.source = globe_vs_src,
+            .fragment_func.source = globe_fs_src,
+            .attrs = {
+                [0] = { .glsl_name = "a_pos" },
+            },
+            .uniform_blocks = {
+                [0] = {
+                    .stage = SG_SHADERSTAGE_VERTEX,
+                    .size = sizeof(GlobeVsUniforms),
+                    .glsl_uniforms = {
+                        [0] = { .type = SG_UNIFORMTYPE_MAT4,   .glsl_name = "u_rot" },
+                        [1] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_place" },
+                        [2] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_screen" },
+                    },
+                },
+                [1] = {
+                    .stage = SG_SHADERSTAGE_FRAGMENT,
+                    .size = sizeof(GlobeFsUniforms),
+                    .glsl_uniforms = {
+                        [0] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_light" },
+                        [1] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_day" },
+                        [2] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_night" },
+                        [3] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_grid" },
+                        [4] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_term" },
+                    },
+                },
+            },
+        });
+
+        g_globe_pip = sg_make_pipeline(&(sg_pipeline_desc){
+            .shader = globe_shd,
+            .index_type = SG_INDEXTYPE_UINT16,
+            .layout.attrs = {
+                [0] = { .format = SG_VERTEXFORMAT_FLOAT3 },
+            },
+            .depth = {
+                .compare = SG_COMPAREFUNC_LESS,
+                .write_enabled = true,
+            },
+            .colors[0].blend = {
+                .enabled = true,
+                .src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA,
+                .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+            },
+        });
+    }
+
+    g_shot_path = getenv("TEMPUS_SHOT");
+    if (g_shot_path) {
+        g_shot_countdown = 30;  // let animations settle
+        g_show_debug = false;
+    }
+    g_pace_log = getenv("TEMPUS_PACE_LOG") != NULL;
+    if (g_pace_log)
+        g_show_debug = false;  // the debug panel forces full rate
+    if (getenv("TEMPUS_TICK"))
+        g_scene.style.sweep_seconds = false;
+
+    // Dev: pin the clock to a fraction of the day/year for screenshots
+    const char *daypct = getenv("TEMPUS_DAYPCT");
+    if (daypct) {
+        g_tempus.time_override = true;
+        g_tempus.override_day_pct = atof(daypct);
+        const char *yearpct = getenv("TEMPUS_YEARPCT");
+        if (yearpct) g_tempus.override_year_pct = atof(yearpct);
+    }
 }
 
 static void frame(void) {
     float w = sapp_widthf();
     float h = sapp_heightf();
     double dt = sapp_frame_duration();
-    double t = sapp_frame_count() * dt;
+    g_time += dt;
 
-    tempus_update(&g_tempus, t);
-    scene_update(&g_scene, &g_tempus, dt);
+    g_desired_fps = scene_desired_fps(&g_scene);
+    if (g_show_debug || g_time < g_boost_until)
+        g_desired_fps = g_scene.pace.animate_fps;  // interactive: full rate
 
-    // Build tempus draw commands
-    float scale = h / 1280.0f;
-    draw_begin(&g_draw, w, h);
-    g_draw.sx = scale;
-    g_draw.sy = scale;
-    scene_render(&g_scene, &g_draw, &g_tempus);
+    bool do_update = (g_time - g_last_update) >= (1.0 / g_desired_fps) - dt * 0.5;
 
-    // Build nuklear GUI
-    debug_gui();
+    if (do_update) {
+        double upd_dt = g_time - g_last_update;
+        if (upd_dt < 0 || upd_dt > 2.0) upd_dt = dt;
+        g_last_update = g_time;
+        g_updates_this_sec++;
 
-    // Upload and draw tempus
-    if (g_draw.num_verts > 0 && g_draw.num_indices > 0) {
-        sg_update_buffer(g_vbuf, &(sg_range){
-            .ptr = g_draw.verts,
-            .size = (size_t)g_draw.num_verts * sizeof(DrawVertex),
-        });
-        sg_update_buffer(g_ibuf, &(sg_range){
-            .ptr = g_draw.indices,
-            .size = (size_t)g_draw.num_indices * sizeof(uint16_t),
-        });
+        tempus_update(&g_tempus, g_time);
+        scene_update(&g_scene, &g_tempus, upd_dt);
+
+        // Build tempus draw commands
+        float scale = h / 1280.0f;
+        draw_begin(&g_draw, w, h);
+        g_draw.sx = scale;
+        g_draw.sy = scale;
+        scene_render(&g_scene, &g_draw, &g_tempus);
+
+        // Build nuklear GUI
+        if (g_show_debug)
+            debug_gui();
+
+        // Upload tempus buffers
+        if (g_draw.num_verts > 0 && g_draw.num_indices > 0) {
+            sg_update_buffer(g_vbuf, &(sg_range){
+                .ptr = g_draw.verts,
+                .size = (size_t)g_draw.num_verts * sizeof(DrawVertex),
+            });
+            sg_update_buffer(g_ibuf, &(sg_range){
+                .ptr = g_draw.indices,
+                .size = (size_t)g_draw.num_indices * sizeof(uint16_t),
+            });
+        }
     }
 
+    if (g_pace_log) {
+        g_pace_log_timer += dt;
+        if (g_pace_log_timer >= 1.0) {
+            fprintf(stderr, "pace: desired=%.1ffps updates=%d/s\n",
+                    g_desired_fps, g_updates_this_sec);
+            g_pace_log_timer = 0;
+            g_updates_this_sec = 0;
+        }
+    }
+
+    // Present every vsync (re-presents previous buffers on skipped frames,
+    // which keeps the swapchain valid at negligible GPU cost).
     sg_begin_pass(&(sg_pass){
         .action = g_pass_action,
         .swapchain = sglue_swapchain(),
     });
 
-    // Draw tempus scene
     if (g_draw.num_indices > 0) {
-        sg_apply_pipeline(g_pip);
-        sg_apply_bindings(&g_bind);
-        sg_draw(0, g_draw.num_indices, 1);
+        const GlobeCmd *gc = &g_draw.globe;
+        int split = (gc->visible) ? gc->split_index : g_draw.num_indices;
+
+        if (split > 0) {
+            sg_apply_pipeline(g_pip);
+            sg_apply_bindings(&g_bind);
+            sg_draw(0, split, 1);
+        }
+
+        if (gc->visible) {
+            GlobeVsUniforms vsu;
+            GlobeFsUniforms fsu;
+            globe_rotation(gc->lat, gc->lon, vsu.rot);
+            vsu.place[0] = gc->cx;  vsu.place[1] = gc->cy;
+            vsu.place[2] = gc->radius; vsu.place[3] = 0;
+            vsu.screen[0] = w * 0.5f; vsu.screen[1] = h * 0.5f;
+            vsu.screen[2] = 0; vsu.screen[3] = 0;
+
+            globe_sun_dir(gc->sun_azimuth, gc->sun_zenith, fsu.light);
+            fsu.light[3] = 0;
+            const RenderStyle *st = &g_scene.style;
+            memcpy(fsu.day,   &st->globe_light,      sizeof(float) * 4);
+            memcpy(fsu.night, &st->globe_shadow,     sizeof(float) * 4);
+            memcpy(fsu.grid,  &st->globe_grid,       sizeof(float) * 4);
+            memcpy(fsu.term,  &st->globe_terminator, sizeof(float) * 4);
+
+            sg_apply_pipeline(g_globe_pip);
+            sg_apply_bindings(&(sg_bindings){
+                .vertex_buffers[0] = g_globe_vbuf,
+                .index_buffer = g_globe_ibuf,
+            });
+            sg_apply_uniforms(0, &SG_RANGE(vsu));
+            sg_apply_uniforms(1, &SG_RANGE(fsu));
+            sg_draw(0, GLOBE_NUM_INDICES, 1);
+
+            if (g_draw.num_indices > split) {
+                sg_apply_pipeline(g_pip);
+                sg_apply_bindings(&g_bind);
+                sg_draw(split, g_draw.num_indices - split, 1);
+            }
+        }
     }
 
-    // Draw nuklear GUI on top
-    snk_render(sapp_width(), sapp_height());
+    // Draw nuklear GUI on top (only built on update frames; debug mode
+    // forces full rate so every frame is an update frame)
+    if (g_show_debug && do_update)
+        snk_render(sapp_width(), sapp_height());
 
     sg_end_pass();
     sg_commit();
+
+    if (g_shot_path && --g_shot_countdown == 0) {
+        save_shot(g_shot_path);
+        sapp_request_quit();
+    }
 }
 
 static void event(const sapp_event *e) {
+    // Any input: briefly return to full rate so interaction feels live
+    g_boost_until = g_time + 1.0;
+
     // Pass events to nuklear first
     if (snk_handle_event(e))
         return; // nuklear consumed the event
@@ -352,7 +685,7 @@ static void event(const sapp_event *e) {
                 g_tempus.config.use_alternate_names = !g_tempus.config.use_alternate_names;
                 break;
             case SAPP_KEYCODE_S:
-                timewarp_start(&g_scene.warp, 8640.0, 8.0, EASE_IN_OUT_QUAD, 1.5, 1.5);
+                timeview_start_day_warp(&g_scene.solar_state.tv, 8640.0, 8.0, EASE_IN_OUT_QUAD, 1.5, 1.5);
                 break;
             case SAPP_KEYCODE_D:
                 g_show_debug = !g_show_debug;
@@ -377,6 +710,7 @@ sapp_desc sokol_main(int argc, char* argv[]) {
         .cleanup_cb = cleanup,
         .width = 1280,
         .height = 800,
+        .high_dpi = true,
         .window_title = "T E M P V S",
         .logger.func = slog_func,
     };

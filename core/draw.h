@@ -51,11 +51,27 @@ typedef struct {
 
 // ---- Draw state ----
 
+// ---- Globe command ----
+// A view can request the 3D earth globe be composited into the batch at
+// the current point: 2D indices before split_index draw first, then the
+// globe, then the rest. The shell owns the actual GPU pipeline.
+
+typedef struct {
+    bool  visible;
+    float cx, cy, radius;       // world coords (transform already applied)
+    float lat, lon;             // observer, degrees
+    float sun_azimuth;          // degrees, SPA convention (0 = north)
+    float sun_zenith;           // degrees
+    int   split_index;
+} GlobeCmd;
+
 typedef struct {
     DrawVertex  verts[DRAW_MAX_VERTS];
     uint16_t    indices[DRAW_MAX_INDICES];
     int         num_verts;
     int         num_indices;
+
+    GlobeCmd    globe;
 
     DrawColor   color;
 
@@ -92,6 +108,23 @@ static inline void draw_begin(DrawCtx *d, float screen_w, float screen_h) {
     d->sx = 1.0f;
     d->sy = 1.0f;
     d->color = dc(1, 1, 1);
+    d->globe.visible = false;
+}
+
+// Request the globe at (cx, cy) with the given radius (local coords, the
+// current transform is applied). Later 2D geometry draws on top of it.
+static inline void draw_globe(DrawCtx *d, float cx, float cy, float radius,
+                              float lat, float lon,
+                              float sun_azimuth, float sun_zenith) {
+    d->globe.visible = true;
+    d->globe.cx = d->tx + cx * d->sx;
+    d->globe.cy = d->ty + cy * d->sy;
+    d->globe.radius = radius * d->sx;
+    d->globe.lat = lat;
+    d->globe.lon = lon;
+    d->globe.sun_azimuth = sun_azimuth;
+    d->globe.sun_zenith = sun_zenith;
+    d->globe.split_index = d->num_indices;
 }
 
 static inline void draw_set_color(DrawCtx *d, DrawColor c) {
@@ -142,24 +175,60 @@ static inline void draw__tri(DrawCtx *d, int a, int b, int c) {
 
 // ---- Primitives (untextured, using white_u/white_v) ----
 
+// One screen pixel expressed in local (pre-transform) units.
+static inline float draw__px(const DrawCtx *d) {
+    float s = d->sx != 0.0f ? d->sx : 1.0f;
+    return 1.0f / fabsf(s);
+}
+
+// Push a vertex with an explicit alpha override (keeps rgb from d->color).
+static inline int draw__push_vert_a(DrawCtx *d, float x, float y,
+                                    float u, float v, float alpha) {
+    DrawColor saved = d->color;
+    d->color.a *= alpha;
+    int idx = draw__push_vert(d, x, y, u, v);
+    d->color = saved;
+    return idx;
+}
+
+// Feathered line: a 1-screen-pixel alpha ramp on each edge kills aliasing
+// and moire in dense tick rings. Lines thinner than a pixel render as
+// proportionally dimmer full-pixel lines (energy conservation) instead of
+// snapping in and out of the pixel grid.
 static inline void draw_line(DrawCtx *d, float x0, float y0, float x1, float y1, float width) {
     float dx = x1 - x0;
     float dy = y1 - y0;
     float len = sqrtf(dx * dx + dy * dy);
     if (len < 0.001f) return;
 
+    float px = draw__px(d);
+    float alpha = 1.0f;
+    if (width < px) {
+        alpha = width / px;
+        width = px;
+    }
     float hw = width * 0.5f;
-    float nx = -dy / len * hw;
-    float ny = dx / len * hw;
+    float core = hw - px * 0.5f;   // full-alpha half-width
+    if (core < 0) core = 0;
+    float edge = hw + px * 0.5f;   // zero-alpha half-width
 
+    float ux = -dy / len, uy = dx / len;
     float u = d->white_u, v = d->white_v;
+
+    // Four vertex rows: 0-alpha edge, core, core, 0-alpha edge
+    float offs[4]  = { -edge, -core, core, edge };
+    float alphas[4] = { 0.0f, alpha, alpha, 0.0f };
     int base = d->num_verts;
-    draw__push_vert(d, x0 + nx, y0 + ny, u, v);
-    draw__push_vert(d, x0 - nx, y0 - ny, u, v);
-    draw__push_vert(d, x1 - nx, y1 - ny, u, v);
-    draw__push_vert(d, x1 + nx, y1 + ny, u, v);
-    draw__tri(d, base, base+1, base+2);
-    draw__tri(d, base, base+2, base+3);
+    for (int r = 0; r < 4; r++) {
+        float nx = ux * offs[r], ny = uy * offs[r];
+        draw__push_vert_a(d, x0 + nx, y0 + ny, u, v, alphas[r]);
+        draw__push_vert_a(d, x1 + nx, y1 + ny, u, v, alphas[r]);
+    }
+    for (int r = 0; r < 3; r++) {
+        int j = base + r * 2;
+        draw__tri(d, j, j+1, j+3);
+        draw__tri(d, j, j+3, j+2);
+    }
 }
 
 // Thin line (1px at display scale)
@@ -195,41 +264,62 @@ static inline void draw_circle_filled(DrawCtx *d, float cx, float cy, float radi
 
 static inline void draw_circle_stroked(DrawCtx *d, float cx, float cy, float radius, float width) {
     float u = d->white_u, v = d->white_v;
+    float px = draw__px(d);
+    float alpha = 1.0f;
+    if (width < px) {
+        alpha = width / px;
+        width = px;
+    }
     float hw = width * 0.5f;
-    float ri = radius - hw;
-    float ro = radius + hw;
+    float core = hw - px * 0.5f;
+    if (core < 0) core = 0;
+    float edge = hw + px * 0.5f;
+
+    float radii[4]  = { radius - edge, radius - core, radius + core, radius + edge };
+    float alphas[4] = { 0.0f, alpha, alpha, 0.0f };
     int base = d->num_verts;
     for (int i = 0; i <= DRAW_CIRCLE_SEGS; i++) {
         float a = (float)i / DRAW_CIRCLE_SEGS * (float)(M_PI * 2.0);
         float cs = cosf(a), sn = sinf(a);
-        draw__push_vert(d, cx + cs * ri, cy + sn * ri, u, v);
-        draw__push_vert(d, cx + cs * ro, cy + sn * ro, u, v);
+        for (int r = 0; r < 4; r++)
+            draw__push_vert_a(d, cx + cs * radii[r], cy + sn * radii[r], u, v, alphas[r]);
         if (i > 0) {
-            int j = base + (i - 1) * 2;
-            int k = base + i * 2;
-            draw__tri(d, j, j+1, k+1);
-            draw__tri(d, j, k+1, k);
+            int j = base + (i - 1) * 4;
+            int k = base + i * 4;
+            for (int r = 0; r < 3; r++) {
+                draw__tri(d, j+r, j+r+1, k+r+1);
+                draw__tri(d, j+r, k+r+1, k+r);
+            }
         }
     }
 }
 
-// Arc: filled ring segment from angle a0 to a1 (radians), inner/outer radius
+// Arc: filled ring segment from angle a0 to a1 (radians), inner/outer radius.
+// Radial edges are feathered by one screen pixel.
 static inline void draw_arc_filled(DrawCtx *d, float cx, float cy,
                                    float r_inner, float r_outer,
                                    float a0, float a1, int segments) {
     float u = d->white_u, v = d->white_v;
+    float px = draw__px(d);
+
+    float radii[4]  = { r_inner - px, r_inner, r_outer, r_outer + px };
+    float alphas[4] = { 0.0f, 1.0f, 1.0f, 0.0f };
+    if (radii[0] < 0) radii[0] = 0;
+
     int base = d->num_verts;
     for (int i = 0; i <= segments; i++) {
         float t = (float)i / segments;
         float a = a0 + (a1 - a0) * t;
         float cs = cosf(a), sn = sinf(a);
-        draw__push_vert(d, cx + cs * r_inner, cy + sn * r_inner, u, v);
-        draw__push_vert(d, cx + cs * r_outer, cy + sn * r_outer, u, v);
+        for (int r = 0; r < 4; r++)
+            draw__push_vert_a(d, cx + cs * radii[r], cy + sn * radii[r], u, v, alphas[r]);
         if (i > 0) {
-            int j = base + (i - 1) * 2;
-            int k = base + i * 2;
-            draw__tri(d, j, j+1, k+1);
-            draw__tri(d, j, k+1, k);
+            int j = base + (i - 1) * 4;
+            int k = base + i * 4;
+            for (int r = 0; r < 3; r++) {
+                draw__tri(d, j+r, j+r+1, k+r+1);
+                draw__tri(d, j+r, k+r+1, k+r);
+            }
         }
     }
 }
