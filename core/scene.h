@@ -190,8 +190,31 @@ static inline void scene_init_views(Scene *sc, const Tempus *t) {
 
 // ---- Update ----
 
-static inline void scene_update(Scene *sc, const Tempus *t, double dt) {
+static inline void scene__advance_override_days(Tempus *t, double dv);
+
+static inline void scene_update(Scene *sc, Tempus *t, double dt) {
     tween_update_all(&sc->tweens, dt);
+
+    // Time-scrub flywheel: while dragging, estimate velocity from the
+    // accumulated motion; after release, coast with exponential decay —
+    // a flicked wheel keeps spinning and slows like a physical machine.
+    {
+        CalendarViewState *c = &sc->calendar_state;
+        bool grabbing = c->wheel_dragging;   // only the wheel has inertia
+        if (grabbing && dt > 1e-4) {
+            double inst = c->drag_accum / dt;
+            c->drag_accum = 0;
+            c->fling_vel = c->fling_vel * 0.65 + inst * 0.35;
+            if (c->fling_vel > 60.0) c->fling_vel = 60.0;
+            if (c->fling_vel < -60.0) c->fling_vel = -60.0;
+        } else if (c->fling_vel != 0.0 && t->time_override) {
+            scene__advance_override_days(t, c->fling_vel * dt);
+            c->fling_vel *= exp2(-dt / 0.7);   // half-life ~0.7s
+            if (fabs(c->fling_vel) < 0.05) c->fling_vel = 0.0;
+        } else {
+            c->fling_vel = 0.0;
+        }
+    }
 
     // Sync/update per-view TimeViews
     for (int i = 0; i < VIEW_COUNT; i++) {
@@ -264,12 +287,135 @@ static inline void scene_event(Scene *sc, const Tempus *t, int key) {
     (void)sc; (void)t; (void)key;
 }
 
+// ---- Pointer interaction ----
+// phase: 0 = down, 1 = move, 2 = up. Coordinates in world units.
+// In helio mode the sun bead is draggable: rotating the sun's direction
+// around the planet IS choosing the orbit position, i.e. the date. Drags
+// engage the manual time override (year component), preserving the time
+// of day; the override stays active afterward for inspection.
+
+// Advance the manual override by a signed number of days (fractional —
+// hours scroll continuously), wrapping within the override year
+static inline void scene__advance_override_days(Tempus *t, double dv) {
+    double diy = (double)cal_days_in_year(t->override_year);
+    double v = floor(t->override_year_pct * diy) + t->override_day_pct + dv;
+    v = fmod(v, diy);
+    if (v < 0) v += diy;
+    t->override_year_pct = v / diy;
+    t->override_day_pct = v - floor(v);
+    t->solar_dirty = true;
+}
+
+// Engage the manual override at the current moment (shared by drags)
+static inline void scene__begin_override(Tempus *t) {
+    if (t->time_override) return;
+    t->time_override = true;
+    t->override_year = t->year;
+    t->override_day_pct = t->percent_of_day;
+    int doy = 0;
+    for (int mm = 1; mm < t->month; mm++)
+        doy += cal_days_in_month(mm, t->year);
+    doy += t->day - 1;
+    t->override_year_pct = (double)doy / cal_days_in_year(t->year);
+}
+
+static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
+                                 float wx, float wy) {
+    OrreryViewState *o = &sc->orrery_state;
+    CalendarViewState *c = &sc->calendar_state;
+
+    if (phase == 0) {
+        float dx = wx - o->bead_x, dy = wy - o->bead_y;
+        if (sc->helio_blend > 0.5
+            && dx * dx + dy * dy < o->bead_hit * o->bead_hit) {
+            o->dragging = true;
+            c->fling_vel = 0;    // grabbing stops the flywheel
+            c->drag_accum = 0;
+            scene__begin_override(t);
+            return;
+        }
+
+        // Calendar wheel: film-strip drag anywhere on the band (numerals
+        // through month text), excluding the globe's interior
+        {
+            float R = sc->style.calendar_base_radius
+                    + (float)c->zoom * sc->style.zoom_in_radius;
+            double ypct = tempus_year_pct(t);
+            float ox = sinf((float)(ypct * 2.0 * M_PI))
+                     * (R - sc->style.calendar_base_radius);
+            float oy = -cosf((float)(ypct * 2.0 * M_PI))
+                     * (R - sc->style.calendar_base_radius);
+            float px = wx + ox, py = wy + oy;   // undo the wheel pan
+            float rp = sqrtf(px * px + py * py);
+            float gdx = wx - o->glob_x, gdy = wy - o->glob_y;
+            bool on_globe = sc->helio_blend > 0.5
+                && gdx * gdx + gdy * gdy < (o->glob_r + 20) * (o->glob_r + 20);
+            if (!on_globe && rp > R - 80.0f && rp < R + 150.0f) {
+                c->wheel_dragging = true;
+                c->last_wx = wx;
+                c->last_wy = wy;
+                c->fling_vel = 0;    // grabbing stops the flywheel
+                c->drag_accum = 0;
+                scene__begin_override(t);
+            }
+        }
+    } else if (phase == 1 && c->wheel_dragging) {
+        // Incremental: project the finger delta onto the band tangent and
+        // move time so the strip follows the finger. The pan rate is
+        // 2*pi*(R - base) per year, which is what the finger fights.
+        float R = sc->style.calendar_base_radius
+                + (float)c->zoom * sc->style.zoom_in_radius;
+        double ypct = tempus_year_pct(t);
+        float th = (float)(ypct * 2.0 * M_PI);
+        float ox = sinf(th) * (R - sc->style.calendar_base_radius);
+        float oy = -cosf(th) * (R - sc->style.calendar_base_radius);
+        float px = wx + ox, py = wy + oy;
+        float rp = sqrtf(px * px + py * py);
+        if (rp > 1.0f) {
+            // Band tangent at the pointer (direction of increasing date)
+            float tx = -py / rp, ty = px / rp;
+            float dxf = wx - c->last_wx, dyf = wy - c->last_wy;
+            float along = dxf * tx + dyf * ty;
+            float denom = R - sc->style.calendar_base_radius;
+            if (denom < 120.0f) denom = 120.0f;   // low-zoom coarse rate
+            double dv = -(double)along / (2.0 * M_PI * (double)denom)
+                      * t->total_days;
+            scene__advance_override_days(t, dv);
+            c->drag_accum += dv;
+        }
+        c->last_wx = wx;
+        c->last_wy = wy;
+    } else if (phase == 1 && o->dragging) {
+        float dx = wx - o->glob_x, dy = wy - o->glob_y;
+        if (dx * dx + dy * dy > 100.0f) {
+            // Bead direction -> sun direction -> wheel angle (yule-based)
+            double phi = atan2((double)-dx, (double)dy);
+            double pct_yule = phi / (2.0 * M_PI);
+            pct_yule -= floor(pct_yule);
+            // Convert wheel position to calendar-year fraction
+            double doy = pct_yule * t->total_days
+                       - (t->jd_months[0] - t->jd_newyear);
+            double diy = (double)cal_days_in_year(t->override_year);
+            double pct_cal = doy / diy;
+            pct_cal -= floor(pct_cal);
+            // (No flywheel feed: the sun is a direct positional control —
+            // it goes where you put it and stays there on release.)
+            t->override_year_pct = pct_cal;
+            t->solar_dirty = true;
+        }
+    } else if (phase == 2) {
+        o->dragging = false;
+        c->wheel_dragging = false;
+    }
+}
+
 // ---- Pacing query ----
 // The frame rate the scene needs right now. Shells are free to render
 // faster (e.g. vsync-locked), but only need to *update* at this rate.
 
 static inline double scene_desired_fps(const Scene *sc) {
-    if (sc->transitioning || tween_any_active(&sc->tweens))
+    if (sc->transitioning || tween_any_active(&sc->tweens)
+        || sc->calendar_state.fling_vel != 0.0)
         return sc->pace.animate_fps;
 
     double fps = sc->pace.ambient_fps;

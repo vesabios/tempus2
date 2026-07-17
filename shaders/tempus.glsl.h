@@ -56,7 +56,6 @@ static const char *globe_fs_src =
     "uniform vec4 u_day;\n"
     "uniform vec4 u_night;\n"
     "uniform vec4 u_grid;\n"      // rgb + line alpha
-    "uniform vec4 u_term;\n"      // rgb + line alpha
     "uniform vec4 u_mode;\n"      // x = overlay mode, y = declination (rad)
     "uniform vec4 u_axis;\n"      // earth rotation axis, view frame
     "uniform vec4 u_sunj;\n"      // sun if it were june solstice
@@ -124,10 +123,8 @@ static const char *globe_fs_src =
     "        float refl = (1.0 - smoothstep(0.0, fwidth(latd) * 1.6, ref)) * dash;\n"
     "        col = mix(col, u_grid.rgb, refl * limbfade * 0.6);\n"
     "    }\n"
-    "    // Terminator hairline (fade where surface turns edge-on, else\n"
-    "    // fwidth explodes at the limb and the line blobs)\n"
-    "    float term = hairline(d, 1.2) * limbfade;\n"
-    "    col = mix(col, u_term.rgb, term * u_term.a);\n"
+    "    // (No terminator hairline: the twilight gradient in the lambert\n"
+    "    // shading IS the terminator, and reads more naturally alone.)\n"
     "    // 30-degree graticule\n"
     "    float lat = degrees(asin(clamp(ne.z, -1.0, 1.0)));\n"
     "    float lon = degrees(atan(ne.y, ne.x));\n"

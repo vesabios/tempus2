@@ -79,7 +79,6 @@ typedef struct {
     float day[4];
     float night[4];
     float grid[4];
-    float term[4];
     float mode[4];      // x = overlay, y = declination (radians)
     float axis[4];      // earth rotation axis, view frame
     float sunj[4];      // sun re-declined to june solstice
@@ -616,11 +615,10 @@ static void init(void) {
                         [1] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_day" },
                         [2] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_night" },
                         [3] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_grid" },
-                        [4] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_term" },
-                        [5] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_mode" },
-                        [6] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_axis" },
-                        [7] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_sunj" },
-                        [8] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_sund" },
+                        [4] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_mode" },
+                        [5] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_axis" },
+                        [6] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_sunj" },
+                        [7] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_sund" },
                     },
                 },
             },
@@ -768,7 +766,6 @@ static void frame(void) {
             memcpy(fsu.day,   &st->globe_light,      sizeof(float) * 4);
             memcpy(fsu.night, &st->globe_shadow,     sizeof(float) * 4);
             memcpy(fsu.grid,  &st->globe_grid,       sizeof(float) * 4);
-            memcpy(fsu.term,  &st->globe_terminator, sizeof(float) * 4);
             fsu.mode[0] = (float)gc->overlay;
             fsu.mode[1] = gc->declination * (float)M_PI / 180.0f;
             fsu.mode[2] = gc->obs_lat;   // degrees
@@ -833,6 +830,19 @@ static void event(const sapp_event *e) {
     // Pass events to nuklear first
     if (snk_handle_event(e))
         return; // nuklear consumed the event
+
+    // Pointer events in world coordinates (the draw space is a virtual
+    // 1280-unit-tall frame centered on screen)
+    if (e->type == SAPP_EVENTTYPE_MOUSE_DOWN
+        || e->type == SAPP_EVENTTYPE_MOUSE_MOVE
+        || e->type == SAPP_EVENTTYPE_MOUSE_UP) {
+        float scale = sapp_heightf() / 1280.0f;
+        float wx = (e->mouse_x - sapp_widthf() * 0.5f) / scale;
+        float wy = (e->mouse_y - sapp_heightf() * 0.5f) / scale;
+        int phase = (e->type == SAPP_EVENTTYPE_MOUSE_DOWN) ? 0
+                  : (e->type == SAPP_EVENTTYPE_MOUSE_MOVE) ? 1 : 2;
+        scene_pointer(&g_scene, &g_tempus, phase, wx, wy);
+    }
 
     if (e->type == SAPP_EVENTTYPE_KEY_DOWN) {
         switch (e->key_code) {

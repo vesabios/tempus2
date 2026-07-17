@@ -30,6 +30,14 @@ struct OrreryViewState {
     double geo_zenith;  // geocentric endpoint of the morph
     const SolarViewState *solar;  // solar data + sun-path caches
 
+    // Published by render for hit-testing: the sun bead is draggable in
+    // helio mode (rotating the sun's direction = choosing the date)
+    float bead_x, bead_y;   // bead position, world coords
+    float bead_hit;         // hit radius
+    float glob_x, glob_y;   // globe center, world coords
+    float glob_r;           // globe radius (wheel drags exclude the globe)
+    bool  dragging;
+
     // Coastline unit vectors (earth frame), precomputed at init
     float coast_vec[COAST_NUM_PTS][3];
 };
@@ -257,6 +265,15 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
         draw_set_color(d, sun_c);
         draw_circle_filled(d, px, py, s->sun_size * earth_r / dial_r);
+
+        // Publish for hit-testing (render-side cache; see scene_pointer)
+        OrreryViewState *wst = (OrreryViewState *)(uintptr_t)buf;
+        wst->bead_x = px;
+        wst->bead_y = py;
+        wst->bead_hit = s->sun_size * earth_r / dial_r + 16.0f;
+        wst->glob_x = ex;
+        wst->glob_y = ey;
+        wst->glob_r = earth_r;
     }
 
     // City marker ("you are here") + sky-dome. At m=0 the city projects

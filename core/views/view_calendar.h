@@ -27,6 +27,15 @@ struct CalendarViewState {
     double  zoom;
     double  target_zoom;
 
+    // Wheel dragging (see scene_pointer): film-strip time scrubbing,
+    // incremental (finger deltas projected onto the band tangent), with
+    // flywheel inertia — release mid-motion and the machine keeps
+    // spinning, decaying like a physical wheel
+    bool    wheel_dragging;
+    float   last_wx, last_wy;   // pointer position at last event
+    double  drag_accum;         // days moved since last update tick
+    double  fling_vel;          // days/second; nonzero = coasting
+
     CachedTick ticks[CAL_MAX_TICKS];
     int        num_ticks;
     int        cached_day;
