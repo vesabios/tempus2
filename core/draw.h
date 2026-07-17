@@ -51,17 +51,24 @@ typedef struct {
 
 // ---- Draw state ----
 
-// ---- Globe command ----
-// A view can request the 3D earth globe be composited into the batch at
+// ---- Globe commands ----
+// A view can request a 3D earth globe be composited into the batch at
 // the current point: 2D indices before split_index draw first, then the
-// globe, then the rest. The shell owns the actual GPU pipeline.
+// globe, then the rest. Views compute the orientation (earth->view
+// rotation) and sun direction themselves (see globe.h); the shell owns
+// the GPU pipeline. Up to DRAW_MAX_GLOBES per frame (geocentric dial +
+// heliocentric orrery can coexist during transitions).
+
+#define DRAW_MAX_GLOBES 2
 
 typedef struct {
-    bool  visible;
     float cx, cy, radius;       // world coords (transform already applied)
-    float lat, lon;             // observer, degrees
-    float sun_azimuth;          // degrees, SPA convention (0 = north)
-    float sun_zenith;           // degrees
+    float rot[16];              // earth -> view rotation, column-major
+    float light[3];             // sun direction, view frame
+    int   overlay;              // GlobeOverlay mode
+    float declination;          // current solar declination, degrees
+    float obs_lat;              // observer latitude, degrees (latitude ring)
+    float grid_boost;           // graticule alpha multiplier (0 = default 1)
     int   split_index;
 } GlobeCmd;
 
@@ -71,9 +78,11 @@ typedef struct {
     int         num_verts;
     int         num_indices;
 
-    GlobeCmd    globe;
+    GlobeCmd    globes[DRAW_MAX_GLOBES];
+    int         num_globes;
 
     DrawColor   color;
+    float       alpha;      // global multiplier (view opacity crossfades)
 
     // Transform stack (simple: translate + scale, no rotation needed beyond manual)
     float       tx, ty;     // translation
@@ -90,6 +99,7 @@ typedef struct {
 static inline void draw_init(DrawCtx *d) {
     memset(d, 0, sizeof(DrawCtx));
     d->color = dc(1, 1, 1);
+    d->alpha = 1.0f;
     d->sx = 1.0f;
     d->sy = 1.0f;
     // White pixel at atlas (0,0) — use half-pixel center for clean sampling
@@ -108,23 +118,23 @@ static inline void draw_begin(DrawCtx *d, float screen_w, float screen_h) {
     d->sx = 1.0f;
     d->sy = 1.0f;
     d->color = dc(1, 1, 1);
-    d->globe.visible = false;
+    d->alpha = 1.0f;
+    d->num_globes = 0;
 }
 
-// Request the globe at (cx, cy) with the given radius (local coords, the
+// Claim a globe slot at (cx, cy) with the given radius (local coords, the
 // current transform is applied). Later 2D geometry draws on top of it.
-static inline void draw_globe(DrawCtx *d, float cx, float cy, float radius,
-                              float lat, float lon,
-                              float sun_azimuth, float sun_zenith) {
-    d->globe.visible = true;
-    d->globe.cx = d->tx + cx * d->sx;
-    d->globe.cy = d->ty + cy * d->sy;
-    d->globe.radius = radius * d->sx;
-    d->globe.lat = lat;
-    d->globe.lon = lon;
-    d->globe.sun_azimuth = sun_azimuth;
-    d->globe.sun_zenith = sun_zenith;
-    d->globe.split_index = d->num_indices;
+// Caller fills rot/light (see globe.h) and overlay fields. NULL if full.
+static inline GlobeCmd *draw_globe_slot(DrawCtx *d, float cx, float cy,
+                                        float radius) {
+    if (d->num_globes >= DRAW_MAX_GLOBES) return NULL;
+    GlobeCmd *g = &d->globes[d->num_globes++];
+    memset(g, 0, sizeof(*g));
+    g->cx = d->tx + cx * d->sx;
+    g->cy = d->ty + cy * d->sy;
+    g->radius = radius * d->sx;
+    g->split_index = d->num_indices;
+    return g;
 }
 
 static inline void draw_set_color(DrawCtx *d, DrawColor c) {
@@ -157,7 +167,7 @@ static inline int draw__push_vert(DrawCtx *d, float x, float y, float u, float v
     float ny = -wy / (d->screen_h * 0.5f); // flip Y for GL
     d->verts[d->num_verts] = (DrawVertex){
         nx, ny, u, v,
-        d->color.r, d->color.g, d->color.b, d->color.a
+        d->color.r, d->color.g, d->color.b, d->color.a * d->alpha
     };
     return d->num_verts++;
 }
@@ -390,19 +400,88 @@ static inline void draw_text_centered(DrawCtx *d, int font_id, float cx, float c
 }
 
 // Curved text along an arc
+// Curved text along a circle. `tracking_em` is ADDITIVE letterspacing in
+// em added to every advance — constant optical gap regardless of glyph
+// width. (A multiplier here makes wide letters carry wide gaps, which
+// reads as uneven spacing once display text is tracked out.)
+// Radial (spoke-aligned) text: the baseline runs along the radius at
+// wheel angle theta (0 = top, matching cal__fc). `anchor_r` is the OUTER
+// end of the text; it extends inward from there. On the left half of the
+// wheel glyphs rotate 180 degrees for legibility (classic dial flip).
+static inline void draw_text_radial(DrawCtx *d, int font_id,
+                                    float cx, float cy, float anchor_r,
+                                    float theta, const char *s) {
+    int w_id = _font_compat[font_id].weight;
+    float sz = _font_compat[font_id].size;
+
+    float total_w = 0;
+    for (const char *p = s; *p; p++) {
+        int ci = *p - SDF_FIRST_CHAR;
+        if (ci >= 0 && ci < SDF_NUM_CHARS)
+            total_w += sdf_glyphs[w_id][ci].nadvance * sz;
+    }
+
+    float rx = sinf(theta), ry = -cosf(theta);   // outward radial unit
+    bool flip = rx < 0;                          // left half of the wheel
+    float rot = atan2f(ry, rx) + (flip ? (float)M_PI : 0.0f);
+    float cs = cosf(rot), sn = sinf(rot);
+    float ascent = sdf_nascent[w_id] * sz;
+
+    // Pen advances along local +x: outward normally; inward when flipped
+    float pen = flip ? anchor_r : anchor_r - total_w;
+    float sign = flip ? -1.0f : 1.0f;
+
+    for (const char *p = s; *p; p++) {
+        int ci = *p - SDF_FIRST_CHAR;
+        if (ci < 0 || ci >= SDF_NUM_CHARS) continue;
+        const SdfGlyph *g = &sdf_glyphs[w_id][ci];
+        float adv = g->nadvance * sz;
+        float mid = pen + sign * adv * 0.5f;
+
+        if (g->nw > 0 && g->nh > 0) {
+            float gw = g->nw * sz;
+            float gh = g->nh * sz;
+            float gx = -gw * 0.5f;
+            // Center the em box on the spoke line
+            float gy = ascent - sz * 0.5f + g->nyoff * sz;
+            float px = cx + rx * mid, py = cy + ry * mid;
+            float corners[4][2] = {
+                { gx,      gy },
+                { gx + gw, gy },
+                { gx + gw, gy + gh },
+                { gx,      gy + gh },
+            };
+            float uvs[4][2] = {
+                { g->u0, g->v0 }, { g->u1, g->v0 },
+                { g->u1, g->v1 }, { g->u0, g->v1 },
+            };
+            int base = d->num_verts;
+            for (int i = 0; i < 4; i++) {
+                float qx = corners[i][0] * cs - corners[i][1] * sn;
+                float qy = corners[i][0] * sn + corners[i][1] * cs;
+                draw__push_vert(d, px + qx, py + qy, uvs[i][0], uvs[i][1]);
+            }
+            draw__tri(d, base, base+1, base+2);
+            draw__tri(d, base, base+2, base+3);
+        }
+        pen += sign * adv;
+    }
+}
+
 static inline void draw_text_curved(DrawCtx *d, int font_id,
                                     float cx, float cy, float radius,
                                     float center_angle,
-                                    const char *s, float spacing) {
+                                    const char *s, float tracking_em,
+                                    float scale) {
     int w_id = _font_compat[font_id].weight;
-    float sz = _font_compat[font_id].size;
+    float sz = _font_compat[font_id].size * scale;
 
     // Measure total advance in pixels
     float total_w = 0;
     for (const char *p = s; *p; p++) {
         int ci = *p - SDF_FIRST_CHAR;
         if (ci >= 0 && ci < SDF_NUM_CHARS)
-            total_w += sdf_glyphs[w_id][ci].nadvance * sz * spacing;
+            total_w += (sdf_glyphs[w_id][ci].nadvance + tracking_em) * sz;
     }
 
     float circumference = 2.0f * (float)M_PI * radius;
@@ -422,7 +501,7 @@ static inline void draw_text_curved(DrawCtx *d, int font_id,
         int ci = *p - SDF_FIRST_CHAR;
         if (ci < 0 || ci >= SDF_NUM_CHARS) continue;
         const SdfGlyph *g = &sdf_glyphs[w_id][ci];
-        float adv = g->nadvance * sz * spacing;
+        float adv = (g->nadvance + tracking_em) * sz;
         float char_angle = adv / circumference * 2.0f * (float)M_PI;
 
         float a = flip

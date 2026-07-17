@@ -77,11 +77,43 @@ typedef struct {
     float night[4];
     float grid[4];
     float term[4];
+    float mode[4];      // x = overlay, y = declination (radians)
+    float axis[4];      // earth rotation axis, view frame
+    float sunj[4];      // sun re-declined to june solstice
+    float sund[4];      // sun re-declined to december solstice
 } GlobeFsUniforms;
 
 // Dev harness: TEMPUS_SHOT=<path> renders N frames, dumps a PNG, exits.
 static const char     *g_shot_path = NULL;
 static int             g_shot_countdown = 0;
+
+// View mode: geocentric (calendar + solar dial + clock) vs heliocentric
+// (calendar wheel as orbit + orrery earth). The scene's helio_blend
+// morphs between them; layer opacities derive from it every frame.
+static bool g_heliocentric = false;
+
+static void apply_view_mode(void) {
+    g_scene.num_layers = 0;
+    scene_add_layer(&g_scene, VIEW_CALENDAR);
+    // Solar is a pure data provider (renders nothing, opacity stays 0);
+    // it precedes the orrery so the instrument reads fresh solar values.
+    // The orrery renders the entire earth instrument at every morph
+    // state; the clock draws its hands on top.
+    scene_add_layer(&g_scene, VIEW_SOLAR);
+    scene_add_layer(&g_scene, VIEW_ORRERY);
+    scene_add_layer(&g_scene, VIEW_CLOCK);
+}
+
+static void set_view_opacities(void) {
+    double hb = g_scene.helio_blend;
+    g_scene.views[VIEW_CALENDAR].opacity = 1.0;
+    g_scene.views[VIEW_SOLAR].opacity = 0.0;    // data only, never draws
+    g_scene.views[VIEW_ORRERY].opacity = 1.0;   // owns the earth instrument
+    // Hands fade out in the first half of the transit (and back in during
+    // the last half of the return) so they don't ghost over the planet
+    double clock_vis = 1.0 - hb * 2.0;
+    g_scene.views[VIEW_CLOCK].opacity = clock_vis < 0 ? 0.0 : clock_vis;
+}
 
 // Pacing: vsync drives the frame callback, but update/rebuild work only
 // runs at scene_desired_fps(). Skipped frames re-present existing buffers.
@@ -99,6 +131,9 @@ static void save_shot(const char *path) {
     unsigned char *flipped = malloc((size_t)w * h * 4);
     if (!pixels || !flipped) { free(pixels); free(flipped); return; }
     glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+    // Force opaque: the framebuffer alpha carries blending residue that
+    // makes the PNG spuriously translucent in viewers
+    for (size_t i = 3; i < (size_t)w * h * 4; i += 4) pixels[i] = 255;
     for (int y = 0; y < h; y++)
         memcpy(flipped + (size_t)y * w * 4,
                pixels + (size_t)(h - 1 - y) * w * 4, (size_t)w * 4);
@@ -286,6 +321,38 @@ static void debug_gui(void) {
             nk_checkbox_label(ctx, "Sweep second hand", &sweep);
             g_scene.style.sweep_seconds = sweep;
 
+            // Geocentric vs heliocentric (tweened camera flight)
+            nk_layout_row_dynamic(ctx, 25, 1);
+            int helio = g_heliocentric;
+            nk_checkbox_label(ctx, "Heliocentric (orrery)", &helio);
+            if ((bool)helio != g_heliocentric) {
+                g_heliocentric = helio;
+                tween_cancel_target(&g_scene.tweens, &g_scene.helio_blend);
+                tween_start(&g_scene.tweens, &g_scene.helio_blend,
+                            g_scene.helio_blend, helio ? 1.0 : 0.0,
+                            3.0, EASE_IN_OUT_CUBIC);
+                // Zoom rides the same flight: heliocentric arrives at the
+                // big centered planet, geocentric returns to the dial
+                tween_cancel_target(&g_scene.tweens, &g_scene.calendar_state.zoom);
+                g_scene.calendar_state.target_zoom = helio ? 1.0 : 0.0;
+                tween_start(&g_scene.tweens, &g_scene.calendar_state.zoom,
+                            g_scene.calendar_state.zoom, helio ? 1.0 : 0.0,
+                            3.0, EASE_IN_OUT_CUBIC);
+            }
+
+            // Globe overlay: static encodings of solar motion
+            static const char *overlay_names[GLOBE_OVERLAY_COUNT] = {
+                "Overlay: none",
+                "Chronophotograph",
+                "Daylight field",
+                "Solstice envelope",
+                "Sun paths + analemma",
+            };
+            nk_layout_row_dynamic(ctx, 25, 1);
+            g_scene.style.globe_overlay = nk_combo(ctx, overlay_names,
+                GLOBE_OVERLAY_COUNT, g_scene.style.globe_overlay, 22,
+                nk_vec2(240, 160));
+
             nk_layout_row_dynamic(ctx, 10, 1);
             nk_spacing(ctx, 1);
 
@@ -305,7 +372,7 @@ static void debug_gui(void) {
             // Actions
             nk_layout_row_dynamic(ctx, 30, 2);
             if (nk_button_label(ctx, "Solar Warp"))
-                timeview_start_day_warp(&g_scene.solar_state.tv, 8640.0, 8.0, EASE_IN_OUT_QUAD, 1.5, 1.5);
+                timeview_start_day_warp(&g_scene.solar_state.tv, 1.0, 8.0, EASE_IN_OUT_QUAD, 1.5, 1.5);
             if (nk_button_label(ctx, "Toggle Names"))
                 g_tempus.config.use_alternate_names = !g_tempus.config.use_alternate_names;
 
@@ -370,6 +437,7 @@ static void init(void) {
     scene_register_view(&g_scene, VIEW_CLOCK,    &clock_vtable);
     scene_register_view(&g_scene, VIEW_CALENDAR,  &calendar_vtable);
     scene_register_view(&g_scene, VIEW_SOLAR,     &solar_vtable);
+    scene_register_view(&g_scene, VIEW_ORRERY,    &orrery_vtable);
     scene_init_views(&g_scene, &g_tempus);
 
     if (g_cfg_sweep_override >= 0)
@@ -377,14 +445,16 @@ static void init(void) {
 
     g_scene.cycle_len = 0;
 
-    scene_add_layer(&g_scene, VIEW_CALENDAR);
-    g_scene.views[VIEW_CALENDAR].opacity = 1.0;
-
-    scene_add_layer(&g_scene, VIEW_SOLAR);
-    g_scene.views[VIEW_SOLAR].opacity = 1.0;
-
-    scene_add_layer(&g_scene, VIEW_CLOCK);
-    g_scene.views[VIEW_CLOCK].opacity = 1.0;
+    g_heliocentric = getenv("TEMPUS_HELIO") != NULL;
+    g_scene.helio_blend = g_heliocentric ? 1.0 : 0.0;
+    if (g_heliocentric) {
+        g_scene.calendar_state.zoom = 1.0;
+        g_scene.calendar_state.target_zoom = 1.0;
+    }
+    const char *blend = getenv("TEMPUS_BLEND");   // dev: pin mid-morph
+    if (blend) g_scene.helio_blend = atof(blend);
+    apply_view_mode();
+    set_view_opacities();
 
     draw_init(&g_draw);
     load_atlas();
@@ -503,6 +573,10 @@ static void init(void) {
                         [2] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_night" },
                         [3] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_grid" },
                         [4] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_term" },
+                        [5] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_mode" },
+                        [6] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_axis" },
+                        [7] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_sunj" },
+                        [8] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_sund" },
                     },
                 },
             },
@@ -537,6 +611,18 @@ static void init(void) {
     if (getenv("TEMPUS_TICK"))
         g_scene.style.sweep_seconds = false;
 
+    // Dev: preselect a globe overlay mode
+    const char *overlay = getenv("TEMPUS_OVERLAY");
+    if (overlay)
+        g_scene.style.globe_overlay = atoi(overlay) % GLOBE_OVERLAY_COUNT;
+
+    // Dev: pin the calendar zoom for screenshots
+    const char *zoom = getenv("TEMPUS_ZOOM");
+    if (zoom) {
+        g_scene.calendar_state.zoom = atof(zoom);
+        g_scene.calendar_state.target_zoom = g_scene.calendar_state.zoom;
+    }
+
     // Dev: pin the clock to a fraction of the day/year for screenshots
     const char *daypct = getenv("TEMPUS_DAYPCT");
     if (daypct) {
@@ -567,6 +653,7 @@ static void frame(void) {
 
         tempus_update(&g_tempus, g_time);
         scene_update(&g_scene, &g_tempus, upd_dt);
+        set_view_opacities();
 
         // Build tempus draw commands
         float scale = h / 1280.0f;
@@ -610,31 +697,46 @@ static void frame(void) {
     });
 
     if (g_draw.num_indices > 0) {
-        const GlobeCmd *gc = &g_draw.globe;
-        int split = (gc->visible) ? gc->split_index : g_draw.num_indices;
+        int drawn = 0;
+        for (int gi = 0; gi <= g_draw.num_globes; gi++) {
+            int upto = (gi < g_draw.num_globes)
+                ? g_draw.globes[gi].split_index : g_draw.num_indices;
+            if (upto > drawn) {
+                sg_apply_pipeline(g_pip);
+                sg_apply_bindings(&g_bind);
+                sg_draw(drawn, upto - drawn, 1);
+                drawn = upto;
+            }
+            if (gi >= g_draw.num_globes) break;
 
-        if (split > 0) {
-            sg_apply_pipeline(g_pip);
-            sg_apply_bindings(&g_bind);
-            sg_draw(0, split, 1);
-        }
-
-        if (gc->visible) {
+            const GlobeCmd *gc = &g_draw.globes[gi];
             GlobeVsUniforms vsu;
             GlobeFsUniforms fsu;
-            globe_rotation(gc->lat, gc->lon, vsu.rot);
+            memcpy(vsu.rot, gc->rot, sizeof(vsu.rot));
             vsu.place[0] = gc->cx;  vsu.place[1] = gc->cy;
             vsu.place[2] = gc->radius; vsu.place[3] = 0;
             vsu.screen[0] = w * 0.5f; vsu.screen[1] = h * 0.5f;
             vsu.screen[2] = 0; vsu.screen[3] = 0;
 
-            globe_sun_dir(gc->sun_azimuth, gc->sun_zenith, fsu.light);
+            memcpy(fsu.light, gc->light, sizeof(float) * 3);
             fsu.light[3] = 0;
             const RenderStyle *st = &g_scene.style;
             memcpy(fsu.day,   &st->globe_light,      sizeof(float) * 4);
             memcpy(fsu.night, &st->globe_shadow,     sizeof(float) * 4);
             memcpy(fsu.grid,  &st->globe_grid,       sizeof(float) * 4);
             memcpy(fsu.term,  &st->globe_terminator, sizeof(float) * 4);
+            fsu.mode[0] = (float)gc->overlay;
+            fsu.mode[1] = gc->declination * (float)M_PI / 180.0f;
+            fsu.mode[2] = gc->obs_lat;   // degrees
+            fsu.mode[3] = gc->grid_boost;   // orrery always sets this
+            // Earth axis in view frame = rotation matrix z column
+            fsu.axis[0] = gc->rot[8];
+            fsu.axis[1] = gc->rot[9];
+            fsu.axis[2] = gc->rot[10];
+            fsu.axis[3] = 0;
+            globe_sun_with_decl(gc->rot, fsu.light, 23.44, fsu.sunj);
+            globe_sun_with_decl(gc->rot, fsu.light, -23.44, fsu.sund);
+            fsu.sunj[3] = fsu.sund[3] = 0;
 
             sg_apply_pipeline(g_globe_pip);
             sg_apply_bindings(&(sg_bindings){
@@ -644,12 +746,6 @@ static void frame(void) {
             sg_apply_uniforms(0, &SG_RANGE(vsu));
             sg_apply_uniforms(1, &SG_RANGE(fsu));
             sg_draw(0, GLOBE_NUM_INDICES, 1);
-
-            if (g_draw.num_indices > split) {
-                sg_apply_pipeline(g_pip);
-                sg_apply_bindings(&g_bind);
-                sg_draw(split, g_draw.num_indices - split, 1);
-            }
         }
     }
 
@@ -660,6 +756,23 @@ static void frame(void) {
 
     sg_end_pass();
     sg_commit();
+
+    if (getenv("TEMPUS_DEBUG_GLOBES") && sapp_frame_count() == 10) {
+        fprintf(stderr, "num_globes=%d solar.helio=%.3f blend=%.3f op=[%.2f %.2f %.2f %.2f] layers=%d\n",
+                g_draw.num_globes, g_scene.solar_state.helio,
+                g_scene.helio_blend,
+                g_scene.views[VIEW_CALENDAR].opacity,
+                g_scene.views[VIEW_SOLAR].opacity,
+                g_scene.views[VIEW_CLOCK].opacity,
+                g_scene.views[VIEW_ORRERY].opacity,
+                g_scene.num_layers);
+        for (int i = 0; i < g_draw.num_globes; i++) {
+            const GlobeCmd *gc = &g_draw.globes[i];
+            fprintf(stderr, "  g%d pos=(%.0f,%.0f) r=%.0f light=(%.2f,%.2f,%.2f) rot0=%.2f\n",
+                    i, gc->cx, gc->cy, gc->radius,
+                    gc->light[0], gc->light[1], gc->light[2], gc->rot[0]);
+        }
+    }
 
     if (g_shot_path && --g_shot_countdown == 0) {
         save_shot(g_shot_path);
@@ -685,7 +798,7 @@ static void event(const sapp_event *e) {
                 g_tempus.config.use_alternate_names = !g_tempus.config.use_alternate_names;
                 break;
             case SAPP_KEYCODE_S:
-                timeview_start_day_warp(&g_scene.solar_state.tv, 8640.0, 8.0, EASE_IN_OUT_QUAD, 1.5, 1.5);
+                timeview_start_day_warp(&g_scene.solar_state.tv, 1.0, 8.0, EASE_IN_OUT_QUAD, 1.5, 1.5);
                 break;
             case SAPP_KEYCODE_D:
                 g_show_debug = !g_show_debug;

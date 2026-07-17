@@ -169,12 +169,29 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
         for (int i = 0; i < 8; i++) {
             float ef = (float)tempus_jd_to_wheel_pct(t, t->jd_events[i]);
             float angle = ef * 2.0f * (float)M_PI;
-            draw_text_curved(d, FONT_event, 0, 0, radius - 10.0f,
-                           angle, tempus_event_name(t, i), 4.0f);
+            draw_text_curved(d, FONT_event, 0, 0, radius - 58.0f,
+                           angle, tempus_event_name(t, i), 1.8f, 1.0f);
         }
     }
 
-    // Day tick marks (from cache)
+    // Current-month arc: a background band drawn UNDER the day ticks so
+    // it never occludes them
+    {
+        int cm = tv->month - 1;
+        float arc_r = radius + (float)tempus_mix(s->month_arc_radius_a, s->month_arc_radius_b, blend);
+        float arc_w = (float)tempus_mix(s->month_arc_width_a, s->month_arc_width_b, blend);
+        float m0 = (float)((t->jd_months[cm] - t->jd_newyear) / t->total_days);
+        float m1 = (float)((t->jd_months[cm + 1] - t->jd_newyear) / t->total_days);
+        float a0 = m0 * 2.0f * (float)M_PI - (float)(M_PI * 0.5);
+        float a1 = m1 * 2.0f * (float)M_PI - (float)(M_PI * 0.5);
+        draw_set_color(d, dc_scale(s->month_color, 0.5f));
+        draw_arc_filled(d, 0, 0, arc_r + arc_w, arc_r, a0, a1, 48);
+    }
+
+    // Day tick marks (from cache). Zoomed in, they pull inside the ring
+    // so the month arc band never crowds them.
+    float tick_in = radius - 16.0f * (float)blend;
+    float tick_out = radius + 20.0f * (1.0f - (float)blend) - 2.0f * (float)blend;
     for (int i = 0; i < st->num_ticks; i++) {
         switch (st->ticks[i].kind) {
             case TICK_LEAP:           draw_set_color(d, s->leap_year); break;
@@ -184,9 +201,52 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
             default:                 draw_set_color(d, s->day_marks); break;
         }
         float ix, iy, ox, oy;
-        cal__fc(st->ticks[i].angle, radius, &ix, &iy);
-        cal__fc(st->ticks[i].angle, radius + 20.0f, &ox, &oy);
+        cal__fc(st->ticks[i].angle, tick_in, &ix, &iy);
+        cal__fc(st->ticks[i].angle, tick_out, &ox, &oy);
         draw_line_thin(d, ix, iy, ox, oy);
+    }
+
+    // Day-of-month numbers, radially set beside their ticks — fade in
+    // once the zoom gives them room to breathe
+    {
+        float num_vis = (float)tempus_smoothstep(2200, 3800, radius);
+        if (num_vis > 0.01f) {
+            for (int mi = 0; mi < 12; mi++) {
+                int dim = t->days_in_month[mi];
+                for (int day = 1; day <= dim; day++) {
+                    double jd = t->jd_months[mi] + (day - 1);
+                    float pct = (float)((jd - t->jd_newyear) / t->total_days);
+                    float theta = pct * 2.0f * (float)M_PI;
+                    char buf[3];
+                    if (day >= 10) {
+                        buf[0] = (char)('0' + day / 10);
+                        buf[1] = (char)('0' + day % 10);
+                        buf[2] = 0;
+                    } else {
+                        buf[0] = (char)('0' + day);
+                        buf[1] = 0;
+                    }
+                    bool is_today = (mi + 1 == tv->month && day == tv->day);
+                    DrawColor c = is_today ? s->month_text_color
+                                           : dc_scale(s->medium_grey, 0.55f);
+                    c.a = num_vis;
+                    draw_set_color(d, c);
+                    // Tangential, half-size; curved text keeps the glyphs
+                    // upright (baseline toward the wheel on the bottom
+                    // half, away from it on top). The two branches place
+                    // glyphs on opposite sides of the baseline circle, so
+                    // compensate the radius to keep the numeral band at a
+                    // constant depth inside the rim.
+                    float na = fmodf(theta, 2.0f * (float)M_PI);
+                    if (na < 0) na += 2.0f * (float)M_PI;
+                    bool nflip = (na > (float)M_PI * 0.5f && na < (float)M_PI * 1.5f);
+                    float gh = _font_compat[FONT_event].size * 0.5f * 0.8f;
+                    float nr = nflip ? (tick_in - 12.0f) : (tick_in - 12.0f - gh);
+                    draw_text_curved(d, FONT_event, 0, 0, nr,
+                                     theta, buf, 0.05f, 0.5f);
+                }
+            }
+        }
     }
 
     // Year boundary
@@ -203,27 +263,13 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
 
     d->tx = save_tx; d->ty = save_ty;
 
-    // Month arc
     int cur_month = tv->month - 1;
-    {
-        float arc_r = radius + (float)tempus_mix(s->month_arc_radius_a, s->month_arc_radius_b, blend);
-        float arc_w = (float)tempus_mix(s->month_arc_width_a, s->month_arc_width_b, blend);
-        float m0 = (float)((t->jd_months[cur_month] - t->jd_newyear) / t->total_days);
-        float m1 = (float)((t->jd_months[cur_month + 1] - t->jd_newyear) / t->total_days);
-        float a0 = m0 * 2.0f * (float)M_PI - (float)(M_PI * 0.5);
-        float a1 = m1 * 2.0f * (float)M_PI - (float)(M_PI * 0.5);
-
-        draw_set_color(d, dc_scale(s->month_color, 0.5f));
-        float stx = d->tx, sty = d->ty;
-        draw_translate(d, -offx, -offy);
-        draw_arc_filled(d, 0, 0, arc_r + arc_w, arc_r, a0, a1, 48);
-        d->tx = stx; d->ty = sty;
-    }
 
     // Month names
     {
         float text_r = radius + (float)tempus_mix(s->month_text_radius_a, s->month_text_radius_b, blend);
-        float text_mix = (float)tempus_mix(2.0, 5.0, blend);
+        // additive tracking (em): letterspacing widens as the ring zooms
+        float text_mix = (float)tempus_mix(0.6, 2.4, blend);
         float outer_mix = (float)tempus_mix(0.1, 0.6, blend);
 
         float stx = d->tx, sty = d->ty;
@@ -236,7 +282,7 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
             float mf = (float)tempus_jd_to_wheel_pct(t, mid_jd);
             float angle = mf * 2.0f * (float)M_PI;
             draw_text_curved(d, FONT_month, 0, 0, text_r,
-                           angle, tempus_month_name(t, i), text_mix);
+                           angle, tempus_month_name(t, i), text_mix, 1.0f);
         }
         d->tx = stx; d->ty = sty;
     }

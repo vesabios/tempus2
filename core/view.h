@@ -6,11 +6,23 @@
 
 #include "tempus.h"
 #include "draw.h"
+#include "globe.h"
 #include "tween.h"
 #include "timewarp.h"
 
 // ---- Forward decl ----
 typedef struct Scene Scene;
+
+// ---- Globe overlays: static encodings of solar motion ----
+
+typedef enum {
+    GLOBE_OVERLAY_NONE = 0,
+    GLOBE_OVERLAY_CHRONO,     // terminator multi-exposure (dense -> heatmap)
+    GLOBE_OVERLAY_DAYLIGHT,   // analytic daylight-hours field (chrono's limit)
+    GLOBE_OVERLAY_ENVELOPE,   // solstice terminators + tropics/polar circles
+    GLOBE_OVERLAY_SUNPATHS,   // dial-side solstice/today sun paths + analemma
+    GLOBE_OVERLAY_COUNT
+} GlobeOverlay;
 
 // ---- Style (shared across views) ----
 
@@ -72,12 +84,14 @@ typedef struct {
     DrawColor globe_shadow;
     DrawColor globe_grid;        // graticule lines (alpha = line strength)
     DrawColor globe_terminator;  // day/night hairline (alpha = line strength)
+
+    int globe_overlay;           // GlobeOverlay mode (debug-gated for now)
 } RenderStyle;
 
 static inline RenderStyle style_default(void) {
     RenderStyle s = {0};
     s.calendar_base_radius = 450.0f;
-    s.zoom_in_radius = 2400.0f;
+    s.zoom_in_radius = 7200.0f;
     s.sunrise_dial_offset = -195.0f;
     s.sunrise_dial_radius = 80.0f;
     s.month_arc_radius_a = 49.0f;  s.month_arc_width_a = -30.0f;
@@ -107,7 +121,7 @@ static inline RenderStyle style_default(void) {
     s.holiday_stroke  = dc_u8(80, 80, 80);
     s.leap_year       = dc(0.5f, 0.5f, 0);
     s.year_stroke     = dc_u8(221, 240, 0);
-    s.day_marks       = dc(0.2f, 0.2f, 0.2f);
+    s.day_marks       = dc(0.3f, 0.3f, 0.3f);
     s.seconds_color   = dc(1, 0, 0);
     s.minutes_color   = dc(1, 1, 1);
     s.hours_color     = dc(1, 1, 1);
@@ -128,6 +142,7 @@ typedef enum {
     VIEW_CLOCK,
     VIEW_CALENDAR,
     VIEW_SOLAR,
+    VIEW_ORRERY,
     VIEW_COUNT,
 } ViewId;
 
@@ -135,12 +150,14 @@ typedef enum {
 typedef struct ClockViewState ClockViewState;
 typedef struct SolarViewState SolarViewState;
 typedef struct CalendarViewState CalendarViewState;
+typedef struct OrreryViewState OrreryViewState;
 
 // View state is a tagged union — properly typed, no byte buffer casts.
 typedef union {
     ClockViewState    *clock;
     SolarViewState    *solar;
     CalendarViewState *calendar;
+    OrreryViewState   *orrery;
 } ViewStatePtr;
 
 typedef struct {

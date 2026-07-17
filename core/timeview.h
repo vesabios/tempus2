@@ -78,10 +78,16 @@ static inline void timeview_derive(TimeView *tv) {
     tv->jd_current = cal_jd_noon(tv->year, tv->month, tv->day);
 }
 
-// Start a day warp (e.g. solar animation cycling through 24 hours)
-static inline void timeview_start_day_warp(TimeView *tv, double speed,
+// Warp through exactly `days` of virtual time over `duration` real
+// seconds. Solves for the speed multiplier including ramp losses: a
+// symmetric ease averages 1/2 over a ramp, so covered time is
+//   S*(duration - (ramp_in+ramp_out)/2) + (ramp_in+ramp_out)/2.
+static inline void timeview_start_day_warp(TimeView *tv, double days,
                                            double duration, EaseCurve curve,
                                            double ramp_in, double ramp_out) {
+    double half_ramps = (ramp_in + ramp_out) * 0.5;
+    double target = days * 86400.0;
+    double speed = (target - half_ramps) / (duration - half_ramps);
     tv->synced = false;
     tv->base_day_pct = tv->day_pct;
     tv->base_year_pct = tv->year_pct;

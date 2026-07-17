@@ -12,6 +12,7 @@
 #include "views/view_clock.h"
 #include "views/view_calendar.h"
 #include "views/view_solar.h"
+#include "views/view_orrery.h"
 
 // ---- Transitions ----
 
@@ -55,6 +56,7 @@ struct Scene {
     ClockViewState    clock_state;
     CalendarViewState calendar_state;
     SolarViewState    solar_state;
+    OrreryViewState   orrery_state;
 
     // Active layer stack (back to front)
     ViewId      layers[SCENE_MAX_LAYERS];
@@ -78,6 +80,10 @@ struct Scene {
     TweenPool   tweens;
     RenderStyle style;
     PacePolicy  pace;
+
+    // Geocentric <-> heliocentric morph (0 = clock/dial, 1 = orrery).
+    // Tweened; the orrery view morphs the globe, other views crossfade.
+    double      helio_blend;
 };
 
 // Now Scene is defined — include view function implementations
@@ -85,6 +91,7 @@ struct Scene {
 #include "views/view_clock.h"
 #include "views/view_calendar.h"
 #include "views/view_solar.h"
+#include "views/view_orrery.h"
 
 // ---- Layer management ----
 
@@ -156,6 +163,7 @@ static inline void scene_init(Scene *sc, const Tempus *t) {
     sc->views[VIEW_CLOCK].state    = &sc->clock_state;
     sc->views[VIEW_CALENDAR].state = &sc->calendar_state;
     sc->views[VIEW_SOLAR].state    = &sc->solar_state;
+    sc->views[VIEW_ORRERY].state   = &sc->orrery_state;
 }
 
 static inline void scene_register_view(Scene *sc, ViewId id, const ViewVtable *vt) {
@@ -169,6 +177,14 @@ static inline void scene_init_views(Scene *sc, const Tempus *t) {
         View *v = &sc->views[i];
         if (v->vt && v->vt->init)
             v->vt->init(v->state, t, &sc->style);
+        // Views are born synced to the master clock — otherwise the first
+        // update derives from a zeroed TimeView, and at ambient pacing the
+        // correcting sync can be a full second away.
+        if (v->state) {
+            TimeView *tv = (TimeView *)v->state;
+            tv->synced = true;
+            timeview_sync(tv, t);
+        }
     }
 }
 
@@ -237,9 +253,11 @@ static inline void scene_render(const Scene *sc, DrawCtx *d, const Tempus *t) {
     for (int i = 0; i < sc->num_layers; i++) {
         const View *v = &sc->views[sc->layers[i]];
         if (v->opacity <= 0.001) continue;
+        d->alpha = (float)v->opacity;
         if (v->vt && v->vt->render)
             v->vt->render(v->state, d, t, &sc->style);
     }
+    d->alpha = 1.0f;
 }
 
 static inline void scene_event(Scene *sc, const Tempus *t, int key) {
@@ -257,12 +275,15 @@ static inline double scene_desired_fps(const Scene *sc) {
     double fps = sc->pace.ambient_fps;
     for (int i = 0; i < sc->num_layers; i++) {
         const View *v = &sc->views[sc->layers[i]];
-        if (!v->state || v->opacity <= 0.001) continue;
+        if (!v->state) continue;
 
+        // Warps animate even when the owning view is an invisible data
+        // provider (the solar view drives the orrery's sun)
         const TimeView *tv = (const TimeView *)v->state; // first field
         if (!tv->synced || tv->warp.active)
             return sc->pace.animate_fps;
 
+        if (v->opacity <= 0.001) continue;
         if (v->id == VIEW_CLOCK) {
             double f = sc->style.sweep_seconds ? sc->pace.sweep_fps
                                                : sc->pace.tick_fps;
