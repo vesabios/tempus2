@@ -64,6 +64,9 @@ static sg_pass_action  g_pass_action;
 static sg_pipeline     g_globe_pip;
 static sg_buffer       g_globe_vbuf;
 static sg_buffer       g_globe_ibuf;
+static sg_image        g_land_img;
+static sg_view         g_land_view;
+static sg_sampler      g_land_sampler;
 
 typedef struct {
     float rot[16];      // earth -> view rotation (column-major mat4)
@@ -536,6 +539,30 @@ static void init(void) {
 
     // Globe mesh + pipeline
     {
+        // Landmass mask (equirectangular, R8)
+        int lw, lh, ln;
+        unsigned char *ldata = stbi_load("assets/land_mask.png", &lw, &lh, &ln, 1);
+        if (!ldata)
+            ldata = stbi_load("../assets/land_mask.png", &lw, &lh, &ln, 1);
+        if (ldata) {
+            g_land_img = sg_make_image(&(sg_image_desc){
+                .width = lw,
+                .height = lh,
+                .pixel_format = SG_PIXELFORMAT_R8,
+                .data.mip_levels[0] = { .ptr = ldata, .size = (size_t)(lw * lh) },
+            });
+            stbi_image_free(ldata);
+            g_land_view = sg_make_view(&(sg_view_desc){
+                .texture.image = g_land_img,
+            });
+        }
+        g_land_sampler = sg_make_sampler(&(sg_sampler_desc){
+            .min_filter = SG_FILTER_LINEAR,
+            .mag_filter = SG_FILTER_LINEAR,
+            .wrap_u = SG_WRAP_REPEAT,            // longitude seam
+            .wrap_v = SG_WRAP_CLAMP_TO_EDGE,
+        });
+
         static GlobeMesh mesh;
         globe_mesh_build(&mesh);
 
@@ -553,6 +580,23 @@ static void init(void) {
             .fragment_func.source = globe_fs_src,
             .attrs = {
                 [0] = { .glsl_name = "a_pos" },
+            },
+            .views[0] = {
+                .texture = {
+                    .stage = SG_SHADERSTAGE_FRAGMENT,
+                    .image_type = SG_IMAGETYPE_2D,
+                    .sample_type = SG_IMAGESAMPLETYPE_FLOAT,
+                },
+            },
+            .samplers[0] = {
+                .stage = SG_SHADERSTAGE_FRAGMENT,
+                .sampler_type = SG_SAMPLERTYPE_FILTERING,
+            },
+            .texture_sampler_pairs[0] = {
+                .stage = SG_SHADERSTAGE_FRAGMENT,
+                .view_slot = 0,
+                .sampler_slot = 0,
+                .glsl_name = "u_land",
             },
             .uniform_blocks = {
                 [0] = {
@@ -742,6 +786,8 @@ static void frame(void) {
             sg_apply_bindings(&(sg_bindings){
                 .vertex_buffers[0] = g_globe_vbuf,
                 .index_buffer = g_globe_ibuf,
+                .views[0] = g_land_view,
+                .samplers[0] = g_land_sampler,
             });
             sg_apply_uniforms(0, &SG_RANGE(vsu));
             sg_apply_uniforms(1, &SG_RANGE(fsu));

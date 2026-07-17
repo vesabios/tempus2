@@ -187,6 +187,11 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
     }
 
+    // Limb outline: bounds the map at the silhouette so coastline vectors
+    // meet a rim instead of floating unconnected against the sky
+    draw_set_color(d, dca(0.63f, 0.58f, 0.50f, 0.10f + 0.35f * m));
+    draw_circle_stroked(d, ex, ey, earth_r, 1.0f);
+
     // ================= OVER THE GLOBE =================
 
     // Dial furniture: outer ring, anchored at the dial. (The old daylight
@@ -202,29 +207,25 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     if (helio_a > 0.001f) {
         d->alpha = base_alpha * helio_a;
 
-        float stub0 = earth_r * 0.05f + 2.0f;
-        float stub1 = earth_r * 0.17f + 2.0f;
-        // The axis itself, drawn straight through like an orrery's brass
-        // pin — the tilt it projects is the whole story of the seasons
-        draw_set_color(d, dca(0.75f, 0.72f, 0.65f, 0.28f));
-        draw_line(d, ex, ey - earth_r - stub1, ex, ey + earth_r + stub1, 1.2f);
-        draw_set_color(d, dca(0.75f, 0.72f, 0.65f, 0.8f));
-        draw_line(d, ex, ey - earth_r - stub0, ex, ey - earth_r - stub1, 1.2f);
-        draw_line(d, ex, ey + earth_r + stub0, ex, ey + earth_r + stub1, 1.2f);
-
-        float noon_ang = atan2f(light[1], light[0]);
-        float tick0 = earth_r * 0.06f + 1.5f;
-        float tick_minor = earth_r * 0.11f + 2.5f;
-        float tick_major = earth_r * 0.16f + 3.5f;
-        for (int h = 0; h < 24; h++) {
-            float a = noon_ang + (float)h / 24.0f * 2.0f * (float)M_PI;
-            bool major = (h % 6) == 0;
-            float r0 = earth_r + tick0;
-            float r1 = earth_r + (major ? tick_major : tick_minor);
-            draw_set_color(d, major ? s->clock_lines_strong : s->clock_lines);
-            draw_line(d, ex + cosf(a) * r0, ey + sinf(a) * r0,
-                      ex + cosf(a) * r1, ey + sinf(a) * r1, 1.0f);
+        // The axis as a physical pin: the visible-pole segment runs from
+        // space down to the pole's projected point ON the disc; the
+        // far-pole segment terminates at the perimeter, occluded by the
+        // planet. Uses the live rotation, so it tracks the morph.
+        float axv0 = rot[8], axv1 = rot[9], axv2 = rot[10];
+        float an = sqrtf(axv0 * axv0 + axv1 * axv1);
+        if (an > 1e-4f) {
+            float sgn = (axv2 >= 0) ? 1.0f : -1.0f;   // toward visible pole
+            float vx = sgn * axv0 / an, vy = sgn * axv1 / an;
+            float ext = earth_r * 0.17f + 4.0f;
+            draw_set_color(d, dca(0.75f, 0.72f, 0.65f, 0.8f));
+            draw_line(d, ex + vx * (earth_r + ext), ey + vy * (earth_r + ext),
+                      ex + sgn * axv0 * earth_r, ey + sgn * axv1 * earth_r, 1.2f);
+            draw_line(d, ex - vx * (earth_r + ext), ey - vy * (earth_r + ext),
+                      ex - vx * earth_r, ey - vy * earth_r, 1.2f);
         }
+
+        // (The uniform 24h bezel is gone — the surface clock projects its
+        // hour marks outward past the limb at their true bearings.)
     }
 
     // ---- Shared elements: continuous across the morph, never fade ----
@@ -243,12 +244,17 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             sun_c = dc_scale(sun_c, 0.5f);
         }
         // In helio the real sun sits at the wheel center, so the marker
-        // lifts off the limb and floats sunward past the bezel — a bead
-        // on the sun line. In geo it stays on the disc as before.
-        float lift = 1.0f + 0.35f * m;
+        // lifts well off the globe toward it — a bead on the sun line.
+        // Its tether starts at the PERIMETER, not the globe center.
+        float lift = 1.0f + 0.9f * m;
         float px = ex + lx * earth_r * lift, py = ey + ly * earth_r * lift;
-        draw_set_color(d, dca(0.75f, 0.75f, 0.75f, 0.35f));
-        draw_line(d, ex, ey, px, py, 1.0f);
+        float mag = sqrtf(lx * lx + ly * ly);
+        if (mag * lift > 1.02f && mag > 1e-4f) {
+            float sx0 = ex + (lx / mag) * earth_r;
+            float sy0 = ey + (ly / mag) * earth_r;
+            draw_set_color(d, dca(0.75f, 0.75f, 0.75f, 0.35f));
+            draw_line(d, sx0, sy0, px, py, 1.0f);
+        }
         draw_set_color(d, sun_c);
         draw_circle_filled(d, px, py, s->sun_size * earth_r / dial_r);
     }
@@ -315,6 +321,74 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                     }
                 }
             }
+        }
+    }
+
+    // ---- Surface clock face: the latitude ring as a 24-hour dial ----
+    // Tick positions are sun-anchored (noon is always the ring's sunward
+    // crossing), so the city marker sweeps past them as the hour hand —
+    // a clock face lying on the surface of the planet.
+    if (m > 0.02f) {
+        double latr2 = t->config.latitude * M_PI / 180.0;
+        float cl = (float)cos(latr2), sl = (float)sin(latr2);
+        float le[3];
+        globe_mat_tmul_vec(rot, light, le);   // subsolar point, earth frame
+        float lam_ss = atan2f(le[1], le[0]);
+        float tick_len = earth_r * 0.035f;
+        float num_size = _font_compat[FONT_event].size * 0.42f;
+        int w_id = _font_compat[FONT_event].weight;
+
+        for (int h = 0; h < 24; h++) {
+            float lam = lam_ss + (float)(h - 12) * 15.0f * (float)M_PI / 180.0f;
+            float p[3]  = { cl * cosf(lam), cl * sinf(lam), sl };
+            float tn[3] = { -sl * cosf(lam), -sl * sinf(lam), cl };  // poleward
+            float pv[3], tw3[3];
+            globe_mat_mul_vec(rot, p, pv);
+            globe_mat_mul_vec(rot, tn, tw3);
+            if (pv[2] < 0.03f) continue;   // front hemisphere only
+
+            bool major = (h % 3) == 0;
+            (void)tw3; (void)tick_len;
+
+            // Bezel tick aimed at the DIAL's center — the ring's own
+            // projected center (where the axis pierces the ring plane) —
+            // not the globe center. Cast a ray from there through the
+            // hour point and find where it exits the bezel radius.
+            float cvx = rot[8] * sl, cvy = rot[9] * sl;   // ring center, view
+            float ux = pv[0] - cvx, uy = pv[1] - cvy;
+            float un = sqrtf(ux * ux + uy * uy);
+            if (un < 0.03f) continue;
+            ux /= un; uy /= un;
+
+            float t0 = earth_r * 0.06f + 1.5f;
+            float t1 = earth_r * (major ? 0.16f : 0.11f) + (major ? 3.5f : 2.5f);
+
+            // Ray-circle intersection: |c + s*u| = k (earth-radius units)
+            float k0 = 1.0f + t0 / earth_r;
+            float cu = cvx * ux + cvy * uy;
+            float cc = cvx * cvx + cvy * cvy;
+            float disc = cu * cu + k0 * k0 - cc;
+            if (disc <= 0) continue;
+            float s0 = -cu + sqrtf(disc);
+            float bx = ex + (cvx + s0 * ux) * earth_r;
+            float by = ey + (cvy + s0 * uy) * earth_r;
+
+            draw_set_color(d, major ? s->clock_lines_strong : s->clock_lines);
+            d->alpha = base_alpha * m;
+            draw_line(d, bx, by, bx + ux * (t1 - t0), by + uy * (t1 - t0), 1.0f);
+
+            if (major) {
+                char hb[3];
+                if (h >= 10) { hb[0] = (char)('0' + h / 10); hb[1] = (char)('0' + h % 10); hb[2] = 0; }
+                else         { hb[0] = (char)('0' + h); hb[1] = 0; }
+                float nd = (t1 - t0) + num_size * 0.85f;
+                float nx = bx + ux * nd, ny = by + uy * nd;
+                float tw = sdf_measure_width(w_id, hb) * num_size;
+                draw_set_color(d, dca(0.8f, 0.78f, 0.72f, 0.65f));
+                draw_text_ex(d, w_id, num_size,
+                             nx - tw * 0.5f, ny - num_size * 0.5f, hb);
+            }
+            d->alpha = base_alpha;
         }
     }
 

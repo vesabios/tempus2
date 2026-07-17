@@ -44,7 +44,8 @@ $(WEB_DIR)/index.html: platform/standalone.c platform/shell.html core/spa.c $(HE
 	    platform/standalone.c core/spa.c -o $@ \
 	    -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sALLOW_MEMORY_GROWTH=1 \
 	    --shell-file platform/shell.html \
-	    --preload-file assets/font_atlas.png
+	    --preload-file assets/font_atlas.png \
+	    --preload-file assets/land_mask.png
 
 serve: web
 	cd $(WEB_DIR) && python3 -m http.server 8123
