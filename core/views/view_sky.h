@@ -29,6 +29,8 @@ struct SkyViewState {
     PlanetsNow now;
     PlanetsSky sky;
     double     cache_jd;
+    float      bowl_sun_alt;   // sun altitude at the DATE's solar
+                               // midnight — the bowl's tint anchor
 
     // The orrery's state: its published live sun/moon positions are the
     // machine-side endpoints of the morph, read at render time — every
@@ -103,21 +105,30 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->blend = sc->sky_blend;
     if (st->blend < 0.001) return;
 
-    // CAELVM shows the coming MIDNIGHT of the displayed date, not the
-    // running clock — the planisphere's convention. The calendar wheel
-    // scrubs the day, and each day gets its canonical night sky (the
-    // diurnal arcs span noon to noon, the whole night centered).
-    // Midnight is LOCAL MEAN SOLAR midnight at the configured longitude
-    // (sun at lower culmination over your spot) — the machine's
-    // timezone has no business in another city's sky.
-    double jd_ut = st->tv.jd_current + 0.5
-                 - t->config.longitude / (15.0 * 24.0);
+    // CAELVM runs on the TRUE display instant — the wheel scrubs hours
+    // and the bodies wheel across the bowl accordingly. The BOWL's
+    // tint, though, is anchored to the date's local mean solar
+    // midnight: the sky stays a readable instrument night, no
+    // day/night strobing under a fast scrub — the sun simply crosses
+    // the horizon ring as a body when its hour comes.
+    double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
+                 - t->config.timezone / 24.0;
     if (fabs(jd_ut - st->cache_jd) <= 1.0 / 1440.0) return;
     st->cache_jd = jd_ut;
 
     double lat = t->config.latitude, lon = t->config.longitude;
     planets_compute(&st->now, jd_ut);
     planets_sky_compute(&st->sky, &st->now, lat, lon);
+
+    // Tint anchor: sun altitude at the date's solar midnight
+    {
+        double jd_mid = st->tv.jd_current + 0.5
+                      - t->config.longitude / (15.0 * 24.0);
+        double blon, blat, az, alt;
+        planets__body_lonlat(BODY_SUN, jd_mid, &blon, &blat);
+        planets_sky_azalt(blon, blat, jd_mid, lat, lon, &az, &alt);
+        st->bowl_sun_alt = (float)alt;
+    }
 
     for (int b = 0; b < BODY_COUNT; b++) {
         double blon, blat, az, alt;
@@ -182,7 +193,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // to read engravings against. Arrives as a deepening veil over the
     // dissolving machine.
     {
-        float sa = st->body_alt[BODY_SUN];
+        float sa = st->bowl_sun_alt;
         float day = (float)tempus_smoothstep(-18.0, 8.0, sa);
         d->alpha = base_alpha * mb;
         // Under the earth: the outer annulus, a dark warm ground

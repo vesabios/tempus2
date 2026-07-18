@@ -474,7 +474,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         // plus the fixed-wheel stations (HORAE) where it maps 1:1.
         if (sc->helio_blend > 0.5 || sc->horae_blend > 0.5
             || sc->rotae_blend > 0.5 || sc->saec_blend > 0.5
-            || sc->orbis_blend > 0.5) {
+            || sc->orbis_blend > 0.5 || sc->sky_blend > 0.5) {
             float base_w = (float)tempus_wheel_radius(
                 sc->style.calendar_base_radius, sc->system_blend,
                 sc->sky_blend);
@@ -522,7 +522,8 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
             float along = dxf * tx + dyf * ty;
             double dv;
             if (sys || sc->horae_blend > 0.5 || sc->rotae_blend > 0.5
-                || sc->saec_blend > 0.5 || sc->orbis_blend > 0.5) {
+                || sc->saec_blend > 0.5 || sc->orbis_blend > 0.5
+                || sc->sky_blend > 0.5) {
                 // System view: the wheel is fixed and the EARTH is what
                 // moves — the pointer/planet follows the finger, arc
                 // length mapping 1:1 to angle at the band radius. (The
