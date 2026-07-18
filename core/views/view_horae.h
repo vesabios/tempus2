@@ -33,6 +33,11 @@ struct HoraeViewState {
     TimeView tv;  // must be first field
     double opacity;
     double blend;     // mirrored scene horae_blend
+
+    // The week ring is itself draggable: one revolution is 7/6 of a
+    // day — the instrument's fine scrub, feeding the same flywheel
+    bool  ring_dragging;
+    float last_wx, last_wy;
 };
 
 #endif // VIEW_HORAE_H
@@ -44,10 +49,10 @@ struct HoraeViewState {
 // Gear geometry (world units; the eccentric ring's farthest sweep,
 // HORAE_ECC + HORAE_RING_OUT + labels, must clear the calendar wheel
 // at 434)
-#define HORAE_CLOCK_R   210.0f   // the fixed day clock, center stage
-#define HORAE_CLOCK_W    46.0f   // its tooth band depth
-#define HORAE_RING_IN   270.0f   // week ring inner (touches the clock)
-#define HORAE_RING_OUT  330.0f   // week ring outer
+#define HORAE_CLOCK_R   230.0f   // the fixed day clock, center stage
+#define HORAE_CLOCK_W    50.0f   // its tooth band depth
+#define HORAE_RING_IN   296.0f   // week ring inner (touches the clock)
+#define HORAE_RING_OUT  364.0f   // week ring outer
 #define HORAE_ECC (HORAE_RING_IN - HORAE_CLOCK_R)   // eccentricity
 
 // Chaldean order, slowest to fastest; colors borrowed from the orrery
@@ -306,7 +311,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
 
                 bool is_day = h < 12;
                 bool cur = (dd == pd && h == hcur);
-                float len = cur ? 18.0f : (is_day ? 11.0f : 6.5f);
+                float len = cur ? 20.0f : (is_day ? 12.0f : 7.0f);
                 // Neutral engraving — length carries day/night, the
                 // reading at the contact carries the planet
                 draw_set_color(d, cur
@@ -369,7 +374,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
 
         // Planet name on its own arc, waist-centered
         float nsz = _font_compat[FONT_month].size;
-        float rn = 312.0f - nsz * 0.5f + nsz * (lflip ? 0.51f : 0.37f);
+        float rn = 346.0f - nsz * 0.5f + nsz * (lflip ? 0.51f : 0.37f);
         draw_set_color(d, dca(0.80f, 0.77f, 0.70f, 0.95f));
         draw_text_curved(d, FONT_month, 0, 0, rn, ah,
                          horae__genitive[ridx], 1.2f, 1.0f);
@@ -380,12 +385,12 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                                            horae__genitive[ridx])
                          + 1.2f * (float)strlen(horae__genitive[ridx]))
                       * nsz;
-            float off = (tw2 * 0.5f + 20.0f) / 312.0f;
+            float off = (tw2 * 0.5f + 20.0f) / 346.0f;
             float ap = ah + (lflip ? off : -off);
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, 0.95f));
-            draw_circle_filled(d, sinf(ap) * 312.0f,
-                               -cosf(ap) * 312.0f, 6.0f);
+            draw_circle_filled(d, sinf(ap) * 346.0f,
+                               -cosf(ap) * 346.0f, 6.0f);
         }
 
         // The hour line on the arc beyond
@@ -393,7 +398,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         snprintf(hb, sizeof(hb), "HORA %s %s", horae__roman[hcur % 12],
                  hcur < 12 ? "DIEI" : "NOCTIS");
         float isz = _font_compat[FONT_date].size * 0.9f;
-        float ri = 348.0f - isz * 0.5f + isz * (lflip ? 0.51f : 0.37f);
+        float ri = 386.0f - isz * 0.5f + isz * (lflip ? 0.51f : 0.37f);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.60f));
         draw_text_curved(d, FONT_date, 0, 0, ri, ah, hb, 0.8f, 0.9f);
     }

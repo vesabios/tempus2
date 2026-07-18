@@ -239,7 +239,8 @@ static inline void scene_update(Scene *sc, Tempus *t, double dt) {
     // a flicked wheel keeps spinning and slows like a physical machine.
     {
         CalendarViewState *c = &sc->calendar_state;
-        bool grabbing = c->wheel_dragging;   // only the wheel has inertia
+        bool grabbing = c->wheel_dragging
+                     || sc->horae_state.ring_dragging;   // both feed inertia
         if (grabbing && dt > 1e-4) {
             double inst = c->drag_accum / dt;
             c->drag_accum = 0;
@@ -386,6 +387,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                                  float wx, float wy) {
     OrreryViewState *o = &sc->orrery_state;
     CalendarViewState *c = &sc->calendar_state;
+    HoraeViewState *ho = &sc->horae_state;
 
     bool sys = sc->system_blend > 0.5;
     // In the sky view the machine is parked invisible underneath: the
@@ -419,6 +421,27 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
             c->drag_accum = 0;
             scene__begin_override(t);
             return;
+        }
+
+        // HORAE's week ring: grab the eccentric ring itself for fine
+        // scrubbing — one revolution is 7/6 of a day (the ring turns
+        // 6/7 rev per day), against the calendar band's year
+        if (sc->horae_blend > 0.5) {
+            float ha = (float)(t->percent_of_day * 2.0 * M_PI);
+            float rcx = -sinf(ha) * HORAE_ECC;
+            float rcy = cosf(ha) * HORAE_ECC;
+            float dxr = wx - rcx, dyr = wy - rcy;
+            float rr = sqrtf(dxr * dxr + dyr * dyr);
+            if (rr > HORAE_RING_IN - 24.0f
+                && rr < HORAE_RING_OUT + 40.0f) {
+                ho->ring_dragging = true;
+                ho->last_wx = wx;
+                ho->last_wy = wy;
+                c->fling_vel = 0;
+                c->drag_accum = 0;
+                scene__begin_override(t);
+                return;
+            }
         }
 
         // Calendar wheel: film-strip drag anywhere on the band (numerals
@@ -489,6 +512,22 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         }
         c->last_wx = wx;
         c->last_wy = wy;
+    } else if (phase == 1 && ho->ring_dragging) {
+        // Incremental angle about the LIVE ring center (it wobbles as
+        // time moves under the drag); clockwise = forward
+        float ha = (float)(t->percent_of_day * 2.0 * M_PI);
+        float rcx = -sinf(ha) * HORAE_ECC;
+        float rcy = cosf(ha) * HORAE_ECC;
+        float a0 = atan2f(ho->last_wx - rcx, -(ho->last_wy - rcy));
+        float a1 = atan2f(wx - rcx, -(wy - rcy));
+        float da = a1 - a0;
+        while (da > (float)M_PI) da -= 2.0f * (float)M_PI;
+        while (da < -(float)M_PI) da += 2.0f * (float)M_PI;
+        double dv = (double)da / (2.0 * M_PI) * (7.0 / 6.0);
+        scene__advance_override_days(t, dv, false);
+        c->drag_accum += dv;
+        ho->last_wx = wx;
+        ho->last_wy = wy;
     } else if (phase == 1 && o->dragging) {
         if (o->drag_earth) {
             // Earth follows the finger around the wheel (whose center is
@@ -516,6 +555,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         o->dragging = false;
         o->drag_earth = false;
         c->wheel_dragging = false;
+        ho->ring_dragging = false;
     }
 }
 
