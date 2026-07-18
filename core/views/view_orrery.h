@@ -295,34 +295,42 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     }
 
     // ---- The moon: ONE object across both worldviews ----
-    // Geo endpoint: the 6 o'clock aperture, lit in the phase frame (what
-    // you see from here). Helio endpoint: on its orbit at the true
-    // elongation, lit by the same sun as Earth (why you see it). The
-    // morph tweens position, size, and the light vector itself.
+    // Two STATIC world-space endpoint transforms — the geo aperture from
+    // geo values, the helio orbit slot from PURE helio values (never
+    // mid-morph intermediates) — and a single pos/scale lerp + slerp
+    // between them. The endpoints evolve only with real time, so the
+    // transition is one clean tween toward a stable target.
     {
         double ph = globe_moon_phase(tv->jd_current
                                      + tv->percent_of_day - 0.5);
         float b = (float)(ph * 2.0 * M_PI);
 
-        // Geo endpoint
+        // Geo endpoint: the 6 o'clock aperture, phase-frame light
         float gx2 = 0.0f, gy2 = -dial_y, gr2 = 52.0f;
         float gl2[3] = { sinf(b), 0.0f, -cosf(b) };
 
-        // Helio endpoint: elongation from the sun direction
-        float hx2 = ex, hy2 = ey, hr2 = 22.0f;
-        float hl2[3] = { light[0], light[1], light[2] };
-        float edx = 0, edy = -1;   // direction moon -> earth, screen
-        float lm = sqrtf(light[0] * light[0] + light[1] * light[1]);
-        if (lm > 1e-4f) {
-            float lx2 = light[0] / lm, ly2 = light[1] / lm;
-            float mdx = lx2 * cosf(b) - ly2 * sinf(b);
-            float mdy = lx2 * sinf(b) + ly2 * cosf(b);
-            float morb = earth_r * 1.55f;
-            hx2 = ex + mdx * morb;
-            hy2 = ey + mdy * morb;
-            edx = -mdx;
-            edy = -mdy;
-        }
+        // Helio endpoint: pure ecliptic sun (helio_light, untouched by
+        // the morph) and the FINAL helio earth arrangement — center,
+        // r 240 — where the zoom tween lands together with m
+        float hex = (m >= 0.999f) ? ex : 0.0f;
+        float hey = (m >= 0.999f) ? ey : 0.0f;
+        float her = (m >= 0.999f) ? earth_r : 240.0f;
+        float plm = sqrtf(helio_light[0] * helio_light[0]
+                        + helio_light[1] * helio_light[1]);
+        float slx = (plm > 1e-4f) ? helio_light[0] / plm : 0.0f;
+        float sly = (plm > 1e-4f) ? helio_light[1] / plm : -1.0f;
+        // Elongation advances CCW on screen — the display frame's
+        // physical rotation sense (the surface clock's hour labels run
+        // CCW; a first-quarter moon must sit over the 18 tick, waning
+        // over the morning side). CW here was the inversion that made
+        // geo and helio phases disagree.
+        float mdx = slx * cosf(b) + sly * sinf(b);
+        float mdy = -slx * sinf(b) + sly * cosf(b);
+        float hx2 = hex + mdx * her * 1.55f;
+        float hy2 = hey + mdy * her * 1.55f;
+        float hr2 = 22.0f;
+        float hl2[3] = { helio_light[0], helio_light[1], helio_light[2] };
+        float edx = -mdx, edy = -mdy;   // direction moon -> earth, screen
 
         float mmx = gx2 * (1 - m) + hx2 * m;
         float mmy = gy2 * (1 - m) + hy2 * m;
