@@ -493,13 +493,12 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
             }
         }
 
-        // Calendar wheel: film-strip drag anywhere on the band (numerals
-        // through month text), excluding the globe's interior. Helio only
-        // — in geo the wheel doesn't pan, so dragging feels broken —
-        // plus the fixed-wheel stations (HORAE) where it maps 1:1.
-        if (sc->helio_blend > 0.5 || sc->horae_blend > 0.5
-            || sc->rotae_blend > 0.5 || sc->saec_blend > 0.5
-            || sc->orbis_blend > 0.5 || sc->sky_blend > 0.5) {
+        // Calendar wheel: draggable at EVERY station — the band is the
+        // instrument's one universal time control. Fixed-wheel 1:1
+        // mapping everywhere the wheel holds still (the main 12-hour
+        // face included); the film-strip rule only where it pans
+        // (TELLVS). The globe's interior stays excluded.
+        {
             float base_w = (float)tempus_wheel_radius(
                 sc->style.calendar_base_radius, sc->system_blend,
                 sc->sky_blend);
@@ -550,7 +549,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
             double dv;
             if (sys || sc->horae_blend > 0.5 || sc->rotae_blend > 0.5
                 || sc->saec_blend > 0.5 || sc->orbis_blend > 0.5
-                || sc->sky_blend > 0.5) {
+                || sc->sky_blend > 0.5 || sc->helio_blend <= 0.5) {
                 // System view: the wheel is fixed and the EARTH is what
                 // moves — the pointer/planet follows the finger, arc
                 // length mapping 1:1 to angle at the band radius. (The
