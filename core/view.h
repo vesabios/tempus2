@@ -164,6 +164,8 @@ typedef enum {
     VIEW_ORRERY,
     VIEW_SKY,
     VIEW_HORAE,
+    VIEW_ROTAE,
+    VIEW_SAEC,
     VIEW_COUNT,
 } ViewId;
 
@@ -174,6 +176,8 @@ typedef struct CalendarViewState CalendarViewState;
 typedef struct OrreryViewState OrreryViewState;
 typedef struct SkyViewState SkyViewState;
 typedef struct HoraeViewState HoraeViewState;
+typedef struct RotaeViewState RotaeViewState;
+typedef struct SaecViewState SaecViewState;
 
 // View state is a tagged union — properly typed, no byte buffer casts.
 typedef union {
@@ -183,6 +187,8 @@ typedef union {
     OrreryViewState   *orrery;
     SkyViewState      *sky;
     HoraeViewState    *horae;
+    RotaeViewState    *rotae;
+    SaecViewState     *saec;
 } ViewStatePtr;
 
 typedef struct {

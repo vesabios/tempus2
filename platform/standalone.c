@@ -102,6 +102,8 @@ static int             g_shot_countdown = 0;
 typedef enum {
     WV_HOROLOGIVM = 0,   // geocentric dial + clock
     WV_HORAE,            // the planetary hours
+    WV_ROTAE,            // the nested cycle wheels
+    WV_SAECVLVM,         // the years of a life
     WV_TELLVS,           // heliocentric earth
     WV_MACHINA,          // full system + zodiac + aspect web
     WV_CAELVM,           // the local sky, first person
@@ -109,7 +111,8 @@ typedef enum {
 } Worldview;
 
 static const char *g_worldview_names[WV_COUNT] = {
-    "HOROLOGIVM", "HORAE", "TELLVS", "MACHINA MVNDI", "CAELVM",
+    "HOROLOGIVM", "HORAE", "ROTAE", "SAECVLVM",
+    "TELLVS", "MACHINA MVNDI", "CAELVM",
 };
 
 static Worldview g_worldview = WV_HOROLOGIVM;
@@ -154,9 +157,17 @@ static void set_worldview(Worldview wv) {
     tween_cancel_target(&g_scene.tweens, &g_scene.horae_blend);
     tween_start(&g_scene.tweens, &g_scene.horae_blend, g_scene.horae_blend,
                 wv == WV_HORAE ? 1.0 : 0.0, 3.0, EASE_IN_OUT_CUBIC);
+    tween_cancel_target(&g_scene.tweens, &g_scene.rotae_blend);
+    tween_start(&g_scene.tweens, &g_scene.rotae_blend, g_scene.rotae_blend,
+                wv == WV_ROTAE ? 1.0 : 0.0, 3.0, EASE_IN_OUT_CUBIC);
+    tween_cancel_target(&g_scene.tweens, &g_scene.saec_blend);
+    tween_start(&g_scene.tweens, &g_scene.saec_blend, g_scene.saec_blend,
+                wv == WV_SAECVLVM ? 1.0 : 0.0, 3.0, EASE_IN_OUT_CUBIC);
     switch (wv) {
         case WV_HOROLOGIVM: fly_worldview(0.0, 0.0, 0.0, 3.5); break;
         case WV_HORAE:      fly_worldview(0.0, 0.0, 0.0, 3.5); break;
+        case WV_ROTAE:      fly_worldview(0.0, 0.0, 0.0, 3.5); break;
+        case WV_SAECVLVM:   fly_worldview(0.0, 0.0, 0.0, 3.5); break;
         case WV_TELLVS:     fly_worldview(1.0, 1.0, 0.0, 3.5); break;
         case WV_MACHINA:    fly_worldview(1.0, 0.0, 1.0, 3.5); break;
         // The machine parks at MACHINA under the fade, so leaving the
@@ -178,6 +189,8 @@ static void apply_view_mode(void) {
     scene_add_layer(&g_scene, VIEW_CLOCK);
     scene_add_layer(&g_scene, VIEW_SKY);
     scene_add_layer(&g_scene, VIEW_HORAE);
+    scene_add_layer(&g_scene, VIEW_ROTAE);
+    scene_add_layer(&g_scene, VIEW_SAEC);
 }
 
 static void set_view_opacities(void) {
@@ -188,8 +201,12 @@ static void set_view_opacities(void) {
     // full strength for the whole flight (the sky view alphas its own
     // elements internally).
     double horae = g_scene.horae_blend;
+    double rotae = g_scene.rotae_blend;
+    double saec = g_scene.saec_blend;
     double fade = (1.0 - tempus_smoothstep(0.0, 0.55, sky))
-                * (1.0 - tempus_smoothstep(0.0, 0.55, horae));
+                * (1.0 - tempus_smoothstep(0.0, 0.55, horae))
+                * (1.0 - tempus_smoothstep(0.0, 0.55, rotae))
+                * (1.0 - tempus_smoothstep(0.0, 0.55, saec));
     // The calendar wheel survives into the sky as its bezel — the time
     // control rides along to every worldview
     g_scene.views[VIEW_CALENDAR].opacity = 1.0;
@@ -203,6 +220,8 @@ static void set_view_opacities(void) {
     g_scene.views[VIEW_CLOCK].opacity = clock_vis * fade;
     g_scene.views[VIEW_SKY].opacity = sky > 0.001 ? 1.0 : 0.0;
     g_scene.views[VIEW_HORAE].opacity = horae;
+    g_scene.views[VIEW_ROTAE].opacity = rotae;
+    g_scene.views[VIEW_SAEC].opacity = saec;
 }
 
 // Pacing: vsync drives the frame callback, but update/rebuild work only
@@ -273,6 +292,9 @@ static void config_load(TempusConfig *cfg) {
         else if (strcmp(key, "timezone_auto") == 0) cfg->timezone_auto = val != 0;
         else if (strcmp(key, "alternate_names") == 0) cfg->use_alternate_names = val != 0;
         else if (strcmp(key, "sweep_seconds") == 0) g_cfg_sweep_override = (val != 0) ? 1 : 0;
+        else if (strcmp(key, "birth_year") == 0)  cfg->birth_year = (int)val;
+        else if (strcmp(key, "birth_month") == 0) cfg->birth_month = (int)val;
+        else if (strcmp(key, "birth_day") == 0)   cfg->birth_day = (int)val;
     }
     fclose(f);
 }
@@ -294,6 +316,11 @@ static void config_save(const TempusConfig *cfg) {
     fprintf(f, "sweep_seconds = %d\n", g_scene.style.sweep_seconds ? 1 : 0);
     if (g_cfg_tz_name[0])
         fprintf(f, "timezone_name = %s\n", g_cfg_tz_name);
+    if (cfg->birth_year > 0) {
+        fprintf(f, "birth_year = %d\n", cfg->birth_year);
+        fprintf(f, "birth_month = %d\n", cfg->birth_month);
+        fprintf(f, "birth_day = %d\n", cfg->birth_day);
+    }
     fclose(f);
 }
 #else
@@ -522,6 +549,8 @@ static void init(void) {
     scene_register_view(&g_scene, VIEW_ORRERY,    &orrery_vtable);
     scene_register_view(&g_scene, VIEW_SKY,       &sky_vtable);
     scene_register_view(&g_scene, VIEW_HORAE,     &horae_vtable);
+    scene_register_view(&g_scene, VIEW_ROTAE,     &rotae_vtable);
+    scene_register_view(&g_scene, VIEW_SAEC,      &saec_vtable);
     scene_init_views(&g_scene, &g_tempus);
 
     if (g_cfg_sweep_override >= 0)
@@ -541,6 +570,14 @@ static void init(void) {
         g_scene.system_blend = 1.0;
         g_scene.calendar_state.zoom = 0.0;
         g_scene.calendar_state.target_zoom = 0.0;
+    }
+    if (getenv("TEMPUS_ROTAE")) {
+        g_worldview = WV_ROTAE;
+        g_scene.rotae_blend = 1.0;
+    }
+    if (getenv("TEMPUS_SAECVLVM")) {
+        g_worldview = WV_SAECVLVM;
+        g_scene.saec_blend = 1.0;
     }
     if (getenv("TEMPUS_HORAE")) {
         g_worldview = WV_HORAE;

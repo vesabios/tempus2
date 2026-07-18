@@ -15,6 +15,8 @@
 #include "views/view_orrery.h"
 #include "views/view_sky.h"
 #include "views/view_horae.h"
+#include "views/view_rotae.h"
+#include "views/view_saec.h"
 
 // ---- Transitions ----
 
@@ -47,7 +49,7 @@ static inline PacePolicy pace_default(void) {
 
 // ---- Scene ----
 
-#define SCENE_MAX_LAYERS  6
+#define SCENE_MAX_LAYERS  10
 #define SCENE_MAX_CYCLE  16
 
 struct Scene {
@@ -61,6 +63,8 @@ struct Scene {
     OrreryViewState   orrery_state;
     SkyViewState      sky_state;
     HoraeViewState    horae_state;
+    RotaeViewState    rotae_state;
+    SaecViewState     saec_state;
 
     // Active layer stack (back to front)
     ViewId      layers[SCENE_MAX_LAYERS];
@@ -105,6 +109,11 @@ struct Scene {
     // the HOROLOGIVM station: the clock furniture fades and the
     // temporal-hours dial takes the center; the wheel stays outside.
     double      horae_blend;
+
+    // The other overlay stations off HOROLOGIVM: the nested cycle
+    // wheels (ROTAE) and the years of a life (SAECVLVM)
+    double      rotae_blend;
+    double      saec_blend;
 };
 
 // Now Scene is defined — include view function implementations
@@ -115,6 +124,8 @@ struct Scene {
 #include "views/view_orrery.h"
 #include "views/view_sky.h"
 #include "views/view_horae.h"
+#include "views/view_rotae.h"
+#include "views/view_saec.h"
 
 // ---- Layer management ----
 
@@ -189,6 +200,8 @@ static inline void scene_init(Scene *sc, const Tempus *t) {
     sc->views[VIEW_ORRERY].state   = &sc->orrery_state;
     sc->views[VIEW_SKY].state      = &sc->sky_state;
     sc->views[VIEW_HORAE].state    = &sc->horae_state;
+    sc->views[VIEW_ROTAE].state    = &sc->rotae_state;
+    sc->views[VIEW_SAEC].state     = &sc->saec_state;
 }
 
 static inline void scene_register_view(Scene *sc, ViewId id, const ViewVtable *vt) {
@@ -399,7 +412,8 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         // through month text), excluding the globe's interior. Helio only
         // — in geo the wheel doesn't pan, so dragging feels broken —
         // plus the fixed-wheel stations (HORAE) where it maps 1:1.
-        if (sc->helio_blend > 0.5 || sc->horae_blend > 0.5) {
+        if (sc->helio_blend > 0.5 || sc->horae_blend > 0.5
+            || sc->rotae_blend > 0.5 || sc->saec_blend > 0.5) {
             float base_w = (float)tempus_wheel_radius(
                 sc->style.calendar_base_radius, sc->system_blend,
                 sc->sky_blend);
@@ -441,7 +455,8 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
             float dxf = wx - c->last_wx, dyf = wy - c->last_wy;
             float along = dxf * tx + dyf * ty;
             double dv;
-            if (sys || sc->horae_blend > 0.5) {
+            if (sys || sc->horae_blend > 0.5 || sc->rotae_blend > 0.5
+                || sc->saec_blend > 0.5) {
                 // System view: the wheel is fixed and the EARTH is what
                 // moves — the pointer/planet follows the finger, arc
                 // length mapping 1:1 to angle at the band radius. (The
@@ -512,7 +527,7 @@ static inline double scene_desired_fps(const Scene *sc) {
             return sc->pace.animate_fps;
 
         if (v->opacity <= 0.001) continue;
-        if (v->id == VIEW_CLOCK) {
+        if (v->id == VIEW_CLOCK || v->id == VIEW_ROTAE) {
             double f = sc->style.sweep_seconds ? sc->pace.sweep_fps
                                                : sc->pace.tick_fps;
             if (f > fps) fps = f;

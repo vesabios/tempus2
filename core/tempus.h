@@ -27,6 +27,11 @@ typedef struct {
     bool   timezone_auto;   // derive timezone from the system clock (w/ DST)
     double elevation;       // meters
     bool   use_alternate_names;
+    // SAECVLVM: with a birth date the century ring becomes the ninety
+    // years of a life (0 = unset, show the current century)
+    int    birth_year;
+    int    birth_month;
+    int    birth_day;
 } TempusConfig;
 
 static inline TempusConfig tempus_default_config(void) {
