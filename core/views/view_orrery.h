@@ -316,11 +316,26 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     double orbis_jd = tv->jd_current + tv->percent_of_day - 0.5
                     - t->config.timezone / 24.0;
     if (ob > 0.001f) {
-        // The globe holds still, observer-face-on — home under the
-        // reticle. Scrubbing the hour moves the DAY across it: the
-        // sun, the terminator, and the analemma sweep the surface
-        // while the rotation stays fixed.
-        //
+        // Physical light: the subsolar point lives in the EARTH frame
+        // (declination, RA minus Greenwich sidereal time) — none of it
+        // depends on the observer, so the terminator stays glued to
+        // the planet no matter where the globe is dragged. The base
+        // az/zen light is the observer's-sky frame: it is only valid
+        // for the location it was computed at, and under a fast drag
+        // it lags and smears the sun across impossible latitudes.
+        {
+            double slon = (t->solar.alpha - t->solar.nu) * M_PI / 180.0;
+            double sla = t->solar.delta * M_PI / 180.0;
+            float sun_earth[3] = {
+                (float)(cos(sla) * cos(slon)),
+                (float)(cos(sla) * sin(slon)),
+                (float)(sin(sla)),
+            };
+            float lo[3];
+            globe_mat_mul_vec(rot, sun_earth, lo);
+            globe_vec_nlerp(light, lo, obf, light);
+        }
+
         // Slow-release closeup: composed with a station flight, a
         // linear release lets the closeup collapse faster than the base
         // morph grows the destination globe (the base radius stays
