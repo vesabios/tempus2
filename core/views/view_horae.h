@@ -459,7 +459,9 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         // the contact — it points AT the ruling planet's tooth
         float px2 = -hdy, py2 = hdx;
         float hw = 5.0f;
-        float h0 = 16.0f, h1 = HORAE_CLOCK_R - 10.0f;
+        // The hands hold off the center, as on the 12-hour face — the
+        // hub is negative space
+        float h0 = 46.0f, h1 = HORAE_CLOCK_R - 10.0f;
         draw_set_color(d, s->hours_color);
         int vb = d->num_verts;
         draw__push_vert(d, hdx * h0 - px2 * hw, hdy * h0 - py2 * hw,
@@ -478,12 +480,10 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             : (double)tv->secs / 60.0;
         float sa2 = (float)(real_secs * 2.0 * M_PI);
         draw_set_color(d, s->seconds_color);
-        draw_line(d, 0, 0,
+        draw_line(d, sinf(sa2) * 46.0f, -cosf(sa2) * 46.0f,
                   sinf(sa2) * (HORAE_CLOCK_R - HORAE_CLOCK_W - 10.0f),
                   -cosf(sa2) * (HORAE_CLOCK_R - HORAE_CLOCK_W - 10.0f),
                   1.5f);
-        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.6f));
-        draw_circle_filled(d, 0, 0, 3.0f);
     }
 
     // ---- The reading, written outside the ring at the contact ----
