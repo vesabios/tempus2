@@ -138,14 +138,17 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->blend = sc->sky_blend;
     if (st->blend < 0.001) return;
 
-    // CAELVM pins the STAR FIELD to the date's local mean solar
-    // midnight: every celestial object, path, and line holds still in
-    // frame. The running hour lives in the VISIBLE WINDOW instead (see
-    // render) — the horizon of the current instant sliding across the
-    // fixed sky. The wheel scrubs both: the date moves the field
-    // slowly, the hour moves only the window.
-    double jd_ut = st->tv.jd_current + 0.5
-                 - t->config.longitude / (15.0 * 24.0);
+    // CAELVM pins the FRAME to the date's local mean solar midnight:
+    // the sky's orientation holds still and the running hour lives in
+    // the VISIBLE WINDOW (see render). The bodies' ORBITAL positions,
+    // though, run on the true fractional instant — the moon glides
+    // its half degree an hour along the fixed ecliptic as the hour
+    // scrubs, instead of freezing all day and lurching at the date
+    // tick. Position at the true instant, frame at midnight.
+    double jd_mid = st->tv.jd_current + 0.5
+                  - t->config.longitude / (15.0 * 24.0);
+    double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
+                 - t->config.timezone / 24.0;
     if (fabs(jd_ut - st->cache_jd) <= 1.0 / 1440.0) return;
     st->cache_jd = jd_ut;
 
@@ -156,13 +159,14 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     for (int b = 0; b < BODY_COUNT; b++) {
         double blon, blat, az, alt;
         planets__body_lonlat(b, jd_ut, &blon, &blat);
-        planets_sky_azalt(blon, blat, jd_ut, lat, lon, &az, &alt);
+        planets_sky_azalt(blon, blat, jd_mid, lat, lon, &az, &alt);
         st->body_az[b] = (float)az;
         st->body_alt[b] = (float)alt;
 
-        // Diurnal arc: the body's whole day across the bowl
+        // Diurnal arc: the body's whole day across the bowl (frame
+        // furniture — anchored to the midnight chart)
         for (int i = 0; i < SKY_PATH_N; i++) {
-            double jd = jd_ut + (i - SKY_PATH_N / 2) * 0.5 / 24.0;
+            double jd = jd_mid + (i - SKY_PATH_N / 2) * 0.5 / 24.0;
             planets__body_lonlat(b, jd, &blon, &blat);
             planets_sky_azalt(blon, blat, jd, lat, lon, &az, &alt);
             st->path[b][i][0] = (float)az;
@@ -173,14 +177,14 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     // The ecliptic's current lie across the sky + the sign cusps
     for (int i = 0; i < SKY_ECL_N; i++) {
         double az, alt;
-        planets_sky_azalt(i * 360.0 / SKY_ECL_N, 0.0, jd_ut, lat, lon,
+        planets_sky_azalt(i * 360.0 / SKY_ECL_N, 0.0, jd_mid, lat, lon,
                           &az, &alt);
         st->ecl_az[i] = (float)az;
         st->ecl_alt[i] = (float)alt;
     }
     for (int i = 0; i < 12; i++) {
         double az, alt;
-        planets_sky_azalt(i * 30.0, 0.0, jd_ut, lat, lon, &az, &alt);
+        planets_sky_azalt(i * 30.0, 0.0, jd_mid, lat, lon, &az, &alt);
         st->sign_az[i] = (float)az;
         st->sign_alt[i] = (float)alt;
     }
