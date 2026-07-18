@@ -408,7 +408,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
 
     if (phase == 0) {
         // ORBIS: grab the planet and turn it under the reticle — this
-        // is the location picker, live and deliberate. Hit-tests the
+        // is the location picker AND the hour control. Hit-tests the
         // orrery's LIVE published globe (position and size mid-flight
         // included), so the grab is honest even during the closeup tween.
         if (sc->orbis_blend > 0.5) {
@@ -417,6 +417,10 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 ob->dragging = true;
                 ob->last_wx = wx;
                 ob->last_wy = wy;
+                c->fling_vel = 0;    // grabbing the planet stops the flywheel
+                c->drag_accum = 0;
+                c->fling_keep_time = false;
+                scene__begin_override(t);
                 return;
             }
         }
@@ -494,9 +498,11 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 c->last_wy = wy;
                 c->fling_vel = 0;    // grabbing stops the flywheel
                 c->drag_accum = 0;
-                // In HORAE the band scrubs whole days (the ring is the
-                // hour control); elsewhere it scrubs fractionally
-                c->fling_keep_time = sc->horae_blend > 0.5;
+                // In HORAE and ORBIS the band scrubs whole days (the
+                // ring / the globe is the hour control); elsewhere it
+                // scrubs fractionally
+                c->fling_keep_time = sc->horae_blend > 0.5
+                                  || sc->orbis_blend > 0.5;
                 scene__begin_override(t);
             }
         }
@@ -542,10 +548,16 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         c->last_wx = wx;
         c->last_wy = wy;
     } else if (phase == 1 && ob->dragging) {
-        // Trackball: the surface follows the finger (near the reticle,
-        // one world unit = 1/R radians of arc). Dragging down brings
-        // northern land to the reticle, dragging right brings the west
-        // around, arc widened to longitude by the shrinking parallels.
+        // Trackball, axes split. Vertical: latitude — northern land
+        // comes down to the reticle (near center, one world unit = 1/R
+        // radians of arc). Horizontal: the planet TURNS — and turning
+        // the earth IS the passage of hours, so the manual clock rides
+        // the rotation at the physical rate, 15 degrees to the hour.
+        // Local solar time at the reticle is invariant under that
+        // coupling, so the terminator holds still in view while the
+        // surface parades beneath it: you are hovering sun-fixed,
+        // watching the world turn. Dragging to a new meridian lands
+        // you there at THAT place's hour.
         float R = o->glob_r > 1.0f ? o->glob_r : 355.0f;
         float ddx = wx - ob->last_wx, ddy = wy - ob->last_wy;
         double k = (180.0 / M_PI) / R;
@@ -554,10 +566,12 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         if (lat < -85.0) lat = -85.0;
         double cl = cos(lat * M_PI / 180.0);
         if (cl < 0.15) cl = 0.15;
-        double lon = t->config.longitude - (double)ddx * k / cl;
+        double dlon = -(double)ddx * k / cl;
+        double lon = t->config.longitude + dlon;
         while (lon > 180.0) lon -= 360.0;
         while (lon < -180.0) lon += 360.0;
         tempus_set_location(t, lat, lon);
+        scene__advance_override_days(t, -dlon / 15.0 / 24.0, false);
         ob->last_wx = wx;
         ob->last_wy = wy;
     } else if (phase == 1 && ho->ring_dragging) {
