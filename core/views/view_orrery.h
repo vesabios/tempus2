@@ -905,8 +905,9 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             }
             // Brighter at the closeup: the 3D path must read against
             // both the lit disc and the black beyond
-            draw_set_color(d, dca(0.62f, 0.60f, 0.56f,
-                                  0.20f + 0.20f * obf));
+            // Assertive at the closeup, quiet at the stations
+            draw_set_color(d, dca(0.64f, 0.62f, 0.58f,
+                                  0.20f + 0.35f * obf));
             for (int k = 0; k < ORB_N; k++) {
                 float mzk = (oz[k] + oz[k + 1]) * 0.5f;
                 float fseg = 1.0f;
