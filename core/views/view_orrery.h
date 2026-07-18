@@ -737,10 +737,14 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float mx0 = ex + lx * earth_r * lift, my0 = ey + ly * earth_r * lift;
         float mag = sqrtf(lx * lx + ly * ly);
 
-        // The departure: bead position -> wheel center, marker size ->
-        // the anchoring disc, marker gold -> the sun's own gold
-        float px = mx0 + (sun_x - mx0) * ss;
-        float py = my0 + (sun_y - my0) * ss;
+        // The departure: bead position -> the wheel's center, marker
+        // size -> the anchoring disc, marker gold -> the sun's own
+        // gold. The path aims at the ORIGIN (its final home) rather
+        // than the live wheel center, which at TELLVS lies thousands
+        // of units off-screen — the sun stays on stage for the whole
+        // flight.
+        float px = mx0 * (1.0f - ss);
+        float py = my0 * (1.0f - ss);
         float msz = s->sun_size * earth_r / dial_r;
         float sz = msz + (32.0f - msz) * ss;
         sun_c.r = sun_c.r + (196.0f / 255.0f - sun_c.r) * ss;
@@ -758,11 +762,33 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         d->alpha = base_alpha;
         draw_set_color(d, sun_c);
         draw_circle_filled(d, px, py, sz);
-        // The corona ring engraves itself as the sun takes the throne
+        // The corona ring and the sun in splendour — the historical
+        // triangular rays, alternating long and short — engrave
+        // themselves as the sun takes the throne
         if (ss > 0.001f) {
             d->alpha = base_alpha * ss;
             draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
             draw_circle_stroked(d, px, py, sz * 28.0f / 22.0f, 1.0f);
+
+            draw_set_color(d, dca(0.72f, 0.46f, 0.08f, 0.75f));
+            for (int i = 0; i < 12; i++) {
+                float a = (float)i / 12.0f * 2.0f * (float)M_PI;
+                float ux = sinf(a), uy = -cosf(a);
+                float qx = cosf(a), qy = sinf(a);   // base tangent
+                float rb = sz * 1.32f;
+                float rt = sz * ((i & 1) ? 1.52f : 1.78f);
+                float half = sz * 0.13f;
+                int vb = d->num_verts;
+                draw__push_vert(d, px + ux * rt, py + uy * rt,
+                                d->white_u, d->white_v);
+                draw__push_vert(d, px + ux * rb - qx * half,
+                                py + uy * rb - qy * half,
+                                d->white_u, d->white_v);
+                draw__push_vert(d, px + ux * rb + qx * half,
+                                py + uy * rb + qy * half,
+                                d->white_u, d->white_v);
+                draw__tri(d, vb, vb + 1, vb + 2);
+            }
             d->alpha = base_alpha;
         }
 
