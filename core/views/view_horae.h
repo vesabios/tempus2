@@ -263,26 +263,25 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     {
         double daypos = w + tv->percent_of_day;   // continuous day-of-week
         for (int i = 0; i < 7; i++) {
-            // Sector center rides the strip; today's center meets the
-            // pointer exactly at noon
-            float ctr = 0.5f + (float)((i + 0.5 - daypos) / 7.0);
+            // Sector center rides the strip (tomorrow approaches from
+            // the other side now); today's center meets the pointer
+            // exactly at noon
+            float ctr = 0.5f - (float)((i + 0.5 - daypos) / 7.0);
             float a0 = (ctr - 0.5f / 7.0f) * 2.0f * (float)M_PI
                      - (float)M_PI * 0.5f;
             float a1 = a0 + (1.0f / 7.0f) * 2.0f * (float)M_PI;
             const uint8_t *c =
                 orr__body_col[horae__chaldean_body[horae__day_ruler[i]]];
+            bool today = i == w;
 
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
-                                  c[2] / 255.0f, 0.10f));
+                                  c[2] / 255.0f, today ? 0.20f : 0.10f));
             draw_arc_filled(d, 0, 0, HORAE_WK0, HORAE_WK1, a0, a1, 10);
 
             float mid = ctr * 2.0f * (float)M_PI;
-            draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
-                                  c[2] / 255.0f, 0.55f));
-            draw_circle_filled(d, sinf(mid) * (HORAE_WK0 + 11.0f),
-                               -cosf(mid) * (HORAE_WK0 + 11.0f), 3.5f);
-
-            draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.45f));
+            draw_set_color(d, today
+                ? dca(0.78f, 0.75f, 0.68f, 0.95f)
+                : dca(0.55f, 0.53f, 0.49f, 0.45f));
             draw_text_curved(d, FONT_date, 0, 0, HORAE_WK0 + 24.0f,
                              mid, horae__dies[i], 0.6f, 0.9f);
         }
