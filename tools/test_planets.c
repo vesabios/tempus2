@@ -147,6 +147,40 @@ int main(void) {
               "Sun near 26 Cancer", geo[BODY_SUN], 115.8, 1.0);
     }
 
+    // ---- Sun altitude vs SPA (validates the whole horizon pipeline:
+    //      equatorial conversion + sidereal time + hour angle) ----
+    printf("Sun altitude vs SPA (Berlin):\n");
+    {
+        double worst_alt = 0;
+        for (int i = 0; i < 60; i++) {
+            int y = 2004 + (i * 5) % 22;
+            int m = 1 + (i * 7) % 12;
+            int d = 3 + (i * 13) % 25;
+            double hh = (i * 29) % 24;
+            spa_data s;
+            memset(&s, 0, sizeof(s));
+            s.year = y; s.month = m; s.day = d;
+            s.hour = (int)hh; s.minute = 0; s.second = 0;
+            s.timezone = 0;
+            s.delta_ut1 = 0; s.delta_t = 67;
+            s.longitude = 13.405; s.latitude = 52.52;
+            s.elevation = 0; s.pressure = 0; s.temperature = 11;
+            s.atmos_refract = 0;   // geometric, to match our pipeline
+            s.function = SPA_ALL;
+            spa_calculate(&s);
+            double alt_spa = 90.0 - s.zenith;
+
+            PlanetsNow pn;
+            PlanetsSky sk;
+            planets_compute(&pn, jd_ut(y, m, d, hh));
+            planets_sky_compute(&sk, &pn, 52.52, 13.405);
+            double err = fabs(sk.alt[BODY_SUN] - alt_spa);
+            if (err > worst_alt) worst_alt = err;
+        }
+        check(worst_alt < 0.3, "max |sun alt - SPA| over 60 samples",
+              worst_alt, 0.0, 0.3);
+    }
+
     // ---- Aspect finder smoke test ----
     printf("Aspect finder:\n");
     {

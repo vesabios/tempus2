@@ -181,6 +181,16 @@ static inline double planets_moon_lon(double jd_ut) {
     return planets__wrap360(lam);
 }
 
+// Geocentric ecliptic latitude of the Moon (deg) — companion series
+static inline double planets_moon_lat(double jd_ut) {
+    double T = (jd_ut - 2451545.0) / 36525.0;
+    double d2r = M_PI / 180.0;
+    return 5.13 * sin((93.3 + 483202.03 * T) * d2r)
+         + 0.28 * sin((228.2 + 960400.87 * T) * d2r)
+         - 0.28 * sin((318.3 + 6003.18 * T) * d2r)
+         - 0.17 * sin((217.6 - 407332.20 * T) * d2r);
+}
+
 // ---- The whole sky at one moment ----
 
 typedef struct {
@@ -235,6 +245,75 @@ static inline void planets_compute(PlanetsNow *pn, double jd_ut) {
     planets__geo_lons(jd_ut + 0.5, after);
     for (int b = 0; b < BODY_COUNT; b++)
         pn->retro[b] = planets_lon_diff(after[b], before[b]) < 0.0;
+}
+
+// ---- The local sky: who is above the horizon ----
+// Geocentric ecliptic -> equatorial -> horizon, via Greenwich sidereal
+// time. Answers "which of these bodies is up right now" for an observer
+// at (lat, lon). Moon parallax (<1 deg) is ignored — this feeds a dial,
+// not a telescope.
+
+// Greenwich mean sidereal time, degrees
+static inline double planets__gmst(double jd_ut) {
+    double D = jd_ut - 2451545.0;
+    double T = D / 36525.0;
+    return planets__wrap360(280.46061837 + 360.98564736629 * D
+                            + 0.000387933 * T * T);
+}
+
+// Altitude (deg) of a sky position given in ecliptic-of-date lon/lat
+static inline double planets_sky_altitude(double lon_deg, double lat_deg,
+                                          double jd_ut,
+                                          double obs_lat_deg,
+                                          double obs_lon_deg) {
+    double d2r = M_PI / 180.0;
+    double T = (jd_ut - 2451545.0) / 36525.0;
+    double eps = (23.439291 - 0.0130042 * T) * d2r;
+    double lam = lon_deg * d2r, bet = lat_deg * d2r;
+
+    double sdec = sin(bet) * cos(eps) + cos(bet) * sin(eps) * sin(lam);
+    double dec = asin(sdec);
+    double ra = atan2(sin(lam) * cos(eps) - tan(bet) * sin(eps), cos(lam));
+
+    double lst = (planets__gmst(jd_ut) + obs_lon_deg) * d2r;
+    double H = lst - ra;   // hour angle
+    double phi = obs_lat_deg * d2r;
+    double salt = sin(phi) * sdec + cos(phi) * cos(dec) * cos(H);
+    return asin(salt) / d2r;
+}
+
+typedef struct {
+    double alt[BODY_COUNT];    // altitude of each body, deg
+    // Altitude of the ecliptic itself, sampled every 5 deg of longitude
+    // (72 samples): the horizon's cut through the zodiac dial
+    float  ecl_alt[72];
+} PlanetsSky;
+
+static inline void planets_sky_compute(PlanetsSky *sky, const PlanetsNow *pn,
+                                       double obs_lat_deg,
+                                       double obs_lon_deg) {
+    double jd_ut = pn->jd_ut;
+    double e[3];
+    planets_helio_xyz(PL_EARTH, jd_ut, e);
+
+    for (int b = 0; b < BODY_COUNT; b++) {
+        double blat = 0.0;
+        if (b == BODY_MOON) {
+            blat = planets_moon_lat(jd_ut);
+        } else if (b != BODY_SUN) {
+            double p[3];
+            planets_helio_xyz(planets_body_pl(b), jd_ut, p);
+            double dx = p[0] - e[0], dy = p[1] - e[1], dz = p[2] - e[2];
+            double dr = sqrt(dx * dx + dy * dy + dz * dz);
+            if (dr > 1e-9) blat = asin(dz / dr) * 180.0 / M_PI;
+        }
+        sky->alt[b] = planets_sky_altitude(pn->geo_lon[b], blat, jd_ut,
+                                           obs_lat_deg, obs_lon_deg);
+    }
+    for (int i = 0; i < 72; i++)
+        sky->ecl_alt[i] = (float)planets_sky_altitude(i * 5.0, 0.0, jd_ut,
+                                                      obs_lat_deg,
+                                                      obs_lon_deg);
 }
 
 // ---- Aspects ----

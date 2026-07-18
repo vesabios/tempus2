@@ -49,6 +49,7 @@ struct OrreryViewState {
 
     // Full-system ephemeris (recomputed when the clock minute moves)
     PlanetsNow planets;
+    PlanetsSky sky;
     Aspect     aspects[PLANETS_MAX_ASPECTS];
     int        num_aspects;
     double     planets_jd;
@@ -175,6 +176,8 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
                      - t->config.timezone / 24.0;
         if (fabs(jd_ut - st->planets_jd) > 1.0 / 1440.0) {
             planets_compute(&st->planets, jd_ut);
+            planets_sky_compute(&st->sky, &st->planets,
+                                t->config.latitude, t->config.longitude);
             st->num_aspects = planets_find_aspects(st->planets.geo_lon,
                                                    st->aspects,
                                                    PLANETS_MAX_ASPECTS);
@@ -327,6 +330,63 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 draw_text_curved(d, FONT_month, 0, 0, ORR_ZODIAC_TEXT,
                                  ang, orr__sign_names[i], 1.6f, 0.85f);
             }
+
+            // ---- The local horizon, cut through the zodiac ----
+            // The horizon great circle crosses the ecliptic at two
+            // opposite points (the chart's ascendant axis). The arc of
+            // the zodiac below the horizon is shaded in the moat —
+            // "under the earth" — and wheels around once per day.
+            // Answers: which of these bodies is over MY horizon now.
+            {
+                // Ascendant: degrees past it have yet to rise, so
+                // altitude falls through zero as longitude increases.
+                // Descendant: the opposite crossing.
+                double lam_asc = -1.0, lam_dsc = -1.0;
+                for (int i = 0; i < 72; i++) {
+                    float a0 = st->sky.ecl_alt[i];
+                    float a1 = st->sky.ecl_alt[(i + 1) % 72];
+                    if (a0 > 0 && a1 <= 0)
+                        lam_asc = (i + a0 / (a0 - a1)) * 5.0;
+                    else if (a0 <= 0 && a1 > 0)
+                        lam_dsc = (i + a0 / (a0 - a1)) * 5.0;
+                }
+                if (lam_asc >= 0 && lam_dsc >= 0) {
+                    double l0 = lam_asc;             // below-horizon arc:
+                    double l1 = lam_dsc;             // ASC -> DSC
+                    if (l1 < l0) l1 += 360.0;
+                    float ba0 = (float)((0.75 + l0 / 360.0) * 2.0 * M_PI
+                                        - M_PI * 0.5);
+                    float ba1 = (float)((0.75 + l1 / 360.0) * 2.0 * M_PI
+                                        - M_PI * 0.5);
+                    draw_set_color(d, dca(0.25f, 0.10f, 0.07f, 0.30f));
+                    draw_arc_filled(d, 0, 0, ORR_WEB_R - 78.0f,
+                                    ORR_WEB_R - 8.0f, ba0, ba1, 64);
+
+                    // Ascendant axis: ticks at both crossings, the
+                    // rising end named
+                    for (int k = 0; k < 2; k++) {
+                        double lam = k ? lam_asc : lam_dsc;
+                        float dx, dy;
+                        orr__ecl_dir(lam, &dx, &dy);
+                        draw_set_color(d, dca(0.60f, 0.55f, 0.48f, 0.55f));
+                        draw_line(d, dx * (ORR_WEB_R - 82.0f),
+                                  dy * (ORR_WEB_R - 82.0f),
+                                  dx * (ORR_WEB_R - 4.0f),
+                                  dy * (ORR_WEB_R - 4.0f), 1.0f);
+                    }
+                    {
+                        float dx, dy;
+                        orr__ecl_dir(lam_asc, &dx, &dy);
+                        int aw = _font_compat[FONT_seconds].weight;
+                        float tw = sdf_measure_width(aw, "ASC") * 13.0f;
+                        draw_set_color(d, dca(0.60f, 0.55f, 0.48f, 0.65f));
+                        draw_text_ex(d, aw, 13.0f,
+                                     dx * (ORR_WEB_R - 100.0f) - tw * 0.5f,
+                                     dy * (ORR_WEB_R - 100.0f) - 6.5f,
+                                     "ASC");
+                    }
+                }
+            }
         }
 
         // Sight-lines: from Earth, through the body, to where it lands in
@@ -406,15 +466,26 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             d->alpha = base_alpha;
         }
 
-        // Geocentric markers on the dial + the classic retrograde R
+        // Geocentric markers on the dial + the classic retrograde R.
+        // Marker state reads visibility: filled = above the observer's
+        // horizon, hollow = set; up-markers wash out while the sun is up
+        // (nothing outshines daylight — except the sun, whose own marker
+        // simply follows the same rule: filled by day, hollow by night).
         if (a_zod > 0.001f) {
-            d->alpha = base_alpha * a_zod;
             int rw = _font_compat[FONT_seconds].weight;
+            bool daylight = st->sky.alt[BODY_SUN] > -6.0;   // civil dusk
             for (int b = 0; b < BODY_COUNT; b++) {
+                bool up = st->sky.alt[b] > 0.0;
+                float glare = (daylight && b != BODY_SUN) ? 0.55f : 1.0f;
+                d->alpha = base_alpha * a_zod * (up ? glare : 0.45f);
                 draw_set_color(d, dca(orr__body_col[b][0] / 255.0f,
                                       orr__body_col[b][1] / 255.0f,
                                       orr__body_col[b][2] / 255.0f, 0.9f));
-                draw_circle_filled(d, mpx[b], mpy[b], 4.0f);
+                if (up)
+                    draw_circle_filled(d, mpx[b], mpy[b], 4.0f);
+                else
+                    draw_circle_stroked(d, mpx[b], mpy[b], 4.0f, 1.0f);
+                d->alpha = base_alpha * a_zod;
                 if (pn->retro[b]) {
                     float dx, dy;
                     orr__ecl_dir(pn->geo_lon[b], &dx, &dy);

@@ -46,6 +46,13 @@ the sacred divisions (conjunction, sextile, square, trine, opposition,
 plus the minors), brightening as the aspect tightens. A grand trine is an
 equilateral triangle drawn across the whole instrument, live.
 
+The local horizon cuts through the dial as the chart's ascendant axis:
+the below-horizon arc of the zodiac shades dark in the moat and wheels
+around once a day, and each body's marker answers "can I see it right
+now" — filled above your horizon, hollow once set, washed out while the
+sun is up. Sky math (equatorial conversion + sidereal time) is validated
+against SPA to arcminutes.
+
 Solar math is NREL's SPA (`core/spa.c`); sunrise/sunset via `core/sunset.h`.
 The instrument is astronomically honest: the clock shows machine wall time,
 the globe shows the truth for the configured coordinates at this absolute
