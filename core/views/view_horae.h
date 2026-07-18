@@ -251,14 +251,41 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_circle_stroked(d, 0, 0, HORAE_WK1, 1.0f);
     }
 
-    // ---- The hand of now ----
+    // ---- The hands: this IS a clock face ----
+    // The day hand wears the 12-hour face's hour-hand dress (same width,
+    // color, and start radius) but makes one revolution per day; the
+    // seconds hand carries over unchanged, the familiar red pulse that
+    // says "clock" at a glance.
     {
-        float pct = horae__pct(now);
-        float sx = sinf(pct * 2.0f * (float)M_PI);
-        float sy = -cosf(pct * 2.0f * (float)M_PI);
-        draw_set_color(d, dc_scale(s->sunrise_handle, 1.0f));
-        draw_line(d, sx * 60.0f, sy * 60.0f,
-                  sx * (HORAE_R0 - 4.0f), sy * (HORAE_R0 - 4.0f), 1.4f);
+        float angle = (float)(now * 2.0 * M_PI);
+        float dx = sinf(angle), dy = -cosf(angle);
+        float px2 = -dy, py2 = dx;
+        float hw = s->hours_width * 0.5f;
+        float h0 = s->hours_start;
+        float h1 = HORAE_R0 - 36.0f;
+        draw_set_color(d, s->hours_color);
+        float corners[4][2] = {
+            { dx * h0 - px2 * hw, dy * h0 - py2 * hw },
+            { dx * h0 + px2 * hw, dy * h0 + py2 * hw },
+            { dx * h1 + px2 * hw, dy * h1 + py2 * hw },
+            { dx * h1 - px2 * hw, dy * h1 - py2 * hw },
+        };
+        int vbase = d->num_verts;
+        for (int j = 0; j < 4; j++)
+            draw__push_vert(d, corners[j][0], corners[j][1],
+                            d->white_u, d->white_v);
+        draw__tri(d, vbase, vbase + 1, vbase + 2);
+        draw__tri(d, vbase, vbase + 2, vbase + 3);
+    }
+    {
+        double real_secs = s->sweep_seconds
+            ? ((double)tv->secs + tv->frac_secs) / 60.0
+            : (double)tv->secs / 60.0;
+        float a = (float)(real_secs * 2.0 * M_PI);
+        float dx = sinf(a), dy = -cosf(a);
+        draw_set_color(d, s->seconds_color);
+        draw_line(d, dx * s->seconds_start, dy * s->seconds_start,
+                  dx * (HORAE_R0 - 12.0f), dy * (HORAE_R0 - 12.0f), 1.5f);
     }
 
     // ---- Center readout: whose hour is this ----

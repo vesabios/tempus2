@@ -527,7 +527,8 @@ static inline double scene_desired_fps(const Scene *sc) {
             return sc->pace.animate_fps;
 
         if (v->opacity <= 0.001) continue;
-        if (v->id == VIEW_CLOCK || v->id == VIEW_ROTAE) {
+        if (v->id == VIEW_CLOCK || v->id == VIEW_ROTAE
+            || v->id == VIEW_HORAE) {
             double f = sc->style.sweep_seconds ? sc->pace.sweep_fps
                                                : sc->pace.tick_fps;
             if (f > fps) fps = f;
