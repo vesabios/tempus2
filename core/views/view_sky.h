@@ -255,7 +255,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             float m2 = (float)tempus_smoothstep(0.0015, 0.012, dA);
             sw2->win_motion = m2 > st->win_motion
                             ? m2
-                            : st->win_motion * 0.90f + m2 * 0.10f;
+                            : st->win_motion * 0.93f + m2 * 0.07f;
         }
         double phi = t->config.latitude * M_PI / 180.0;
         float px = 0.0f, py = (float)cos(phi), pz = (float)sin(phi);
@@ -302,7 +302,11 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
         draw_circle_filled(d, 0, 0, SKY_R);
         // The visible sky: the WINDOW, fan-filled from the current
-        // zenith, breathing with the (midnight) sun
+        // zenith, breathing with the (midnight) sun. In MOTION the
+        // window vanishes entirely — the sweeping fill reads as
+        // flashing — and fades back once the scrub settles; the
+        // celestial chart carries the scene meanwhile.
+        d->alpha = base_alpha * mb * (1.0f - st->win_motion);
         draw_set_color(d, dca(0.020f + 0.055f * day,
                               0.022f + 0.075f * day,
                               0.035f + 0.130f * day, 1.0f));
@@ -357,10 +361,13 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.20f));
         draw_circle_stroked(d, 0, 0, SKY_R, 1.0f);
         // The zenith cross marks what is overhead NOW — it rides the
-        // hour around the fixed star field with the window
+        // hour around the fixed star field with the window (and hides
+        // with it while the scrub sweeps)
+        d->alpha = base_alpha * fb * (1.0f - st->win_motion);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
         draw_line(d, zwx - 6.0f, zwy, zwx + 6.0f, zwy, 1.0f);
         draw_line(d, zwx, zwy - 6.0f, zwx, zwy + 6.0f, 1.0f);
+        d->alpha = base_alpha * fb;
         d->alpha = base_alpha;
     }
 
@@ -472,7 +479,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     {
         d->alpha = base_alpha * (float)tempus_smoothstep(0.05, 0.5,
                                                          st->blend)
-                 * (1.0f - 0.70f * st->win_motion);
+                 * (1.0f - st->win_motion);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.55f));
         for (int k = 0; k < SKY_WIN_N; k++)
             draw_line(d, lx[k], ly[k], lx[k + 1], ly[k + 1], 1.0f);
@@ -607,7 +614,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
 
     // ---- Compass furniture (riding the moving window rim) ----
     if (fb > 0.001f) {
-        d->alpha = base_alpha * fb * (1.0f - 0.5f * st->win_motion);
+        d->alpha = base_alpha * fb * (1.0f - st->win_motion);
         int cw = _font_compat[FONT_month].weight;
         // az 0/90/180/270 = N/E/S/W; ticks sit ON the window curve,
         // pointing away from the current zenith
