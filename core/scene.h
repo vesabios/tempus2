@@ -416,18 +416,6 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
             float gdx = wx - o->glob_x, gdy = wy - o->glob_y;
             float d2 = gdx * gdx + gdy * gdy;
             if (d2 < 34.0f * 34.0f) {
-                // Grabbing the reticle picks whatever it points at:
-                // fold the accumulated spin into config longitude (the
-                // view is unchanged — home simply becomes the meridian
-                // under the crosshairs) and re-anchor.
-                double jd_ut = o->tv.jd_current + o->tv.percent_of_day
-                             - 0.5 - t->config.timezone / 24.0;
-                double lon = t->config.longitude + o->orbis_spin;
-                while (lon > 180.0) lon -= 360.0;
-                while (lon < -180.0) lon += 360.0;
-                tempus_set_location(t, t->config.latitude, lon);
-                o->orbis_anchor_jd = jd_ut;
-                o->orbis_spin = 0.0;
                 ob->reticle_drag = true;
                 ob->last_wx = wx;
                 ob->last_wy = wy;
@@ -586,17 +574,15 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         ob->last_wx = wx;
         ob->last_wy = wy;
     } else if (phase == 1 && ob->dragging) {
-        // Spinning the planet IS the passage of hours: 15 degrees to
-        // the hour, surface following the finger. The sun-anchored
-        // frame turns the earth as the clock moves, terminator held
-        // still — drag right, and tomorrow comes around the limb.
+        // Dragging the planet scrubs the hour: the globe holds still
+        // and the SUN follows the finger — 15 degrees of surface to
+        // the hour, the terminator sweeping with it. Drag the sun
+        // west and the day advances.
         float R = o->glob_r > 1.0f ? o->glob_r : 355.0f;
         float ddx = wx - ob->last_wx;
         double k = (180.0 / M_PI) / R;
-        double cl = cos(t->config.latitude * M_PI / 180.0);
-        if (cl < 0.15) cl = 0.15;
         scene__advance_override_days(
-            t, (double)ddx * k / cl / 15.0 / 24.0, false);
+            t, -(double)ddx * k / 15.0 / 24.0, false);
         ob->last_wx = wx;
         ob->last_wy = wy;
     } else if (phase == 1 && ho->ring_dragging) {

@@ -49,17 +49,6 @@ struct OrreryViewState {
     bool  earth_pq_valid;
     float moon_pq[4];
     bool  moon_pq_valid;
-    float orbis_pq[4];
-    bool  orbis_pq_valid;
-
-    // ORBIS sun-anchored spin: the view meridian follows display time
-    // (the earth turns 360 deg per day, terminator held still in view).
-    // Anchored when the station is entered; published for the pointer
-    // code (the reticle grab rebases the spin into config longitude).
-    double orbis_anchor_jd;
-    bool   orbis_anchor_valid;
-    double orbis_spin;        // degrees, published each render
-
     // Analemma on the surface: the subsolar point at this same clock
     // time across the year (73 five-day steps)
     float  ana_vec[74][3];
@@ -322,43 +311,16 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     if (ob > 1) ob = 1;
     float obq1 = 1.0f - ob;
     float obf = 1.0f - obq1 * obq1 * obq1 * obq1;
-    // Display instant in UT (same formula as the ephemeris cache)
+    // Display instant in UT (same formula as the ephemeris cache) —
+    // keys the analemma cache
     double orbis_jd = tv->jd_current + tv->percent_of_day - 0.5
                     - t->config.timezone / 24.0;
-    // Subsolar point in the earth frame, straight from SPA: lat is the
-    // declination, lon is RA minus Greenwich sidereal time
-    float sun_earth[3];
-    {
-        double slon = t->solar.alpha - t->solar.nu;
-        double sla = t->solar.delta * M_PI / 180.0;
-        double slo = slon * M_PI / 180.0;
-        sun_earth[0] = (float)(cos(sla) * cos(slo));
-        sun_earth[1] = (float)(cos(sla) * sin(slo));
-        sun_earth[2] = (float)(sin(sla));
-    }
     if (ob > 0.001f) {
-        // Sun-anchored frame: the anchor is taken as the station is
-        // entered (spin 0 = home under the reticle), then the view
-        // meridian rides display time — the earth turns 360 deg per
-        // day while the terminator holds still. Day-clicks on the
-        // wheel rotate an exact 360 and land seamlessly; real time
-        // turns the planet live, a quarter degree a minute.
-        if (!stw->orbis_anchor_valid) {
-            stw->orbis_anchor_jd = orbis_jd;
-            stw->orbis_anchor_valid = true;
-        }
-        double spin = fmod(-360.0 * (orbis_jd - stw->orbis_anchor_jd),
-                           360.0);
-        stw->orbis_spin = spin;
-
-        float orbis_rot[16];
-        globe_rotation(t->config.latitude, t->config.longitude + spin,
-                       orbis_rot);
-        globe_rot_slerp_cont(rot, orbis_rot, obf,
-                             stw->orbis_pq, &stw->orbis_pq_valid, rot);
-        float lo[3];
-        globe_mat_mul_vec(rot, sun_earth, lo);
-        globe_vec_nlerp(light, lo, obf, light);
+        // The globe holds still, observer-face-on — home under the
+        // reticle. Scrubbing the hour moves the DAY across it: the
+        // sun, the terminator, and the analemma sweep the surface
+        // while the rotation stays fixed.
+        //
         // Slow-release closeup: composed with a station flight, a
         // linear release lets the closeup collapse faster than the base
         // morph grows the destination globe (the base radius stays
@@ -379,10 +341,6 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         earth_r += (ORBIS_GLOBE_R - earth_r) * obf;
         geo_a   *= (1.0f - ob);
         helio_a *= (1.0f - ob);
-    } else {
-        stw->orbis_anchor_valid = false;
-        stw->orbis_pq_valid = false;
-        stw->orbis_spin = 0.0;
     }
 
     // ================= UNDER THE GLOBE =================
