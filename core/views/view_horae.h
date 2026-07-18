@@ -50,7 +50,7 @@ struct HoraeViewState {
 // HORAE_ECC + HORAE_RING_OUT + labels, must clear the calendar wheel
 // at 434)
 #define HORAE_CLOCK_R   230.0f   // the fixed day clock, center stage
-#define HORAE_CLOCK_W    50.0f   // its tooth band depth
+#define HORAE_CLOCK_W    28.0f   // its sky band depth
 #define HORAE_RING_IN   296.0f   // week ring inner (touches the clock)
 #define HORAE_RING_OUT  364.0f   // week ring outer
 #define HORAE_ECC (HORAE_RING_IN - HORAE_CLOCK_R)   // eccentricity
@@ -99,6 +99,31 @@ static void horae_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     HoraeViewState *st = (HoraeViewState *)buf;
     (void)t; (void)dt;
     st->blend = sc->horae_blend;
+}
+
+// The sky's own colors, keyed to the sun's altitude: day gold, low
+// amber, civil ember, nautical violet, astronomical indigo, night.
+// Rich on purpose — this band is the one place the instrument wears
+// the sky's palette at full voice.
+static DrawColor horae__sky(float alt) {
+    static const float k[6][4] = {
+        {  20.0f, 0.95f, 0.72f, 0.22f },
+        {   4.0f, 1.00f, 0.52f, 0.14f },
+        {  -4.0f, 0.80f, 0.24f, 0.20f },
+        { -10.0f, 0.42f, 0.16f, 0.45f },
+        { -16.0f, 0.15f, 0.11f, 0.36f },
+        { -28.0f, 0.05f, 0.05f, 0.15f },
+    };
+    if (alt >= k[0][0]) return dc(k[0][1], k[0][2], k[0][3]);
+    for (int i = 0; i < 5; i++) {
+        if (alt >= k[i + 1][0]) {
+            float f = (alt - k[i + 1][0]) / (k[i][0] - k[i + 1][0]);
+            return dc(k[i + 1][1] + (k[i][1] - k[i + 1][1]) * f,
+                      k[i + 1][2] + (k[i][2] - k[i + 1][2]) * f,
+                      k[i + 1][3] + (k[i][3] - k[i + 1][3]) * f);
+        }
+    }
+    return dc(k[5][1], k[5][2], k[5][3]);
 }
 
 // Wrap into [-half, half)
@@ -166,67 +191,94 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     while (hcur < 23 && u[hcur + 1] <= u_now) hcur++;
     int ridx = (horae__day_ruler[pd] + hcur) % 7;
 
-    // Sun-altitude sampler for twilight grading (civil fraction f of the
-    // planetary day pd may exceed 1 = past midnight; jd handles it)
-    double jd0 = tv->jd_current - 0.5 - t->config.timezone / 24.0
-               + (pd - w);   // start of the planetary day's civil date
+    // Sun-altitude curve for the sky band, from hour angle about the
+    // DIAL'S OWN noon (the rise/set midpoint) and today's declination —
+    // no timezone anywhere, so it agrees with the gold thresholds by
+    // construction: altitude zero exactly where ORTVS and OCCASVS draw.
+    float fnoon = (rise + set) * 0.5f;
+    float d2r = (float)M_PI / 180.0f;
+    float sphi = sinf((float)t->config.latitude * d2r);
+    float cphi = cosf((float)t->config.latitude * d2r);
+    float sdec = sinf((float)t->solar.delta * d2r);
+    float cdec = cosf((float)t->solar.delta * d2r);
 
     // ---- The day clock, fixed at center stage ----
-    // A readable 24-hour temporal clock: midnight top, cells at their
-    // time of day, neutral of any planet. The hand points at now —
-    // which is exactly where the week ring touches.
+    // A thin band of the sky itself — every temporal cell colored by
+    // the sun's true altitude at that hour, dawn to dusk to deep night
+    // — with the 12-hour face's own furniture inside it: the same tick
+    // language, the same numeral voice, because that is what this is —
+    // a 24-hour clock.
     {
-        int nw2 = _font_compat[FONT_seconds].weight;
         for (int h = 0; h < 24; h++) {
             float f0 = rise + u[h];
             float f1 = rise + u[h + 1];
-            bool is_day = h < 12;
             bool cur = h == hcur;
 
-            if (is_day) {
-                draw_set_color(d, dca(0.32f, 0.25f, 0.12f,
-                                      cur ? 0.55f : 0.28f));
-            } else {
-                double jm = jd0 + rise + (u[h] + u[h + 1]) * 0.5;
-                double slon, slat;
-                planets__body_lonlat(BODY_SUN, jm, &slon, &slat);
-                float sa = (float)planets_sky_altitude(
-                    slon, slat, jm, t->config.latitude,
-                    t->config.longitude);
-                float twf = -sa / 18.0f;
-                if (twf < 0) twf = 0;
-                if (twf > 1) twf = 1;
-                draw_set_color(d, dca(0.42f + (0.055f - 0.42f) * twf,
-                                      0.24f + (0.060f - 0.24f) * twf,
-                                      0.10f + (0.150f - 0.10f) * twf,
-                                      cur ? 0.60f : 0.32f));
+            float fm = rise + (u[h] + u[h + 1]) * 0.5f;
+            float H = (fm - fnoon) * 2.0f * (float)M_PI;
+            float salt = sphi * sdec + cphi * cdec * cosf(H);
+            if (salt > 1.0f) salt = 1.0f;
+            if (salt < -1.0f) salt = -1.0f;
+            float sa = asinf(salt) / d2r;
+            DrawColor sc2 = horae__sky(sa);
+            sc2.a = cur ? 1.0f : 0.85f;
+            if (cur) {
+                sc2.r = fminf(1.0f, sc2.r * 1.15f);
+                sc2.g = fminf(1.0f, sc2.g * 1.15f);
+                sc2.b = fminf(1.0f, sc2.b * 1.15f);
             }
+            draw_set_color(d, sc2);
             horae__cell(d, 0, 0, HORAE_CLOCK_R - HORAE_CLOCK_W,
                         HORAE_CLOCK_R, f0, f1);
 
-            // Tooth boundary
+            // Temporal cell boundary, a hairline break in the band
             {
                 float ab = (f0 - floorf(f0)) * 2.0f * (float)M_PI;
                 float sx = sinf(ab), sy = -cosf(ab);
-                draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.25f));
+                draw_set_color(d, dca(0.05f, 0.05f, 0.05f, 0.5f));
                 draw_line(d, sx * (HORAE_CLOCK_R - HORAE_CLOCK_W),
                           sy * (HORAE_CLOCK_R - HORAE_CLOCK_W),
                           sx * HORAE_CLOCK_R, sy * HORAE_CLOCK_R, 1.0f);
             }
+        }
 
-            // Numeral, inside the band
-            {
-                float fm = (f0 + f1) * 0.5f;
-                float am = fm * 2.0f * (float)M_PI;
-                float rn = HORAE_CLOCK_R - HORAE_CLOCK_W - 13.0f;
-                float rx = sinf(am) * rn;
-                float ry = -cosf(am) * rn;
-                float tw2 = sdf_measure_width(nw2, horae__roman[h % 12])
-                          * 11.0f;
-                draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
-                                      cur ? 0.95f : 0.35f));
-                draw_text_ex(d, nw2, 11.0f, rx - tw2 * 0.5f, ry - 5.5f,
-                             horae__roman[h % 12]);
+        // The current cell wears bright rims
+        {
+            float p0 = rise + u[hcur], p1 = rise + u[hcur + 1];
+            draw_set_color(d, dca(0.92f, 0.89f, 0.80f, 0.9f));
+            horae__cell(d, 0, 0, HORAE_CLOCK_R - 2.0f, HORAE_CLOCK_R,
+                        p0, p1);
+            horae__cell(d, 0, 0, HORAE_CLOCK_R - HORAE_CLOCK_W,
+                        HORAE_CLOCK_R - HORAE_CLOCK_W + 2.0f, p0, p1);
+        }
+
+        // Civil hour ticks in the clock's own voice, inside the band
+        for (int h = 0; h < 24; h++) {
+            float a = (float)h / 24.0f * 2.0f * (float)M_PI;
+            float sx = sinf(a), sy = -cosf(a);
+            bool major = (h % 3) == 0;
+            float outer = HORAE_CLOCK_R - HORAE_CLOCK_W - 4.0f;
+            float inner = outer - (major ? 22.0f : 12.0f);
+            draw_set_color(d, major ? s->clock_lines_strong
+                                    : s->clock_lines);
+            draw_line_thin(d, sx * outer, sy * outer,
+                           sx * inner, sy * inner);
+        }
+
+        // Numerals at the even hours, the clock face's numeral voice
+        {
+            int cw2 = _font_compat[FONT_clock].weight;
+            for (int h = 0; h < 24; h += 2) {
+                float a = (float)h / 24.0f * 2.0f * (float)M_PI;
+                float rn = HORAE_CLOCK_R - HORAE_CLOCK_W - 48.0f;
+                float rx = sinf(a) * rn, ry = -cosf(a) * rn;
+                char nb[3];
+                snprintf(nb, sizeof(nb), "%d", h);
+                float nsz2 = 20.0f;
+                float tw2 = sdf_measure_width(cw2, nb) * nsz2;
+                draw_set_color(d, s->clock_lines_strong);
+                draw_text_ex(d, cw2, nsz2, rx - tw2 * 0.5f,
+                             ry - nsz2 * 0.5f, nb);
             }
         }
 
