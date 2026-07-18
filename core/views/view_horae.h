@@ -502,18 +502,13 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_text_curved(d, FONT_month, 0, 0, rn, ah,
                          horae__genitive[ridx], 1.2f, 1.0f);
 
-        // The ruler's pip leads the name along the arc
+        // The ruler's pip rides the week ring's outer rim at the
+        // contact — hand, pip, name, hour: one radial procession
         {
-            float tw2 = (sdf_measure_width(_font_compat[FONT_month].weight,
-                                           horae__genitive[ridx])
-                         + 1.2f * (float)strlen(horae__genitive[ridx]))
-                      * nsz;
-            float off = (tw2 * 0.5f + 20.0f) / 346.0f;
-            float ap = ah + (lflip ? off : -off);
+            float pr = HORAE_RING_OUT - HORAE_ECC + 9.0f;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, 0.95f));
-            draw_circle_filled(d, sinf(ap) * 346.0f,
-                               -cosf(ap) * 346.0f, 6.0f);
+            draw_circle_filled(d, hdx * pr, hdy * pr, 6.5f);
         }
 
         // The hour line on the arc beyond
