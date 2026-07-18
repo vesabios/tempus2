@@ -101,6 +101,7 @@ static int             g_shot_countdown = 0;
 // of the world. CAELVM (the local sky) joins as the fourth.
 typedef enum {
     WV_HOROLOGIVM = 0,   // geocentric dial + clock
+    WV_HORAE,            // the planetary hours
     WV_TELLVS,           // heliocentric earth
     WV_MACHINA,          // full system + zodiac + aspect web
     WV_CAELVM,           // the local sky, first person
@@ -108,7 +109,7 @@ typedef enum {
 } Worldview;
 
 static const char *g_worldview_names[WV_COUNT] = {
-    "HOROLOGIVM", "TELLVS", "MACHINA MVNDI", "CAELVM",
+    "HOROLOGIVM", "HORAE", "TELLVS", "MACHINA MVNDI", "CAELVM",
 };
 
 static Worldview g_worldview = WV_HOROLOGIVM;
@@ -150,8 +151,12 @@ static void set_worldview(Worldview wv) {
     tween_cancel_target(&g_scene.tweens, &g_scene.sky_blend);
     tween_start(&g_scene.tweens, &g_scene.sky_blend, g_scene.sky_blend,
                 wv == WV_CAELVM ? 1.0 : 0.0, 3.0, EASE_IN_OUT_CUBIC);
+    tween_cancel_target(&g_scene.tweens, &g_scene.horae_blend);
+    tween_start(&g_scene.tweens, &g_scene.horae_blend, g_scene.horae_blend,
+                wv == WV_HORAE ? 1.0 : 0.0, 3.0, EASE_IN_OUT_CUBIC);
     switch (wv) {
         case WV_HOROLOGIVM: fly_worldview(0.0, 0.0, 0.0, 3.5); break;
+        case WV_HORAE:      fly_worldview(0.0, 0.0, 0.0, 3.5); break;
         case WV_TELLVS:     fly_worldview(1.0, 1.0, 0.0, 3.5); break;
         case WV_MACHINA:    fly_worldview(1.0, 0.0, 1.0, 3.5); break;
         // The machine parks at MACHINA under the fade, so leaving the
@@ -172,6 +177,7 @@ static void apply_view_mode(void) {
     scene_add_layer(&g_scene, VIEW_ORRERY);
     scene_add_layer(&g_scene, VIEW_CLOCK);
     scene_add_layer(&g_scene, VIEW_SKY);
+    scene_add_layer(&g_scene, VIEW_HORAE);
 }
 
 static void set_view_opacities(void) {
@@ -181,7 +187,9 @@ static void set_view_opacities(void) {
     // rings hand off to the sky view's moving copies, which render at
     // full strength for the whole flight (the sky view alphas its own
     // elements internally).
-    double fade = 1.0 - tempus_smoothstep(0.0, 0.55, sky);
+    double horae = g_scene.horae_blend;
+    double fade = (1.0 - tempus_smoothstep(0.0, 0.55, sky))
+                * (1.0 - tempus_smoothstep(0.0, 0.55, horae));
     // The calendar wheel survives into the sky as its bezel — the time
     // control rides along to every worldview
     g_scene.views[VIEW_CALENDAR].opacity = 1.0;
@@ -194,6 +202,7 @@ static void set_view_opacities(void) {
     if (clock_vis < 0) clock_vis = 0.0;
     g_scene.views[VIEW_CLOCK].opacity = clock_vis * fade;
     g_scene.views[VIEW_SKY].opacity = sky > 0.001 ? 1.0 : 0.0;
+    g_scene.views[VIEW_HORAE].opacity = horae;
 }
 
 // Pacing: vsync drives the frame callback, but update/rebuild work only
@@ -512,6 +521,7 @@ static void init(void) {
     scene_register_view(&g_scene, VIEW_SOLAR,     &solar_vtable);
     scene_register_view(&g_scene, VIEW_ORRERY,    &orrery_vtable);
     scene_register_view(&g_scene, VIEW_SKY,       &sky_vtable);
+    scene_register_view(&g_scene, VIEW_HORAE,     &horae_vtable);
     scene_init_views(&g_scene, &g_tempus);
 
     if (g_cfg_sweep_override >= 0)
@@ -531,6 +541,10 @@ static void init(void) {
         g_scene.system_blend = 1.0;
         g_scene.calendar_state.zoom = 0.0;
         g_scene.calendar_state.target_zoom = 0.0;
+    }
+    if (getenv("TEMPUS_HORAE")) {
+        g_worldview = WV_HORAE;
+        g_scene.horae_blend = 1.0;
     }
     if (getenv("TEMPUS_SKY")) {
         g_worldview = WV_CAELVM;
