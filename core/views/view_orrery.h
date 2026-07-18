@@ -69,8 +69,12 @@ struct OrreryViewState {
 // calendar wheel (1.0); Mercury and Venus sit inside it, Mars through
 // Pluto outside, and the zodiac dial is the outermost ring.
 
+// Outer rings pack tight just past the wheel's month text; the gap from
+// Pluto's ring to the zodiac dial is deliberate negative space — the
+// moat between the heliocentric machine and the geocentric dial, crossed
+// only by the sight-lines.
 static const float orr__orbit_frac[PL_COUNT] = {
-    0.36f, 0.64f, 1.0f, 1.32f, 1.50f, 1.665f, 1.81f, 1.925f, 2.03f
+    0.36f, 0.64f, 1.0f, 1.31f, 1.377f, 1.443f, 1.51f, 1.577f, 1.643f
 };
 
 #define ORR_WEB_R       930.0f   // aspect chords + geocentric markers
@@ -441,19 +445,31 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 float orbr = wheel_R * orr__orbit_frac[p];
                 float th = (float)((0.75 + pn->helio_lon[p] / 360.0)
                                    * 2.0 * M_PI);
-                float lscale = 1.45f;
+                // Name engraved along the ring like the month text —
+                // planet and label share the arc, set clockwise of the
+                // bead (ahead of it), hugging just outside the ring line
+                float lscale = 1.2f;
+                float ltrack = 0.5f;
                 int lw = _font_compat[FONT_date].weight;
                 float lsz = _font_compat[FONT_date].size * lscale;
-                float tw = sdf_measure_width(lw, orr__planet[p].name) * lsz;
-                // Inner planets label inward, outer outward — clear of the
-                // bead and its orbit ring either way
-                float anchor = (p < PL_EARTH)
-                    ? orbr - orr__planet[p].size - 12.0f
-                    : orbr + orr__planet[p].size + 12.0f + tw;
+                float tw = (sdf_measure_width(lw, orr__planet[p].name)
+                            + ltrack * (float)strlen(orr__planet[p].name))
+                         * lsz;
+                float ang_off = (orr__planet[p].size + 14.0f + tw * 0.5f)
+                              / orbr;
+                float lth = th + ang_off;   // clockwise of the bead
+                // Curved text places glyphs on opposite sides of the
+                // baseline circle per hemisphere (dial flip) — compensate
+                // so the label hugs just outside its ring on both halves
+                float na = fmodf(lth, 2.0f * (float)M_PI);
+                if (na < 0) na += 2.0f * (float)M_PI;
+                bool lflip = (na > (float)M_PI * 0.5f
+                              && na < (float)M_PI * 1.5f);
+                float lr = orbr + 5.0f + (lflip ? lsz * 0.8f : 0.0f);
                 d->alpha = base_alpha * a_planet * 0.85f;
                 draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.85f));
-                draw_text_radial(d, FONT_date, 0, 0, anchor, th,
-                                 orr__planet[p].name, lscale);
+                draw_text_curved(d, FONT_date, 0, 0, lr, lth,
+                                 orr__planet[p].name, ltrack, lscale);
             }
             d->alpha = base_alpha;
         }
