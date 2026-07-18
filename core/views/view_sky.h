@@ -89,8 +89,15 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->blend = sc->sky_blend;
     if (st->blend < 0.001) return;
 
-    double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
-                 - t->config.timezone / 24.0;
+    // CAELVM shows the coming MIDNIGHT of the displayed date, not the
+    // running clock — the planisphere's convention. The calendar wheel
+    // scrubs the day, and each day gets its canonical night sky (the
+    // diurnal arcs span noon to noon, the whole night centered).
+    // Midnight is LOCAL MEAN SOLAR midnight at the configured longitude
+    // (sun at lower culmination over your spot) — the machine's
+    // timezone has no business in another city's sky.
+    double jd_ut = st->tv.jd_current + 0.5
+                 - t->config.longitude / (15.0 * 24.0);
     if (fabs(jd_ut - st->cache_jd) <= 1.0 / 1440.0) return;
     st->cache_jd = jd_ut;
 
@@ -345,8 +352,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             GlobeCmd *gm = draw_globe_slot(d, x, y, pr + 12.0f);
             d->alpha = base_alpha;
             if (gm) {
-                double phb = globe_moon_phase(st->tv.jd_current
-                                              + st->tv.percent_of_day - 0.5);
+                double phb = globe_moon_phase(st->cache_jd);
                 float bb = (float)(phb * 2.0 * M_PI);
                 float ssx, ssy;
                 sky__project(st->body_az[BODY_SUN],
