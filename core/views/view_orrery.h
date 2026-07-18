@@ -49,6 +49,21 @@ struct OrreryViewState {
     bool  earth_pq_valid;
     float moon_pq[4];
     bool  moon_pq_valid;
+    float orbis_pq[4];
+    bool  orbis_pq_valid;
+
+    // ORBIS sun-anchored spin: the view meridian follows display time
+    // (the earth turns 360 deg per day, terminator held still in view).
+    // Anchored when the station is entered; published for the pointer
+    // code (the reticle grab rebases the spin into config longitude).
+    double orbis_anchor_jd;
+    bool   orbis_anchor_valid;
+    double orbis_spin;        // degrees, published each render
+
+    // Analemma on the surface: the subsolar point at this same clock
+    // time across the year (73 five-day steps)
+    float  ana_vec[74][3];
+    double ana_jd;
 
     // Full-system ephemeris (recomputed when the clock minute moves)
     PlanetsNow planets;
@@ -305,7 +320,45 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     float ob = (float)st->orbisb;
     if (ob < 0) ob = 0;
     if (ob > 1) ob = 1;
+    float obq1 = 1.0f - ob;
+    float obf = 1.0f - obq1 * obq1 * obq1 * obq1;
+    // Display instant in UT (same formula as the ephemeris cache)
+    double orbis_jd = tv->jd_current + tv->percent_of_day - 0.5
+                    - t->config.timezone / 24.0;
+    // Subsolar point in the earth frame, straight from SPA: lat is the
+    // declination, lon is RA minus Greenwich sidereal time
+    float sun_earth[3];
+    {
+        double slon = t->solar.alpha - t->solar.nu;
+        double sla = t->solar.delta * M_PI / 180.0;
+        double slo = slon * M_PI / 180.0;
+        sun_earth[0] = (float)(cos(sla) * cos(slo));
+        sun_earth[1] = (float)(cos(sla) * sin(slo));
+        sun_earth[2] = (float)(sin(sla));
+    }
     if (ob > 0.001f) {
+        // Sun-anchored frame: the anchor is taken as the station is
+        // entered (spin 0 = home under the reticle), then the view
+        // meridian rides display time — the earth turns 360 deg per
+        // day while the terminator holds still. Day-clicks on the
+        // wheel rotate an exact 360 and land seamlessly; real time
+        // turns the planet live, a quarter degree a minute.
+        if (!stw->orbis_anchor_valid) {
+            stw->orbis_anchor_jd = orbis_jd;
+            stw->orbis_anchor_valid = true;
+        }
+        double spin = fmod(-360.0 * (orbis_jd - stw->orbis_anchor_jd),
+                           360.0);
+        stw->orbis_spin = spin;
+
+        float orbis_rot[16];
+        globe_rotation(t->config.latitude, t->config.longitude + spin,
+                       orbis_rot);
+        globe_rot_slerp_cont(rot, orbis_rot, obf,
+                             stw->orbis_pq, &stw->orbis_pq_valid, rot);
+        float lo[3];
+        globe_mat_mul_vec(rot, sun_earth, lo);
+        globe_vec_nlerp(light, lo, obf, light);
         // Slow-release closeup: composed with a station flight, a
         // linear release lets the closeup collapse faster than the base
         // morph grows the destination globe (the base radius stays
@@ -321,13 +374,15 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // bottom edge near its seat and grows the globe upward into
         // place — radius on its own clock left a full-size sphere
         // parked at the dial, bulging out of frame before it slid up.
-        float obq = 1.0f - ob;
-        float obf = 1.0f - obq * obq * obq * obq;
         ex *= (1.0f - obf);
         ey *= (1.0f - obf);
         earth_r += (ORBIS_GLOBE_R - earth_r) * obf;
         geo_a   *= (1.0f - ob);
         helio_a *= (1.0f - ob);
+    } else {
+        stw->orbis_anchor_valid = false;
+        stw->orbis_pq_valid = false;
+        stw->orbis_spin = 0.0;
     }
 
     // ================= UNDER THE GLOBE =================
@@ -713,6 +768,44 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
     }
 
+    // ---- The analemma, engraved on the surface ----
+    // The subsolar point at this same clock time across the year: the
+    // figure-eight of the seasons, drawn around wherever the sun
+    // stands today. Whole-day steps keep the clock time fixed; the
+    // width is the equation of time, the height the declination.
+    if (obf > 0.01f) {
+        if (fabs(orbis_jd - stw->ana_jd) > 1.0 / 144.0) {
+            stw->ana_jd = orbis_jd;
+            for (int k = 0; k < 74; k++) {
+                double jdk = orbis_jd + (double)((k % 73) * 5 - 180);
+                double lam = (planets_helio_lon(PL_EARTH, jdk, NULL)
+                              + 180.0) * M_PI / 180.0;
+                double T = (jdk - 2451545.0) / 36525.0;
+                double eps = (23.439291 - 0.0130042 * T) * M_PI / 180.0;
+                double ra = atan2(sin(lam) * cos(eps), cos(lam));
+                double dec = asin(sin(eps) * sin(lam));
+                double slo = fmod(ra * 180.0 / M_PI
+                                  - planets__gmst(jdk), 360.0)
+                           * M_PI / 180.0;
+                stw->ana_vec[k][0] = (float)(cos(dec) * cos(slo));
+                stw->ana_vec[k][1] = (float)(cos(dec) * sin(slo));
+                stw->ana_vec[k][2] = (float)(sin(dec));
+            }
+        }
+        draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.30f * obf));
+        float pv[3];
+        bool has = false;
+        for (int k = 0; k < 74; k++) {
+            float v[3];
+            globe_mat_mul_vec(rot, st->ana_vec[k], v);
+            if (has && v[2] > 0.02f && pv[2] > 0.02f)
+                draw_line(d, ex + pv[0] * earth_r, ey + pv[1] * earth_r,
+                          ex + v[0] * earth_r, ey + v[1] * earth_r, 1.0f);
+            pv[0] = v[0]; pv[1] = v[1]; pv[2] = v[2];
+            has = true;
+        }
+    }
+
     // Limb outline: bounds the map at the silhouette so coastline vectors
     // meet a rim instead of floating unconnected against the sky
     draw_set_color(d, dca(0.63f, 0.58f, 0.50f,
@@ -791,7 +884,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // marker pins to the surface as the subsolar point, instead of
         // wobbling out-and-in while the lift (station clock) and the
         // radius hold (orbis clock) race each other.
-        float lift = 1.0f + 0.9f * m * (1.0f - ob);
+        // At the closeup the sun floats a little off the surface —
+        // the TELLVS gesture at a smaller reach — tethered straight
+        // down to the subsolar point.
+        float lift = 1.0f + 0.9f * m * (1.0f - ob) + 0.22f * obf;
         float mx0 = ex + lx * earth_r * lift, my0 = ey + ly * earth_r * lift;
         float mag = sqrtf(lx * lx + ly * ly);
 
@@ -815,12 +911,21 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         sun_c.b = sun_c.b + (16.0f / 255.0f - sun_c.b) * ss;
 
         // Tether is globe furniture — gone as the sun departs
-        d->alpha = base_alpha * sysf;
+        d->alpha = base_alpha * sysf * (1.0f - obf);
         if (mag * lift > 1.02f && mag > 1e-4f) {
             float sx0 = ex + (lx / mag) * earth_r;
             float sy0 = ey + (ly / mag) * earth_r;
             draw_set_color(d, dca(0.75f, 0.75f, 0.75f, 0.35f));
             draw_line(d, sx0, sy0, mx0, my0, 1.0f);
+        }
+        // ORBIS tether: from the subsolar point on the surface up to
+        // the floating sun — the line says "the sun stands over HERE"
+        if (obf > 0.01f) {
+            d->alpha = base_alpha * obf;
+            draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.45f));
+            draw_line(d, ex + lx * earth_r, ey + ly * earth_r,
+                      ex + lx * earth_r * lift, ey + ly * earth_r * lift,
+                      1.0f);
         }
         if (!sky_owns) {
         d->alpha = base_alpha;

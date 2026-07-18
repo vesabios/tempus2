@@ -407,13 +407,33 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
     bool in_sky = sc->sky_blend > 0.5;
 
     if (phase == 0) {
-        // ORBIS: grab the planet and turn it under the reticle — this
-        // is the location picker AND the hour control. Hit-tests the
-        // orrery's LIVE published globe (position and size mid-flight
-        // included), so the grab is honest even during the closeup tween.
+        // ORBIS: two grabs. The RETICLE is the location picker — hold
+        // it and the surface slides beneath to reposition home. The
+        // PLANET is the hour control — grab anywhere else on the globe
+        // and spin the earth through the day. Hit-tests the orrery's
+        // LIVE published globe, honest mid-flight too.
         if (sc->orbis_blend > 0.5) {
             float gdx = wx - o->glob_x, gdy = wy - o->glob_y;
-            if (gdx * gdx + gdy * gdy < o->glob_r * o->glob_r) {
+            float d2 = gdx * gdx + gdy * gdy;
+            if (d2 < 34.0f * 34.0f) {
+                // Grabbing the reticle picks whatever it points at:
+                // fold the accumulated spin into config longitude (the
+                // view is unchanged — home simply becomes the meridian
+                // under the crosshairs) and re-anchor.
+                double jd_ut = o->tv.jd_current + o->tv.percent_of_day
+                             - 0.5 - t->config.timezone / 24.0;
+                double lon = t->config.longitude + o->orbis_spin;
+                while (lon > 180.0) lon -= 360.0;
+                while (lon < -180.0) lon += 360.0;
+                tempus_set_location(t, t->config.latitude, lon);
+                o->orbis_anchor_jd = jd_ut;
+                o->orbis_spin = 0.0;
+                ob->reticle_drag = true;
+                ob->last_wx = wx;
+                ob->last_wy = wy;
+                return;
+            }
+            if (d2 < o->glob_r * o->glob_r) {
                 ob->dragging = true;
                 ob->last_wx = wx;
                 ob->last_wy = wy;
@@ -547,17 +567,10 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         }
         c->last_wx = wx;
         c->last_wy = wy;
-    } else if (phase == 1 && ob->dragging) {
-        // Trackball, axes split. Vertical: latitude — northern land
-        // comes down to the reticle (near center, one world unit = 1/R
-        // radians of arc). Horizontal: the planet TURNS — and turning
-        // the earth IS the passage of hours, so the manual clock rides
-        // the rotation at the physical rate, 15 degrees to the hour.
-        // Local solar time at the reticle is invariant under that
-        // coupling, so the terminator holds still in view while the
-        // surface parades beneath it: you are hovering sun-fixed,
-        // watching the world turn. Dragging to a new meridian lands
-        // you there at THAT place's hour.
+    } else if (phase == 1 && ob->reticle_drag) {
+        // The reticle holds the pick: trackball — the surface slides
+        // beneath the crosshairs, home follows. Near center one world
+        // unit = 1/R radians; longitude widened by the parallels.
         float R = o->glob_r > 1.0f ? o->glob_r : 355.0f;
         float ddx = wx - ob->last_wx, ddy = wy - ob->last_wy;
         double k = (180.0 / M_PI) / R;
@@ -566,12 +579,24 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         if (lat < -85.0) lat = -85.0;
         double cl = cos(lat * M_PI / 180.0);
         if (cl < 0.15) cl = 0.15;
-        double dlon = -(double)ddx * k / cl;
-        double lon = t->config.longitude + dlon;
+        double lon = t->config.longitude - (double)ddx * k / cl;
         while (lon > 180.0) lon -= 360.0;
         while (lon < -180.0) lon += 360.0;
         tempus_set_location(t, lat, lon);
-        scene__advance_override_days(t, -dlon / 15.0 / 24.0, false);
+        ob->last_wx = wx;
+        ob->last_wy = wy;
+    } else if (phase == 1 && ob->dragging) {
+        // Spinning the planet IS the passage of hours: 15 degrees to
+        // the hour, surface following the finger. The sun-anchored
+        // frame turns the earth as the clock moves, terminator held
+        // still — drag right, and tomorrow comes around the limb.
+        float R = o->glob_r > 1.0f ? o->glob_r : 355.0f;
+        float ddx = wx - ob->last_wx;
+        double k = (180.0 / M_PI) / R;
+        double cl = cos(t->config.latitude * M_PI / 180.0);
+        if (cl < 0.15) cl = 0.15;
+        scene__advance_override_days(
+            t, (double)ddx * k / cl / 15.0 / 24.0, false);
         ob->last_wx = wx;
         ob->last_wy = wy;
     } else if (phase == 1 && ho->ring_dragging) {
@@ -619,6 +644,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         c->wheel_dragging = false;
         ho->ring_dragging = false;
         ob->dragging = false;
+        ob->reticle_drag = false;
     }
 }
 

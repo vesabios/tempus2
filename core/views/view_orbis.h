@@ -27,7 +27,8 @@ struct OrbisViewState {
     double opacity;
     double blend;     // mirrored scene orbis_blend
 
-    bool  dragging;   // turning the globe under the reticle
+    bool  dragging;       // spinning the earth (the hour control)
+    bool  reticle_drag;   // holding the reticle: positioning the location
     float last_wx, last_wy;
 
     // The orrery's state — its published globe (position, radius, live
