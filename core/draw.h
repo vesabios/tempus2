@@ -72,6 +72,8 @@ typedef struct {
     float alpha;                // whole-sphere fade (defaults to view alpha)
     bool  land;                 // sample the surface texture
     int   tex_id;               // 0 = Earth land mask, 1 = Moon albedo
+    float aux_dir[4];           // observer direction (w > 0 = enabled):
+                                // lit surface facing away from it is dimmed
     float day_col[4];           // per-body palette; w > 0 = use these
     float night_col[4];         // (otherwise the style's Earth colors)
     int   split_index;

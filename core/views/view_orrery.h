@@ -350,6 +350,13 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             memcpy(gm->light, ml, sizeof(ml));
             gm->land = true;      // sample the lunar albedo
             gm->tex_id = 1;
+            // Observer direction for phase legibility: the viewer in geo
+            // (identity — whole disc counts), Earth in helio; the morph
+            // sweeps between them
+            gm->aux_dir[0] = edx * m;
+            gm->aux_dir[1] = edy * m;
+            gm->aux_dir[2] = 1.0f - m;
+            gm->aux_dir[3] = 1.0f;
             gm->grid_boost = 0.0f;
             gm->obs_lat = 999.0f;
             gm->day_col[0] = 0.58f; gm->day_col[1] = 0.55f;

@@ -814,6 +814,8 @@ static void frame(void) {
             globe_sun_with_decl(gc->rot, fsu.light, 23.44, fsu.sunj);
             globe_sun_with_decl(gc->rot, fsu.light, -23.44, fsu.sund);
             fsu.sunj[3] = fsu.sund[3] = 0;
+            if (gc->aux_dir[3] > 0)   // observer-visibility dir (the moon)
+                memcpy(fsu.sunj, gc->aux_dir, sizeof(float) * 4);
 
             sg_apply_pipeline(g_globe_pip);
             sg_apply_bindings(&(sg_bindings){
