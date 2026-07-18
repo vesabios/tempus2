@@ -296,14 +296,12 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     float ex, ey, earth_r;
     if (m >= 0.999f) {
         memcpy(rot, helio_rot, sizeof(rot));
-        memcpy(light, helio_light, sizeof(light));
         ex = sphi * base_w * (1.0f - z);
         ey = -cphi * base_w * (1.0f - z);
         earth_r = 42.0f + z * 198.0f;   // full-zoom helio size: 240
     } else {
-        float geo_rot[16], geo_light[3];
+        float geo_rot[16];
         globe_rotation(t->config.latitude, t->config.longitude, geo_rot);
-        globe_sun_dir(st->geo_azimuth, st->geo_zenith, geo_light);
 
         // Mid-morph target: the helio arrangement AT THE CURRENT ZOOM
         // (centered planet at z = 1, bead on the wheel at z = 0), so the
@@ -318,11 +316,23 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
 
         globe_rot_slerp_cont(geo_rot, helio_rot, m,
                              stw->earth_pq, &stw->earth_pq_valid, rot);
-        float le_g[3], le_h[3], le[3];
-        globe_mat_tmul_vec(geo_rot, geo_light, le_g);
-        globe_mat_tmul_vec(helio_rot, helio_light, le_h);
-        globe_vec_nlerp(le_g, le_h, m, le);
-        globe_mat_mul_vec(rot, le, light);
+    }
+
+    // The light is the SUN IN THE EARTH FRAME (declination, RA minus
+    // sidereal time) rotated by the LIVE view — glued to the planet
+    // through every morph. The old per-station frame lights nlerped
+    // against a slerping rotation and cut the corner: the sun slid
+    // cartesian across the view while the globe turned polar beneath
+    // it. Rotate WITH the planet and the sun holds its relative seat.
+    {
+        double slon = (t->solar.alpha - t->solar.nu) * M_PI / 180.0;
+        double sla = t->solar.delta * M_PI / 180.0;
+        float sun_earth[3] = {
+            (float)(cos(sla) * cos(slon)),
+            (float)(cos(sla) * sin(slon)),
+            (float)(sin(sla)),
+        };
+        globe_mat_mul_vec(rot, sun_earth, light);
     }
 
     // ---- ORBIS: the location picker is THIS globe, up close ----
@@ -340,43 +350,6 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     double orbis_jd = tv->jd_current + tv->percent_of_day - 0.5
                     - t->config.timezone / 24.0;
     if (ob > 0.001f) {
-        // Physical light: the subsolar point lives in the EARTH frame
-        // (declination, RA minus Greenwich sidereal time) — none of it
-        // depends on the observer, so the terminator stays glued to
-        // the planet no matter where the globe is dragged. The base
-        // az/zen light is the observer's-sky frame: it is only valid
-        // for the location it was computed at, and under a fast drag
-        // it lags and smears the sun across impossible latitudes.
-        {
-            double slon = (t->solar.alpha - t->solar.nu) * M_PI / 180.0;
-            double sla = t->solar.delta * M_PI / 180.0;
-            float sun_earth[3] = {
-                (float)(cos(sla) * cos(slon)),
-                (float)(cos(sla) * sin(slon)),
-                (float)(sin(sla)),
-            };
-            float lo[3];
-            globe_mat_mul_vec(rot, sun_earth, lo);
-            // Blend WITHOUT the shortest-path sign flip (same lesson
-            // the moon's light learned): both vectors are the same
-            // physical sun, but the az/zen side lags a fast drag —
-            // when the stale base swings past 90 deg from the true
-            // light, nlerp's flip NEGATES it and the sun mirrors to
-            // the wrong side of the planet.
-            float bl[3];
-            float bn = 0;
-            for (int i = 0; i < 3; i++) {
-                bl[i] = light[i] + (lo[i] - light[i]) * obf;
-                bn += bl[i] * bl[i];
-            }
-            bn = sqrtf(bn);
-            if (bn > 1.0e-3f) {
-                for (int i = 0; i < 3; i++) light[i] = bl[i] / bn;
-            } else {
-                memcpy(light, lo, sizeof(lo));
-            }
-        }
-
         // Slow-release closeup: composed with a station flight, a
         // linear release lets the closeup collapse faster than the base
         // morph grows the destination globe (the base radius stays
@@ -880,10 +853,20 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // (The uniform 24h bezel is gone — the surface clock projects its
         // hour marks outward past the limb at their true bearings.)
 
-        // Moon orbit ring (the moon itself is a shared element below)
-        d->alpha = base_alpha * helio_a;
-        draw_set_color(d, dca(0.6f, 0.58f, 0.54f, 0.20f));
-        draw_circle_stroked(d, ex, ey, earth_r * 1.55f, 1.0f);
+    }
+
+    // Moon orbit ring: helio furniture that also rides the ORBIS
+    // closeup — the moon keeps its relative seat there, so its ring
+    // comes along, easing from the slot reach to the hang reach.
+    {
+        float ring_a = helio_a + (1.0f - helio_a) * obf;
+        if (ring_a > 0.001f) {
+            d->alpha = base_alpha * ring_a * (1.0f - skw);
+            draw_set_color(d, dca(0.6f, 0.58f, 0.54f, 0.20f));
+            draw_circle_stroked(d, ex, ey,
+                earth_r * (1.55f + (1.22f - 1.55f) * obf), 1.0f);
+            d->alpha = base_alpha;
+        }
     }
 
     // ---- Shared elements: continuous across the morph, never fade ----
@@ -1097,7 +1080,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             while (da > (float)M_PI) da -= 2.0f * (float)M_PI;
             while (da < -(float)M_PI) da += 2.0f * (float)M_PI;
             float am = a0 + da * obf;
-            float rr2 = br * (1.0f - obf) + earth_r * 1.22f * obf;
+            // Target the ring's LIVE radius so the moon sits on its
+            // own orbit ring through the whole closeup morph
+            float ring_r = earth_r * (1.55f + (1.22f - 1.55f) * obf);
+            float rr2 = br * (1.0f - obf) + ring_r * obf;
             mmx = ex + cosf(am) * rr2;
             mmy = ey + sinf(am) * rr2;
             mmr = mmr * (1.0f - obf) + 24.0f * obf;
