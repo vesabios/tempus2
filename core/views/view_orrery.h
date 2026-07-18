@@ -422,7 +422,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 float p1y = 2.0f * by2 - 0.5f * (ey + mpy[b]);
                 draw_set_color(d, dca(orr__body_col[b][0] / 255.0f,
                                       orr__body_col[b][1] / 255.0f,
-                                      orr__body_col[b][2] / 255.0f, 0.28f));
+                                      orr__body_col[b][2] / 255.0f, 0.38f));
                 float lx0 = ex, ly0 = ey;
                 const int SEG = 20;
                 for (int k = 1; k <= SEG; k++) {
