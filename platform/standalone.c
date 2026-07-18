@@ -117,14 +117,15 @@ static Worldview g_worldview = WV_HOROLOGIVM;
 // zoom), published by the frame that draws them
 static float g_wv_btn[WV_COUNT][4];   // x0, y0, x1, y1
 
-#define SYS_CAMERA_ZOOM 0.62f
+#define SYS_CAMERA_ZOOM    0.62f
+#define CAELVM_CAMERA_ZOOM 0.85f
 static float sys_camera_scale(void) {
     float k = 1.0f - (1.0f - SYS_CAMERA_ZOOM) * (float)g_scene.system_blend;
-    // CAELVM: the sky chart is composed for the plain frame, so the
-    // camera eases home as the machine dissolves — the zodiac ring
-    // (930 * 0.62) hands off to the horizon rim (560) at near-matching
-    // screen size.
-    return k + (1.0f - k) * (float)g_scene.sky_blend;
+    // CAELVM: camera eases most of the way home — enough room for the
+    // sky bowl AND the calendar wheel riding outside it as the bezel.
+    // The zodiac ring still hands off to the horizon rim at near-
+    // matching screen size.
+    return k + (CAELVM_CAMERA_ZOOM - k) * (float)g_scene.sky_blend;
 }
 
 // Fly the instrument to a worldview station: geo (0,0,0), heliocentric
@@ -181,7 +182,9 @@ static void set_view_opacities(void) {
     // full strength for the whole flight (the sky view alphas its own
     // elements internally).
     double fade = 1.0 - tempus_smoothstep(0.0, 0.55, sky);
-    g_scene.views[VIEW_CALENDAR].opacity = fade;
+    // The calendar wheel survives into the sky as its bezel — the time
+    // control rides along to every worldview
+    g_scene.views[VIEW_CALENDAR].opacity = 1.0;
     g_scene.views[VIEW_SOLAR].opacity = 0.0;    // data only, never draws
     g_scene.views[VIEW_ORRERY].opacity = fade;
     // Clock face and hands exit in the first quarter of the transit (and

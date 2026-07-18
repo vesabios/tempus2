@@ -27,6 +27,7 @@ struct CalendarViewState {
     double  zoom;
     double  target_zoom;
     double  sys;          // mirrored scene system_blend (wheel cedes 20%)
+    double  skyb;         // mirrored scene sky_blend (wheel -> sky bezel)
 
     // Wheel dragging (see scene_pointer): film-strip time scrubbing,
     // incremental (finger deltas projected onto the band tangent), with
@@ -152,6 +153,7 @@ static void calendar_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     CalendarViewState *st = (CalendarViewState *)buf;
     (void)dt;
     st->sys = sc->system_blend;
+    st->skyb = sc->sky_blend;
     if (st->cached_day != st->tv.day || st->cached_year != st->tv.year)
         cal__rebuild_ticks(st, t, &sc->style);
 }
@@ -164,8 +166,8 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
     double year_pct = (tv->jd_current - t->jd_newyear) / t->total_days
                     + tv->percent_of_day / t->total_days;
 
-    float base_r = s->calendar_base_radius
-                 * (float)tempus_wheel_scale(st->sys);
+    float base_r = (float)tempus_wheel_radius(s->calendar_base_radius,
+                                              st->sys, st->skyb);
     float radius = base_r + (float)(blend * s->zoom_in_radius);
 
     float offx, offy;

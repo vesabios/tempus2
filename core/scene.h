@@ -352,21 +352,17 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
     OrreryViewState *o = &sc->orrery_state;
     CalendarViewState *c = &sc->calendar_state;
 
-    // In the sky view the machine is parked invisible underneath —
-    // don't let drags grab ghosts
-    if (sc->sky_blend > 0.5) {
-        o->dragging = false;
-        o->drag_earth = false;
-        c->wheel_dragging = false;
-        return;
-    }
-
     bool sys = sc->system_blend > 0.5;
+    // In the sky view the machine is parked invisible underneath: the
+    // WHEEL stays live (it glides outside as the sky's bezel — the time
+    // control survives every worldview), but the ghost sun bead and
+    // ghost earth are not grabbable.
+    bool in_sky = sc->sky_blend > 0.5;
 
     if (phase == 0) {
         // System view: the sun bead is invisible — instead, grab the
         // planet itself and drag it around its orbit (the wheel).
-        if (sys) {
+        if (sys && !in_sky) {
             float gdx = wx - o->glob_x, gdy = wy - o->glob_y;
             float grab = o->glob_r + 24.0f;
             if (gdx * gdx + gdy * gdy < grab * grab) {
@@ -380,7 +376,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         }
 
         float dx = wx - o->bead_x, dy = wy - o->bead_y;
-        if (sc->helio_blend > 0.5 && !sys
+        if (sc->helio_blend > 0.5 && !sys && !in_sky
             && dx * dx + dy * dy < o->bead_hit * o->bead_hit) {
             o->dragging = true;
             o->drag_earth = false;
@@ -394,8 +390,9 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         // through month text), excluding the globe's interior. Helio only
         // — in geo the wheel doesn't pan, so dragging feels broken.
         if (sc->helio_blend > 0.5) {
-            float base_w = sc->style.calendar_base_radius
-                         * (float)tempus_wheel_scale(sc->system_blend);
+            float base_w = (float)tempus_wheel_radius(
+                sc->style.calendar_base_radius, sc->system_blend,
+                sc->sky_blend);
             float R = base_w + (float)c->zoom * sc->style.zoom_in_radius;
             double ypct = tempus_year_pct(t);
             float ox = sinf((float)(ypct * 2.0 * M_PI)) * (R - base_w);
@@ -418,8 +415,9 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         // Incremental: project the finger delta onto the band tangent and
         // move time so the strip follows the finger. The pan rate is
         // 2*pi*(R - base) per year, which is what the finger fights.
-        float base_w = sc->style.calendar_base_radius
-                     * (float)tempus_wheel_scale(sc->system_blend);
+        float base_w = (float)tempus_wheel_radius(
+            sc->style.calendar_base_radius, sc->system_blend,
+            sc->sky_blend);
         float R = base_w + (float)c->zoom * sc->style.zoom_in_radius;
         double ypct = tempus_year_pct(t);
         float th = (float)(ypct * 2.0 * M_PI);

@@ -144,6 +144,17 @@ static inline double tempus_wheel_scale(double system_blend) {
     return 1.0 - 0.20 * system_blend;
 }
 
+// At CAELVM the wheel peels off the forming horizon (both born from the
+// same circle) and glides outside the sky chart to become its bezel —
+// the time control survives every worldview. Radius shared by the
+// calendar renderer and the pointer hit-tests.
+#define TEMPUS_SKY_WHEEL_R 610.0
+static inline double tempus_wheel_radius(double base, double system_blend,
+                                         double sky_blend) {
+    double r = base * tempus_wheel_scale(system_blend);
+    return r + (TEMPUS_SKY_WHEEL_R - r) * sky_blend;
+}
+
 // ---- View lifecycle ----
 
 typedef enum {
