@@ -228,7 +228,8 @@ static inline void scene_init_views(Scene *sc, const Tempus *t) {
 
 // ---- Update ----
 
-static inline void scene__advance_override_days(Tempus *t, double dv);
+static inline void scene__advance_override_days(Tempus *t, double dv,
+                                                bool keep_time);
 
 static inline void scene_update(Scene *sc, Tempus *t, double dt) {
     tween_update_all(&sc->tweens, dt);
@@ -246,7 +247,8 @@ static inline void scene_update(Scene *sc, Tempus *t, double dt) {
             if (c->fling_vel > 60.0) c->fling_vel = 60.0;
             if (c->fling_vel < -60.0) c->fling_vel = -60.0;
         } else if (c->fling_vel != 0.0 && t->time_override) {
-            scene__advance_override_days(t, c->fling_vel * dt);
+            scene__advance_override_days(t, c->fling_vel * dt,
+                                         sc->horae_blend > 0.5);
             c->fling_vel *= exp2(-dt / 0.7);   // half-life ~0.7s
             if (fabs(c->fling_vel) < 0.05) c->fling_vel = 0.0;
         } else {
@@ -333,14 +335,26 @@ static inline void scene_event(Scene *sc, const Tempus *t, int key) {
 // of day; the override stays active afterward for inspection.
 
 // Advance the manual override by a signed number of days (fractional —
-// hours scroll continuously), wrapping within the override year
-static inline void scene__advance_override_days(Tempus *t, double dv) {
+// hours scroll continuously), wrapping within the override year. With
+// keep_time (HORAE mode) only the DATE position moves — the wheel still
+// glides smoothly, but the clock reading stays put: scrubbing changes
+// the day, never the hour.
+static inline void scene__advance_override_days(Tempus *t, double dv,
+                                                bool keep_time) {
     double diy = (double)cal_days_in_year(t->override_year);
-    double v = floor(t->override_year_pct * diy) + t->override_day_pct + dv;
-    v = fmod(v, diy);
-    if (v < 0) v += diy;
-    t->override_year_pct = v / diy;
-    t->override_day_pct = v - floor(v);
+    if (keep_time) {
+        double v = t->override_year_pct * diy + dv;
+        v = fmod(v, diy);
+        if (v < 0) v += diy;
+        t->override_year_pct = v / diy;
+    } else {
+        double v = floor(t->override_year_pct * diy)
+                 + t->override_day_pct + dv;
+        v = fmod(v, diy);
+        if (v < 0) v += diy;
+        t->override_year_pct = v / diy;
+        t->override_day_pct = v - floor(v);
+    }
     t->solar_dirty = true;
 }
 
@@ -471,7 +485,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 dv = -(double)along / (2.0 * M_PI * (double)denom)
                    * t->total_days;
             }
-            scene__advance_override_days(t, dv);
+            scene__advance_override_days(t, dv, sc->horae_blend > 0.5);
             c->drag_accum += dv;
         }
         c->last_wx = wx;
