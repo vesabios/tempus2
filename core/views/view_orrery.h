@@ -985,13 +985,6 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float gx2 = 0.0f, gy2 = -dial_y, gr2 = 52.0f;
         float gl2[3] = { sinf(b), 0.0f, -cosf(b) };
 
-        // Helio endpoint: pure ecliptic sun (helio_light, untouched by
-        // the morph) and the helio earth arrangement AT THE CURRENT ZOOM
-        // (center/240 when z rides with m; a bead on the wheel when the
-        // system flight leaves z at 0) — matching the earth's own target
-        float hex = (m >= 0.999f) ? ex : sphi * base_w * (1.0f - z);
-        float hey = (m >= 0.999f) ? ey : -cphi * base_w * (1.0f - z);
-        float her = (m >= 0.999f) ? earth_r : 42.0f + z * 198.0f;
         // THE MOON'S FRAME LAW (Seren): shown WITH the globe — at
         // EVERY station, MACHINA included — the moon is PHYSICALLY
         // placed: its true direction from the earth, seen in the
@@ -1029,76 +1022,66 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 mdy = mv[1] / mm2;
             }
         }
-        float hx2 = hex + mdx * her * 1.55f;
-        float hy2 = hey + mdy * her * 1.55f;
         // At system scale the moon shrinks toward a bead beside its planet
         float hr2 = 22.0f * (1.0f - 0.55f
                              * (float)tempus_smoothstep(0.2, 0.7, ss));
         float hl2[3] = { helio_light[0], helio_light[1], helio_light[2] };
         float edx = -mdx, edy = -mdy;   // direction moon -> earth, screen
 
-        float mmx = gx2 * (1 - m) + hx2 * m;
-        float mmy = gy2 * (1 - m) + hy2 * m;
-        float mmr = gr2 * (1 - m) + hr2 * m;
-        // Light blend WITHOUT the shortest-path sign flip: the two frames
-        // (phase-view vs orbital sun) can be arbitrarily far apart, and
-        // the flip hands the moon a negated sun for half of every orbit.
+        // FULLY POLAR about the LIVE globe. The moon is a
+        // globe-relative object at every station: physical bearing,
+        // ring-reach radius (1.55 at the stations, easing to the 1.22
+        // hang at the closeup), riding the planet wherever it goes —
+        // between TELLVS, MACHINA, and ORBIS its relative seat never
+        // moves. The ONLY thing that pulls it off the ring is the
+        // 12-hour clock's aperture, whose claim w_ap dies with either
+        // the helio morph or the closeup — so no station flight ever
+        // routes the moon through the aperture's cartesian seat.
+        float ring_fac = 1.55f + (1.22f - 1.55f) * obf;
+        float w_ap = (1.0f - m) * (1.0f - obf);
+        float morb = 1.0f - w_ap;    // the orbital form's claim
+        float tgt_ang = atan2f(mdy, mdx);
+        float ap_dx = gx2 - ex, ap_dy = gy2 - ey;
+        float ap_r = sqrtf(ap_dx * ap_dx + ap_dy * ap_dy);
+        float ap_ang = (ap_r > 1.0f) ? atan2f(ap_dy, ap_dx) : tgt_ang;
+        float dang = tgt_ang - ap_ang;
+        while (dang > (float)M_PI) dang -= 2.0f * (float)M_PI;
+        while (dang < -(float)M_PI) dang += 2.0f * (float)M_PI;
+        float mang = ap_ang + dang * morb;
+        float mrad = ap_r * w_ap + earth_r * ring_fac * morb;
+        float mmx = ex + cosf(mang) * mrad;
+        float mmy = ey + sinf(mang) * mrad;
+        float mmr = gr2 * w_ap
+                  + (hr2 * (1.0f - obf) + 24.0f * obf) * morb;
+
+        // Light blend WITHOUT the shortest-path sign flip: aperture
+        // phase-frame vs orbital sun, then eased to the shared
+        // earth-frame light as the closeup rises
         float ml[3];
         float mn = 0;
         for (int i = 0; i < 3; i++) {
-            ml[i] = gl2[i] * (1 - m) + hl2[i] * m;
+            ml[i] = gl2[i] * w_ap + hl2[i] * morb;
             mn += ml[i] * ml[i];
         }
         mn = sqrtf(mn);
         if (mn > 1e-3f) {
             for (int i = 0; i < 3; i++) ml[i] /= mn;
         } else {
-            memcpy(ml, m > 0.5f ? hl2 : gl2, sizeof(ml));
+            memcpy(ml, morb > 0.5f ? hl2 : gl2, sizeof(ml));
         }
-
-        // ORBIS: the moon joins the sun over the closeup — hung on the
-        // same physical direction it already rides at TELLVS (the
-        // frame law makes this a gentle radial ease, not a flip),
-        // lifted on the sun's reach, tethered to the spot it stands
-        // over, phase-lit by the same earth-frame sun. Over the far
-        // side it dims.
         float moon_dim = 1.0f;
         if (obf > 0.001f) {
             if (moon_vz < 0.0f)
                 moon_dim = 1.0f - 0.45f * obf;
-            // POLAR composition about the LIVE globe: bearing and
-            // radius lerp separately (shortest arc), so the moon
-            // RIDES AROUND the planet to its hang instead of cutting
-            // a chord through it — the base form is itself mid-morph
-            // during station flights, and a cartesian blend of two
-            // moving anchors bows across the disc.
-            float bdx = mmx - ex, bdy = mmy - ey;
-            float br = sqrtf(bdx * bdx + bdy * bdy);
-            float a1 = atan2f(mdy, mdx);
-            float a0 = (br > 1.0f) ? atan2f(bdy, bdx) : a1;
-            float da = a1 - a0;
-            while (da > (float)M_PI) da -= 2.0f * (float)M_PI;
-            while (da < -(float)M_PI) da += 2.0f * (float)M_PI;
-            float am = a0 + da * obf;
-            // Target the ring's LIVE radius so the moon sits on its
-            // own orbit ring through the whole closeup morph
-            float ring_r = earth_r * (1.55f + (1.22f - 1.55f) * obf);
-            float rr2 = br * (1.0f - obf) + ring_r * obf;
-            mmx = ex + cosf(am) * rr2;
-            mmy = ey + sinf(am) * rr2;
-            mmr = mmr * (1.0f - obf) + 24.0f * obf;
-            // Tether: radial, directly beneath wherever the moon is,
-            // fading with the rising sky (its endpoint is the machine
-            // form, not the flying luminary)
+            // Tether: radial, directly beneath the moon, fading with
+            // the rising sky
             if (skw < 0.999f) {
                 d->alpha = base_alpha * obf * moon_dim * (1.0f - skw);
                 draw_set_color(d, dca(0.72f, 0.72f, 0.70f, 0.35f));
-                draw_line(d, ex + cosf(am) * earth_r,
-                          ey + sinf(am) * earth_r, mmx, mmy, 1.0f);
+                draw_line(d, ex + cosf(mang) * earth_r,
+                          ey + sinf(mang) * earth_r, mmx, mmy, 1.0f);
                 d->alpha = base_alpha;
             }
-            // Phase light eases to the shared earth-frame sun
-            // (component blend, no shortest-path flip)
             float mn2 = 0;
             for (int i = 0; i < 3; i++) {
                 ml[i] = ml[i] * (1.0f - obf) + light[i] * obf;
@@ -1151,16 +1134,16 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             rot_helio[1] = edy;  rot_helio[5] = -edx;
             rot_helio[10] = 1.0f;
             rot_helio[15] = 1.0f;
-            globe_rot_slerp_cont(rot_geo, rot_helio, m,
+            globe_rot_slerp_cont(rot_geo, rot_helio, morb,
                                  stw->moon_pq, &stw->moon_pq_valid,
                                  mrot0);
             globe_rot_slerp_cont(mrot0, rot_geo, skw,
                                  stw->lum_pq, &stw->lum_pq_valid,
                                  stw->lum_moon_rot);
         }
-        stw->lum_moon_aux[0] = edx * m * (1.0f - skw);
-        stw->lum_moon_aux[1] = edy * m * (1.0f - skw);
-        stw->lum_moon_aux[2] = 1.0f - m * (1.0f - skw);
+        stw->lum_moon_aux[0] = edx * morb * (1.0f - skw);
+        stw->lum_moon_aux[1] = edy * morb * (1.0f - skw);
+        stw->lum_moon_aux[2] = 1.0f - morb * (1.0f - skw);
         stw->lum_moon_aux[3] = 1.0f;
     }
 
