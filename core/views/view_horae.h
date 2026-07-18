@@ -95,20 +95,30 @@ static void horae_update(void *buf, const Tempus *t, double dt, Scene *sc) {
 }
 
 // One hour sector: [f0, f1] in day fractions, chaldean ruler, hour
-// number within its half (0-11), day or night
+// number within its half (0-11), day or night. sun_alt is the sun's
+// altitude at the sector midpoint: night grounds grade through the
+// twilights, the Orloj's lesson — dusk is a place, not a line.
 static void horae__sector(DrawCtx *d, const Tempus *t, float f0, float f1,
-                          int ruler, int idx, bool is_day, bool current) {
+                          int ruler, int idx, bool is_day, bool current,
+                          float sun_alt) {
     if (f1 <= f0) return;
     float a0 = horae__pct(f0) * 2.0f * (float)M_PI - (float)M_PI * 0.5f;
     float a1 = a0 + (f1 - f0) * 2.0f * (float)M_PI;
     const uint8_t *c = orr__body_col[horae__chaldean_body[ruler]];
 
-    // Ground tint: day sectors warm, night sectors cold — the dial
-    // wears the daylight share of the date
-    if (is_day)
+    if (is_day) {
         draw_set_color(d, dca(0.30f, 0.24f, 0.12f, current ? 0.34f : 0.16f));
-    else
-        draw_set_color(d, dca(0.10f, 0.11f, 0.20f, current ? 0.40f : 0.18f));
+    } else {
+        // AVRORA to astronomical night: ember at the horizon, indigo at
+        // full dark (sun 18 degrees down)
+        float tw = -sun_alt / 18.0f;
+        if (tw < 0) tw = 0;
+        if (tw > 1) tw = 1;
+        float rr = 0.42f + (0.055f - 0.42f) * tw;
+        float gg = 0.24f + (0.060f - 0.24f) * tw;
+        float bb = 0.10f + (0.150f - 0.10f) * tw;
+        draw_set_color(d, dca(rr, gg, bb, current ? 0.42f : 0.22f));
+    }
     draw_arc_filled(d, 0, 0, HORAE_R0, HORAE_R1, a0, a1, 12);
 
     // Ruler wash over the ground
@@ -178,34 +188,66 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     else
         cur = -1 - (int)((rise - now) / nh);   // -1 = hour ending at rise
 
+    // Sun altitude at an arbitrary fraction of this date (for the
+    // twilight grading of the night grounds)
+    double jd0 = tv->jd_current - 0.5 - t->config.timezone / 24.0;
+    double slon, slat;
+
     // ---- The 24 temporal hours covering this date ----
     // Day, then tonight's hours until midnight, then the pre-dawn tail
     // of YESTERDAY'S night (its rulers three Chaldean steps back).
     for (int k = 0; k < 12; k++)
         horae__sector(d, t, rise + k * dh, rise + (k + 1) * dh,
-                      (dri + k) % 7, k, true, cur == k);
+                      (dri + k) % 7, k, true, cur == k, 10.0f);
     for (int k = 0; k < 12; k++) {
         float f0 = set + k * nh;
         if (f0 >= 1.0f) break;
+        double jm = jd0 + f0 + nh * 0.5;
+        planets__body_lonlat(BODY_SUN, jm, &slon, &slat);
+        float sa = (float)planets_sky_altitude(slon, slat, jm,
+                                               t->config.latitude,
+                                               t->config.longitude);
         horae__sector(d, t, f0, fminf(f0 + nh, 1.0f),
-                      (dri + 12 + k) % 7, k, false, cur == 12 + k);
+                      (dri + 12 + k) % 7, k, false, cur == 12 + k, sa);
     }
     for (int k = 0; k < 12; k++) {
         float f1 = rise - k * nh;
         if (f1 <= 0.0f) break;
+        double jm = jd0 + f1 - nh * 0.5;
+        planets__body_lonlat(BODY_SUN, jm, &slon, &slat);
+        float sa = (float)planets_sky_altitude(slon, slat, jm,
+                                               t->config.latitude,
+                                               t->config.longitude);
         horae__sector(d, t, fmaxf(f1 - nh, 0.0f), f1,
                       (dri + 7 + 20 - k) % 7, 11 - k, false,
-                      cur == -1 - k);
+                      cur == -1 - k, sa);
     }
 
-    // Sunrise and sunset: gold thresholds
+    // Sunrise and sunset: gold thresholds, named as the Orloj names
+    // them — ORTVS rising, OCCASVS setting — with the twilight wedges
+    // AVRORA and CREPVSCVLVM labeled where they burn
     for (int e = 0; e < 2; e++) {
-        float pct = horae__pct(e ? set : rise);
-        float sx = sinf(pct * 2.0f * (float)M_PI);
-        float sy = -cosf(pct * 2.0f * (float)M_PI);
+        float f = e ? set : rise;
+        float pct = horae__pct(f);
+        float ang = pct * 2.0f * (float)M_PI;
+        float sx = sinf(ang), sy = -cosf(ang);
         draw_set_color(d, dc_scale(s->sunrise_handle, 0.9f));
         draw_line(d, sx * (HORAE_R0 - 8.0f), sy * (HORAE_R0 - 8.0f),
                   sx * (HORAE_R1 + 10.0f), sy * (HORAE_R1 + 10.0f), 1.6f);
+        draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.75f));
+        draw_text_curved(d, FONT_date, 0, 0, HORAE_R1 + 16.0f, ang,
+                         e ? "OCCASVS" : "ORTVS", 0.5f, 0.8f);
+    }
+    {
+        // Twilight labels sit a civil-twilight's width past the lines
+        float tw_arc = nh * 0.8f;
+        float ang_a = horae__pct(rise - tw_arc * 0.6f) * 2.0f * (float)M_PI;
+        float ang_c = horae__pct(set + tw_arc * 0.6f) * 2.0f * (float)M_PI;
+        draw_set_color(d, dca(0.60f, 0.38f, 0.12f, 0.55f));
+        draw_text_curved(d, FONT_date, 0, 0, HORAE_R0 + 46.0f, ang_a,
+                         "AVRORA", 0.6f, 0.75f);
+        draw_text_curved(d, FONT_date, 0, 0, HORAE_R0 + 46.0f, ang_c,
+                         "CREPVSCVLVM", 0.6f, 0.75f);
     }
 
     // Ring rims
