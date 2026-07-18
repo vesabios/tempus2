@@ -903,7 +903,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                              * earth_r * ring_fac2;
                 oz[k] = pv[2];
             }
-            draw_set_color(d, dca(0.6f, 0.58f, 0.54f, 0.20f));
+            // Brighter at the closeup: the 3D path must read against
+            // both the lit disc and the black beyond
+            draw_set_color(d, dca(0.62f, 0.60f, 0.56f,
+                                  0.20f + 0.20f * obf));
             for (int k = 0; k < ORB_N; k++) {
                 float mzk = (oz[k] + oz[k + 1]) * 0.5f;
                 float fseg = 1.0f;
