@@ -460,7 +460,17 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             for (int i = 0; i < 12; i++) {
                 float ang = (float)((0.75 + (i * 30.0 + 15.0) / 360.0)
                                     * 2.0 * M_PI);
-                draw_text_curved(d, FONT_month, 0, 0, ORR_ZODIAC_TEXT,
+                // Names sit INSIDE the band, letterforms centered on
+                // its waist — same flip-compensated recipe as the
+                // planet labels
+                float na = fmodf(ang, 2.0f * (float)M_PI);
+                if (na < 0) na += 2.0f * (float)M_PI;
+                bool zflip = (na > (float)M_PI * 0.5f
+                              && na < (float)M_PI * 1.5f);
+                float zsz = _font_compat[FONT_month].size * 0.85f;
+                float zr = 0.5f * (ORR_ZODIAC_IN + ORR_ZODIAC_OUT)
+                         + zsz * (zflip ? 0.51f : 0.37f);
+                draw_text_curved(d, FONT_month, 0, 0, zr,
                                  ang, orr__sign_names[i], 1.6f, 0.85f);
             }
 
