@@ -1028,29 +1028,26 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float hl2[3] = { helio_light[0], helio_light[1], helio_light[2] };
         float edx = -mdx, edy = -mdy;   // direction moon -> earth, screen
 
-        // FULLY POLAR about the LIVE globe. The moon is a
-        // globe-relative object at every station: physical bearing,
-        // ring-reach radius (1.55 at the stations, easing to the 1.22
-        // hang at the closeup), riding the planet wherever it goes —
-        // between TELLVS, MACHINA, and ORBIS its relative seat never
-        // moves. The ONLY thing that pulls it off the ring is the
-        // 12-hour clock's aperture, whose claim w_ap dies with either
-        // the helio morph or the closeup — so no station flight ever
-        // routes the moon through the aperture's cartesian seat.
+        // The moon's SEAT is polar about the LIVE globe: physical
+        // bearing, ring-reach radius (1.55 at the stations, easing to
+        // the 1.22 hang at the closeup), riding the planet's live
+        // center and size — between TELLVS, MACHINA, and ORBIS the
+        // relative seat never moves. The 12-hour clock's aperture is
+        // the only other form, and its claim follows the CLOCK'S own
+        // choreography: the hands leave the face in the first quarter
+        // of any departure, and so does the moon — a plain point mix
+        // over that brief window (never an arc about a globe 600
+        // units away), zero for the rest of every flight, so neither
+        // clock->MUNDI spirals nor MUNDI->ORBIS ever feels its pull.
         float ring_fac = 1.55f + (1.22f - 1.55f) * obf;
-        float w_ap = (1.0f - m) * (1.0f - obf);
+        float m4 = m * 4.0f > 1.0f ? 1.0f : m * 4.0f;
+        float w_ap = (1.0f - m4) * (1.0f - obf);
         float morb = 1.0f - w_ap;    // the orbital form's claim
         float tgt_ang = atan2f(mdy, mdx);
-        float ap_dx = gx2 - ex, ap_dy = gy2 - ey;
-        float ap_r = sqrtf(ap_dx * ap_dx + ap_dy * ap_dy);
-        float ap_ang = (ap_r > 1.0f) ? atan2f(ap_dy, ap_dx) : tgt_ang;
-        float dang = tgt_ang - ap_ang;
-        while (dang > (float)M_PI) dang -= 2.0f * (float)M_PI;
-        while (dang < -(float)M_PI) dang += 2.0f * (float)M_PI;
-        float mang = ap_ang + dang * morb;
-        float mrad = ap_r * w_ap + earth_r * ring_fac * morb;
-        float mmx = ex + cosf(mang) * mrad;
-        float mmy = ey + sinf(mang) * mrad;
+        float seat_x = ex + mdx * earth_r * ring_fac;
+        float seat_y = ey + mdy * earth_r * ring_fac;
+        float mmx = seat_x * morb + gx2 * w_ap;
+        float mmy = seat_y * morb + gy2 * w_ap;
         float mmr = gr2 * w_ap
                   + (hr2 * (1.0f - obf) + 24.0f * obf) * morb;
 
@@ -1078,8 +1075,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             if (skw < 0.999f) {
                 d->alpha = base_alpha * obf * moon_dim * (1.0f - skw);
                 draw_set_color(d, dca(0.72f, 0.72f, 0.70f, 0.35f));
-                draw_line(d, ex + cosf(mang) * earth_r,
-                          ey + sinf(mang) * earth_r, mmx, mmy, 1.0f);
+                draw_line(d, ex + cosf(tgt_ang) * earth_r,
+                          ey + sinf(tgt_ang) * earth_r, mmx, mmy, 1.0f);
                 d->alpha = base_alpha;
             }
             float mn2 = 0;
