@@ -166,6 +166,70 @@ static inline double globe__det3(const float m[16]) {
          + m02 * (m10 * m21 - m11 * m20);
 }
 
+// Raw quaternion slerp taking qb's sign as given (no shortest-path flip)
+static inline void globe__quat_slerp(const double qa[4], const double qb[4],
+                                     double t, double out[4]) {
+    double dot = qa[0]*qb[0] + qa[1]*qb[1] + qa[2]*qb[2] + qa[3]*qb[3];
+    if (dot > 1.0) dot = 1.0;
+    if (dot < -1.0) dot = -1.0;
+    if (fabs(dot) > 0.9995) {
+        for (int i = 0; i < 4; i++) out[i] = qa[i] + (qb[i] - qa[i]) * t;
+    } else {
+        double th = acos(dot);
+        double sa = sin((1.0 - t) * th) / sin(th);
+        double sb = sin(t * th) / sin(th);
+        for (int i = 0; i < 4; i++) out[i] = qa[i] * sa + qb[i] * sb;
+    }
+    double n = sqrt(out[0]*out[0] + out[1]*out[1] + out[2]*out[2] + out[3]*out[3]);
+    for (int i = 0; i < 4; i++) out[i] /= n;
+}
+
+// Continuity-aware orientation morph. When the target orientation MOVES
+// while the morph runs (the moon tracking Earth, the camera tracking the
+// clock), the per-frame shortest quaternion path can flip sides as the
+// relative rotation crosses 180 degrees — a visible snap. This variant
+// remembers the previously output orientation and picks whichever path
+// candidate stays continuous with it. prev_q/prev_valid live in caller
+// state; endpoints are exact under either path choice.
+static inline void globe_rot_slerp_cont(const float A[16], const float B[16],
+                                        double t, float prev_q[4],
+                                        bool *prev_valid, float out[16]) {
+    float Ap[16], Bp[16];
+    memcpy(Ap, A, sizeof(Ap));
+    memcpy(Bp, B, sizeof(Bp));
+    bool improper = globe__det3(A) < 0.0;
+    if (improper)
+        for (int c = 0; c < 3; c++) { Ap[c*4] = -Ap[c*4]; Bp[c*4] = -Bp[c*4]; }
+
+    double qa[4], qb[4];
+    globe__mat_to_quat(Ap, qa);
+    globe__mat_to_quat(Bp, qb);
+    double d0 = qa[0]*qb[0] + qa[1]*qb[1] + qa[2]*qb[2] + qa[3]*qb[3];
+    double qb1[4], qb2[4];
+    for (int i = 0; i < 4; i++) {
+        qb1[i] = (d0 < 0) ? -qb[i] : qb[i];   // shortest path
+        qb2[i] = -qb1[i];                      // the long way around
+    }
+    double c1[4], c2[4];
+    globe__quat_slerp(qa, qb1, t, c1);
+    globe__quat_slerp(qa, qb2, t, c2);
+
+    const double *pick = c1;
+    if (*prev_valid) {
+        double p1 = fabs(c1[0]*prev_q[0] + c1[1]*prev_q[1]
+                       + c1[2]*prev_q[2] + c1[3]*prev_q[3]);
+        double p2 = fabs(c2[0]*prev_q[0] + c2[1]*prev_q[1]
+                       + c2[2]*prev_q[2] + c2[3]*prev_q[3]);
+        if (p2 > p1) pick = c2;
+    }
+    for (int i = 0; i < 4; i++) prev_q[i] = (float)pick[i];
+    *prev_valid = true;
+
+    globe__quat_to_mat(pick, out);
+    if (improper)
+        for (int c = 0; c < 3; c++) out[c*4] = -out[c*4];
+}
+
 // Spherical interpolation between two view orientations — a smooth
 // camera flight from one vantage to the other. Display matrices carry a
 // reflection (det -1, left-handed screen basis); quaternions only exist

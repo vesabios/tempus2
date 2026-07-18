@@ -38,6 +38,12 @@ struct OrreryViewState {
     float glob_r;           // globe radius (wheel drags exclude the globe)
     bool  dragging;
 
+    // Orientation-morph continuity state (see globe_rot_slerp_cont)
+    float earth_pq[4];
+    bool  earth_pq_valid;
+    float moon_pq[4];
+    bool  moon_pq_valid;
+
     // Coastline unit vectors (earth frame), precomputed at init
     float coast_vec[COAST_NUM_PTS][3];
 };
@@ -82,6 +88,9 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
 static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                           const RenderStyle *s) {
     const OrreryViewState *st = (const OrreryViewState *)buf;
+    // Writable alias for render-side caches (hit-test publishing and
+    // orientation-morph continuity)
+    OrreryViewState *stw = (OrreryViewState *)(uintptr_t)buf;
     const TimeView *tv = &st->tv;
     float base_alpha = d->alpha;
 
@@ -127,7 +136,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         ey = dial_y * (1 - m);
         earth_r = dial_r * (1 - m) + 240.0f * m;
 
-        globe_rot_slerp(geo_rot, helio_rot, m, rot);
+        globe_rot_slerp_cont(geo_rot, helio_rot, m,
+                             stw->earth_pq, &stw->earth_pq_valid, rot);
         float le_g[3], le_h[3], le[3];
         globe_mat_tmul_vec(geo_rot, geo_light, le_g);
         globe_mat_tmul_vec(helio_rot, helio_light, le_h);
@@ -346,7 +356,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             rot_helio[1] = edy;  rot_helio[5] = -edx;
             rot_helio[10] = 1.0f;
             rot_helio[15] = 1.0f;
-            globe_rot_slerp(rot_geo, rot_helio, m, gm->rot);
+            globe_rot_slerp_cont(rot_geo, rot_helio, m,
+                                 stw->moon_pq, &stw->moon_pq_valid, gm->rot);
             memcpy(gm->light, ml, sizeof(ml));
             gm->land = true;      // sample the lunar albedo
             gm->tex_id = 1;
