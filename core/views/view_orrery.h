@@ -999,15 +999,52 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float hex = (m >= 0.999f) ? ex : sphi * base_w * (1.0f - z);
         float hey = (m >= 0.999f) ? ey : -cphi * base_w * (1.0f - z);
         float her = (m >= 0.999f) ? earth_r : 42.0f + z * 198.0f;
-        // ONE FRAME for the moon's orbital position: the wheel's zodiac
-        // convention, dir(lambda_moon), the same direction MACHINA's
-        // ring marker, sight-line, and CAELVM's mover use — so the moon
-        // never swings or flips between stations. (The earlier
-        // spin-frame elongation lived in the globe's proper frame; the
-        // two are mirrored, and blending them swept the moon across
-        // the dial mid-flight. One object, one frame.)
+        // THE MOON'S FRAME LAW (Seren): shown WITH the globe, the moon
+        // is PHYSICALLY placed — its true direction from the earth,
+        // seen in the globe's own view frame. The wheel's mirrored
+        // zodiac frame belongs only to the full system's wheel-world
+        // (where ring markers, sight-lines, and aspect chords live),
+        // and the 12-hour clock's 6-o'clock aperture is dial
+        // furniture. Between TELLVS and MACHINA the direction turns
+        // ALONG the orbit ring (shortest arc) as the system arrives —
+        // an orbital swing, not a sweep across the dial.
         float mdx, mdy;
         orr__ecl_dir(st->planets.geo_lon[BODY_MOON], &mdx, &mdy);
+        float moon_vz = 1.0f;   // view-frame z of the physical direction
+        {
+            double mlon2, mlat2;
+            planets__body_lonlat(BODY_MOON, orbis_jd, &mlon2, &mlat2);
+            double T2 = (orbis_jd - 2451545.0) / 36525.0;
+            double ep2 = (23.439291 - 0.0130042 * T2) * M_PI / 180.0;
+            double lam2 = mlon2 * M_PI / 180.0;
+            double bet2 = mlat2 * M_PI / 180.0;
+            double sd2 = sin(bet2) * cos(ep2)
+                       + cos(bet2) * sin(ep2) * sin(lam2);
+            double dec2 = asin(sd2);
+            double ra2 = atan2(sin(lam2) * cos(ep2)
+                               - tan(bet2) * sin(ep2), cos(lam2));
+            double sl2 = fmod(ra2 * 180.0 / M_PI
+                              - planets__gmst(orbis_jd), 360.0)
+                       * M_PI / 180.0;
+            float me[3] = { (float)(cos(dec2) * cos(sl2)),
+                            (float)(cos(dec2) * sin(sl2)),
+                            (float)(sin(dec2)) };
+            float mv[3];
+            globe_mat_mul_vec(rot, me, mv);
+            float mm2 = sqrtf(mv[0] * mv[0] + mv[1] * mv[1]);
+            if (mm2 > 1.0e-4f) {
+                moon_vz = mv[2];
+                float a0 = atan2f(mv[1] / mm2, mv[0] / mm2);
+                float a1 = atan2f(mdy, mdx);
+                float da = a1 - a0;
+                while (da > (float)M_PI) da -= 2.0f * (float)M_PI;
+                while (da < -(float)M_PI) da += 2.0f * (float)M_PI;
+                float wz = (float)tempus_smoothstep(0.15, 0.85, ss);
+                float am = a0 + da * wz;
+                mdx = cosf(am);
+                mdy = sinf(am);
+            }
+        }
         float hx2 = hex + mdx * her * 1.55f;
         float hy2 = hey + mdy * her * 1.55f;
         // At system scale the moon shrinks toward a bead beside its planet
@@ -1035,25 +1072,36 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             memcpy(ml, m > 0.5f ? hl2 : gl2, sizeof(ml));
         }
 
-        // ORBIS: the moon KEEPS its station position — the same
-        // relative place it held at the station you left. (It was
-        // briefly hung at its sublunar point like the sun, but the
-        // sublunar frame is the physical globe frame and the station
-        // slots live in the wheel's mirrored zodiac frame — the blend
-        // between them read as the moon flipping sides. No frame
-        // swing: the moon simply stays, at full strength.) Only if
-        // its slot falls INSIDE the grown closeup globe — the geo
-        // aperture does — does it slide radially out past the limb.
+        // ORBIS: the moon joins the sun over the closeup — hung on the
+        // same physical direction it already rides at TELLVS (the
+        // frame law makes this a gentle radial ease, not a flip),
+        // lifted on the sun's reach, tethered to the spot it stands
+        // over, phase-lit by the same earth-frame sun. Over the far
+        // side it dims.
         float moon_dim = 1.0f;
         if (obf > 0.001f) {
-            float rdx = mmx - ex, rdy = mmy - ey;
-            float rd = sqrtf(rdx * rdx + rdy * rdy);
-            float need = earth_r + mmr + 14.0f;
-            if (rd > 1.0f && rd < need) {
-                float push = (need - rd) * obf;
-                mmx += rdx / rd * push;
-                mmy += rdy / rd * push;
+            float omx = ex + mdx * earth_r * 1.22f;
+            float omy = ey + mdy * earth_r * 1.22f;
+            if (moon_vz < 0.0f)
+                moon_dim = 1.0f - 0.45f * obf;
+            d->alpha = base_alpha * obf * moon_dim;
+            draw_set_color(d, dca(0.72f, 0.72f, 0.70f, 0.35f));
+            draw_line(d, ex + mdx * earth_r, ey + mdy * earth_r,
+                      omx, omy, 1.0f);
+            d->alpha = base_alpha;
+            mmx = mmx * (1.0f - obf) + omx * obf;
+            mmy = mmy * (1.0f - obf) + omy * obf;
+            mmr = mmr * (1.0f - obf) + 24.0f * obf;
+            // Phase light eases to the shared earth-frame sun
+            // (component blend, no shortest-path flip)
+            float mn2 = 0;
+            for (int i = 0; i < 3; i++) {
+                ml[i] = ml[i] * (1.0f - obf) + light[i] * obf;
+                mn2 += ml[i] * ml[i];
             }
+            mn2 = sqrtf(mn2);
+            if (mn2 > 1.0e-3f)
+                for (int i = 0; i < 3; i++) ml[i] /= mn2;
         }
 
         // Publish the live moon for CAELVM's mover — the sky morph
