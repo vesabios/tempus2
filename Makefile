@@ -38,15 +38,23 @@ WEB_DIR = web
 
 web: $(WEB_DIR)/index.html
 
+# The runtime is a single self-contained .js (wasm + assets embedded)
+# loaded by a static shell page — BOTH work when the html is opened
+# straight from disk (no server): script tags load from file://, and
+# the binary lives inside a .js file where emcc's byte-string escaping
+# is safe. (Inlining it into the html corrupts the wasm: the HTML
+# tokenizer normalizes raw CR bytes to LF inside inline scripts.)
 $(WEB_DIR)/index.html: platform/standalone.c platform/shell.html core/spa.c $(HEADERS) assets/font_atlas.png
 	@mkdir -p $(WEB_DIR)
 	emcc -std=gnu11 -O2 -Wall -Wno-unused-function -I core -I lib -I assets \
-	    platform/standalone.c core/spa.c -o $@ \
+	    platform/standalone.c core/spa.c -o $(WEB_DIR)/index.js \
 	    -sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 -sALLOW_MEMORY_GROWTH=1 \
-	    --shell-file platform/shell.html \
-	    --preload-file assets/font_atlas.png \
-	    --preload-file assets/land_mask.png \
-	    --preload-file assets/moon_mask.png
+	    -sSINGLE_FILE=1 \
+	    --embed-file assets/font_atlas.png \
+	    --embed-file assets/land_mask.png \
+	    --embed-file assets/moon_mask.png
+	sed 's|{{{ SCRIPT }}}|<script src="index.js"></script>|' \
+	    platform/shell.html > $@
 
 serve: web
 	cd $(WEB_DIR) && python3 -m http.server 8123
