@@ -163,10 +163,12 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         st->body_az[b] = (float)az;
         st->body_alt[b] = (float)alt;
 
-        // Diurnal arc: the body's whole day across the bowl (frame
-        // furniture — anchored to the midnight chart)
+        // Diurnal arc: the body's whole day across the bowl, centered
+        // on the true instant — a day-track mostly re-traces itself,
+        // so the arc glides with the scrub instead of lurching at the
+        // date tick, always passing through the body
         for (int i = 0; i < SKY_PATH_N; i++) {
-            double jd = jd_mid + (i - SKY_PATH_N / 2) * 0.5 / 24.0;
+            double jd = jd_ut + (i - SKY_PATH_N / 2) * 0.5 / 24.0;
             planets__body_lonlat(b, jd, &blon, &blat);
             planets_sky_azalt(blon, blat, jd, lat, lon, &az, &alt);
             st->path[b][i][0] = (float)az;
@@ -392,7 +394,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             float y1 = ry1 * ORR_WEB_R * mw + sy1 * (1 - mw);
             bool vis = sky__in_window(st->ecl_az[i], st->ecl_alt[i], zv)
                     && sky__in_window(st->ecl_az[j], st->ecl_alt[j], zv);
-            float a = 0.22f * mw + (vis ? 0.30f : 0.13f) * sw;
+            float dim = 0.13f + (0.30f - 0.13f) * st->win_motion;
+            float a = 0.22f * mw + (vis ? 0.30f : dim) * sw;
             draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
             draw_line(d, x0, y0, x1, y1, 1.0f);
         }
@@ -404,7 +407,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             float x = rx * ORR_WEB_R * mw + sx * (1 - mw);
             float y = ry * ORR_WEB_R * mw + sy * (1 - mw);
             bool vis = sky__in_window(st->sign_az[i], st->sign_alt[i], zv);
-            float a = 0.30f * mw + (vis ? 0.45f : 0.22f) * sw;
+            float dim = 0.22f + (0.45f - 0.22f) * st->win_motion;
+            float a = 0.30f * mw + (vis ? 0.45f : dim) * sw;
             draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
             draw_line(d, x - 4.0f, y - 4.0f, x + 4.0f, y + 4.0f, 1.0f);
             draw_line(d, x - 4.0f, y + 4.0f, x + 4.0f, y - 4.0f, 1.0f);
@@ -465,7 +469,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                                       st->path[b][i][1], zv)
                     && sky__in_window(st->path[b][i + 1][0],
                                       st->path[b][i + 1][1], zv);
-            float a = ra * mw + (vis ? pa : pa * 0.45f) * sw;
+            float pd = pa * (0.45f + 0.55f * st->win_motion);
+            float a = ra * mw + (vis ? pa : pd) * sw;
             if (a < 0.004f) continue;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, a));
@@ -523,9 +528,12 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         float x = rx * pw + sx * (1 - pw);
         float y = ry * pw + sy * (1 - pw);
         // Outside the current window is a place on this chart, not an
-        // exit: bodies in the unseen sky just read slightly subdued
+        // exit: bodies in the unseen sky just read slightly subdued —
+        // but while the window sweeps, the dimming releases entirely
+        // (a moving boundary strobing bodies on and off reads as
+        // flashing, not information)
         float ba = sky__in_window(st->body_az[b], st->body_alt[b], zv)
-                 ? 1.0f : 0.78f;
+                 ? 1.0f : 0.78f + 0.22f * st->win_motion;
         if (!handoff)
             ba *= ms + (1.0f - ms) * fin;   // born in place, fading in
         float pr = rsz * pw + orr__pip_r(st->now.mag[b]) * (1 - pw);
