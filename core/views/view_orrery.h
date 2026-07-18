@@ -44,6 +44,22 @@ struct OrreryViewState {
     float glob_x, glob_y;   // globe center, world coords
     float glob_r;           // globe radius (wheel drags exclude the globe)
     float glob_rot[16];     // live earth->view rotation (ORBIS city pips)
+
+    // Luminary parameters, published for VIEW_LVMEN — the single
+    // renderer of the sun and moon, drawn above machine and sky alike.
+    // Composed HERE (this view knows every station's forms and blends
+    // toward the sky's published chart targets), drawn THERE, once.
+    float lum_sun_x, lum_sun_y, lum_sun_r;
+    float lum_sun_col[3];
+    float lum_sun_ray;        // corona/ray strength
+    float lum_moon_x, lum_moon_y, lum_moon_r;
+    float lum_moon_rot[16];
+    float lum_moon_light[3];
+    float lum_moon_aux[4];
+    float lum_moon_a;
+    float lum_pq[4];
+    bool  lum_pq_valid;
+    const SkyViewState *skyv;
     bool  dragging;
     bool  drag_earth;       // system view: dragging Earth around its orbit
 
@@ -196,6 +212,7 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->sys = sc->system_blend;
     st->skyb = sc->sky_blend;
     st->orbisb = sc->orbis_blend;
+    st->skyv = &sc->sky_state;
     st->geo_azimuth = sc->solar_state.azimuth;
     st->geo_zenith = sc->solar_state.zenith;
     st->solar = &sc->solar_state;
@@ -242,6 +259,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     OrreryViewState *stw = (OrreryViewState *)(uintptr_t)buf;
     const TimeView *tv = &st->tv;
     float base_alpha = d->alpha;
+    // At CAELVM the machine is invisible (opacity floored just above
+    // zero so this render still runs to compose the luminaries) —
+    // skip the vertex-heavy passes outright.
+    bool machine_vis = base_alpha > 0.004f;
 
     float m = (float)st->blend;
     if (m < 0) m = 0;
@@ -397,7 +418,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // crossfade: ownership transfers at a seam where the two forms
     // coincide.
     bool sky_owns = st->skyb > 0.001;
-    if (ss > 0.001f) {
+    float skw = (float)st->skyb;
+    if (skw < 0) skw = 0;
+    if (skw > 1) skw = 1;
+    if (ss > 0.001f && machine_vis) {
         const PlanetsNow *pn = &st->planets;
         float a_ring   = (float)tempus_smoothstep(0.05, 0.45, ss);
         float a_planet = (float)tempus_smoothstep(0.20, 0.60, ss);
@@ -728,7 +752,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // ================= THE GLOBE =================
 
     d->alpha = base_alpha;
-    GlobeCmd *g = draw_globe_slot(d, ex, ey, earth_r);
+    GlobeCmd *g = machine_vis ? draw_globe_slot(d, ex, ey, earth_r)
+                              : NULL;
     if (g) {
         memcpy(g->rot, rot, sizeof(rot));
         memcpy(g->light, light, sizeof(light));
@@ -751,7 +776,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // Coastlines: Natural Earth outlines on the front hemisphere only,
     // rotating with the planet's spin. Subtle at dial size, present at
     // orrery scale.
-    {
+    if (machine_vis) {
         float coast_a = (0.16f + 0.34f * m) * sysf;
         coast_a += (0.55f - coast_a) * ob;
         draw_set_color(d, dca(0.63f, 0.58f, 0.50f, coast_a));
@@ -776,7 +801,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // figure-eight of the seasons, drawn around wherever the sun
     // stands today. Whole-day steps keep the clock time fixed; the
     // width is the equation of time, the height the declination.
-    if (obf > 0.01f) {
+    if (obf > 0.01f && machine_vis) {
         if (fabs(orbis_jd - stw->ana_jd) > 1.0 / 144.0) {
             stw->ana_jd = orbis_jd;
             for (int k = 0; k < 74; k++) {
@@ -913,8 +938,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         sun_c.g = sun_c.g + (126.0f / 255.0f - sun_c.g) * ss;
         sun_c.b = sun_c.b + (16.0f / 255.0f - sun_c.b) * ss;
 
-        // Tether is globe furniture — gone as the sun departs
-        d->alpha = base_alpha * sysf * (1.0f - obf);
+        // Tether is globe furniture — gone as the sun departs, and
+        // faded with the rising sky (its endpoint is the machine form,
+        // not the flying luminary)
+        d->alpha = base_alpha * sysf * (1.0f - obf) * (1.0f - skw);
         if (mag * lift > 1.02f && mag > 1e-4f) {
             float sx0 = ex + (lx / mag) * earth_r;
             float sy0 = ey + (ly / mag) * earth_r;
@@ -922,53 +949,34 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             draw_line(d, sx0, sy0, mx0, my0, 1.0f);
         }
         // ORBIS tether: from the subsolar point on the surface up to
-        // the floating sun — the line says "the sun stands over HERE".
-        // Only when this view owns the sun: a tether without its body
-        // under the dissolving sky reads as a second object.
-        if (obf > 0.01f && !sky_owns) {
-            d->alpha = base_alpha * obf;
+        // the floating sun — the line says "the sun stands over HERE"
+        if (obf > 0.01f && skw < 0.999f) {
+            d->alpha = base_alpha * obf * (1.0f - skw);
             draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.45f));
             draw_line(d, ex + lx * earth_r, ey + ly * earth_r,
                       ex + lx * earth_r * lift, ey + ly * earth_r * lift,
                       1.0f);
         }
-        if (!sky_owns) {
         d->alpha = base_alpha;
-        draw_set_color(d, sun_c);
-        draw_circle_filled(d, px, py, sz);
-        // The corona ring and the sun in splendour — the historical
-        // triangular rays, alternating long and short — engrave
-        // themselves as the sun takes the throne
-        if (ss > 0.001f) {
-            d->alpha = base_alpha * ss;
-            draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
-            draw_circle_stroked(d, px, py, sz * 28.0f / 22.0f, 1.0f);
 
-            draw_set_color(d, dca(0.72f, 0.46f, 0.08f, 0.75f));
-            for (int i = 0; i < 12; i++) {
-                float a = (float)i / 12.0f * 2.0f * (float)M_PI;
-                float ux = sinf(a), uy = -cosf(a);
-                float qx = cosf(a), qy = sinf(a);   // base tangent
-                float rb = sz * 1.32f;
-                float rt = sz * ((i & 1) ? 1.52f : 1.78f);
-                float half = sz * 0.13f;
-                int vb = d->num_verts;
-                draw__push_vert(d, px + ux * rt, py + uy * rt,
-                                d->white_u, d->white_v);
-                draw__push_vert(d, px + ux * rb - qx * half,
-                                py + uy * rb - qy * half,
-                                d->white_u, d->white_v);
-                draw__push_vert(d, px + ux * rb + qx * half,
-                                py + uy * rb + qy * half,
-                                d->white_u, d->white_v);
-                draw__tri(d, vb, vb + 1, vb + 2);
-            }
-            d->alpha = base_alpha;
+        // The sky blend is just one more term of the SAME object's
+        // composition: position and size ease to the chart targets the
+        // sky view publishes. VIEW_LVMEN draws the result, once.
+        if (skw > 0.001f && st->skyv) {
+            px = px * (1.0f - skw) + st->skyv->lum_sun_x * skw;
+            py = py * (1.0f - skw) + st->skyv->lum_sun_y * skw;
+            sz = sz * (1.0f - skw) + st->skyv->lum_sun_r * skw;
         }
-        }   // !sky_owns
 
-        // Publish for hit-testing (render-side cache; see scene_pointer)
+        // Publish for VIEW_LVMEN and for hit-testing
         OrreryViewState *wst = (OrreryViewState *)(uintptr_t)buf;
+        wst->lum_sun_x = px;
+        wst->lum_sun_y = py;
+        wst->lum_sun_r = sz;
+        wst->lum_sun_col[0] = sun_c.r;
+        wst->lum_sun_col[1] = sun_c.g;
+        wst->lum_sun_col[2] = sun_c.b;
+        wst->lum_sun_ray = ss * (1.0f - skw);
         wst->bead_x = px;
         wst->bead_y = py;
         wst->bead_r = sz;
@@ -1093,10 +1101,11 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             mmx = ex + cosf(am) * rr2;
             mmy = ey + sinf(am) * rr2;
             mmr = mmr * (1.0f - obf) + 24.0f * obf;
-            // Tether: radial, directly beneath wherever the moon is —
-            // drawn only when this view owns the moon
-            if (!sky_owns) {
-                d->alpha = base_alpha * obf * moon_dim;
+            // Tether: radial, directly beneath wherever the moon is,
+            // fading with the rising sky (its endpoint is the machine
+            // form, not the flying luminary)
+            if (skw < 0.999f) {
+                d->alpha = base_alpha * obf * moon_dim * (1.0f - skw);
                 draw_set_color(d, dca(0.72f, 0.72f, 0.70f, 0.35f));
                 draw_line(d, ex + cosf(am) * earth_r,
                           ey + sinf(am) * earth_r, mmx, mmy, 1.0f);
@@ -1114,20 +1123,41 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 for (int i = 0; i < 3; i++) ml[i] /= mn2;
         }
 
-        // Publish the live moon for CAELVM's mover — the sky morph
-        // starts every flight from where the moon actually is
+        // The sky blend: one more term of the SAME object's
+        // composition — position, size, orientation, and phase light
+        // all ease to the chart targets the sky view publishes
+        if (skw > 0.001f && st->skyv) {
+            mmx = mmx * (1.0f - skw) + st->skyv->lum_moon_x * skw;
+            mmy = mmy * (1.0f - skw) + st->skyv->lum_moon_y * skw;
+            mmr = mmr * (1.0f - skw) + st->skyv->lum_moon_r * skw;
+            float mn3 = 0;
+            for (int i = 0; i < 3; i++) {
+                ml[i] = ml[i] * (1.0f - skw)
+                      + st->skyv->lum_moon_light[i] * skw;
+                mn3 += ml[i] * ml[i];
+            }
+            mn3 = sqrtf(mn3);
+            if (mn3 > 1.0e-3f)
+                for (int i = 0; i < 3; i++) ml[i] /= mn3;
+        }
+        if (moon_vz < 0.0f)
+            moon_dim = 1.0f - 0.45f * obf * (1.0f - skw);
+
+        // Publish for VIEW_LVMEN (and the pointer code's exclusions)
         stw->moon_x = mmx;
         stw->moon_y = mmy;
         stw->moon_r = mmr;
-
-        GlobeCmd *gm = sky_owns ? NULL
-                     : draw_globe_slot(d, mmx, mmy, mmr);
-        if (gm) {
-            gm->alpha = d->alpha * moon_dim;
+        stw->lum_moon_x = mmx;
+        stw->lum_moon_y = mmy;
+        stw->lum_moon_r = mmr;
+        stw->lum_moon_a = moon_dim;
+        memcpy(stw->lum_moon_light, ml, sizeof(ml));
+        {
             // Tidal locking: geo shows the near side (lon 0 centered,
             // north up); helio looks down the lunar pole with the
-            // near-side meridian aimed at Earth, turning as it orbits.
-            float rot_geo[16], rot_helio[16];
+            // near-side meridian aimed at Earth; the sky chart returns
+            // to the near side. Two continuity-slerped stages.
+            float rot_geo[16], rot_helio[16], mrot0[16];
             globe_rotation(0, 0, rot_geo);
             memset(rot_helio, 0, sizeof(rot_helio));
             // rows: (edx,edy,0), (edy,-edx,0), (0,0,1) — det -1 display
@@ -1136,26 +1166,16 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             rot_helio[10] = 1.0f;
             rot_helio[15] = 1.0f;
             globe_rot_slerp_cont(rot_geo, rot_helio, m,
-                                 stw->moon_pq, &stw->moon_pq_valid, gm->rot);
-            memcpy(gm->light, ml, sizeof(ml));
-            gm->land = true;      // sample the lunar albedo
-            gm->tex_id = 1;
-            // Observer direction for phase legibility: the viewer in geo
-            // (identity — whole disc counts), Earth in helio; the morph
-            // sweeps between them
-            gm->aux_dir[0] = edx * m;
-            gm->aux_dir[1] = edy * m;
-            gm->aux_dir[2] = 1.0f - m;
-            gm->aux_dir[3] = 1.0f;
-            gm->grid_boost = 0.0f;
-            gm->obs_lat = 999.0f;
-            gm->day_col[0] = 0.58f; gm->day_col[1] = 0.55f;
-            gm->day_col[2] = 0.49f; gm->day_col[3] = 1.0f;
-            // Dark indigo night side — the full disc stays legible, and
-            // the albedo ghosting through reads as earthshine
-            gm->night_col[0] = 0.10f; gm->night_col[1] = 0.105f;
-            gm->night_col[2] = 0.23f; gm->night_col[3] = 1.0f;
+                                 stw->moon_pq, &stw->moon_pq_valid,
+                                 mrot0);
+            globe_rot_slerp_cont(mrot0, rot_geo, skw,
+                                 stw->lum_pq, &stw->lum_pq_valid,
+                                 stw->lum_moon_rot);
         }
+        stw->lum_moon_aux[0] = edx * m * (1.0f - skw);
+        stw->lum_moon_aux[1] = edy * m * (1.0f - skw);
+        stw->lum_moon_aux[2] = 1.0f - m * (1.0f - skw);
+        stw->lum_moon_aux[3] = 1.0f;
     }
 
     // City marker ("you are here") + sky-dome. At m=0 the city projects

@@ -221,8 +221,12 @@ static void apply_view_mode(void) {
     // state; the clock draws its hands on top.
     scene_add_layer(&g_scene, VIEW_SOLAR);
     scene_add_layer(&g_scene, VIEW_ORRERY);
-    scene_add_layer(&g_scene, VIEW_CLOCK);
+    // The sky renders under the luminaries; the clock's hands render
+    // over them (the moon lives in the dial's aperture at HOROLOGIVM).
+    // The two never fight: wherever the sky is up, the clock is gone.
     scene_add_layer(&g_scene, VIEW_SKY);
+    scene_add_layer(&g_scene, VIEW_LVMEN);
+    scene_add_layer(&g_scene, VIEW_CLOCK);
     scene_add_layer(&g_scene, VIEW_HORAE);
     scene_add_layer(&g_scene, VIEW_ROTAE);
     scene_add_layer(&g_scene, VIEW_SAEC);
@@ -251,7 +255,11 @@ static void set_view_opacities(void) {
     // control rides along to every worldview
     g_scene.views[VIEW_CALENDAR].opacity = 1.0;
     g_scene.views[VIEW_SOLAR].opacity = 0.0;    // data only, never draws
-    g_scene.views[VIEW_ORRERY].opacity = fade;
+    // The orrery must keep rendering even fully faded — it is the
+    // COMPOSER of the luminaries (its render publishes their
+    // parameters for VIEW_LVMEN). Floor just above the render cutoff;
+    // its vertex-heavy passes skip themselves below visibility.
+    g_scene.views[VIEW_ORRERY].opacity = fade > 0.002 ? fade : 0.002;
     // Clock face and hands exit in the first quarter of the transit (and
     // return in the last quarter coming home) — they're geocentric
     // furniture and have no business lingering over the flight
@@ -263,6 +271,16 @@ static void set_view_opacities(void) {
     g_scene.views[VIEW_ROTAE].opacity = rotae;
     g_scene.views[VIEW_SAEC].opacity = saec;
     g_scene.views[VIEW_ORBIS].opacity = orbis;
+    // The luminaries ride whichever surface is up: the machine's fade
+    // or the sky — never both gone unless an overlay dial owns the
+    // stage. This is what makes the sun and moon SINGLE objects: one
+    // renderer, always on top, parameters composed continuously.
+    {
+        double lum = 1.0 - tempus_smoothstep(0.0, 0.15, sky);
+        double skyvis = tempus_smoothstep(0.0, 0.15, sky);
+        lum = fade > skyvis ? fade : skyvis;
+        g_scene.views[VIEW_LVMEN].opacity = lum;
+    }
 }
 
 // Pacing: vsync drives the frame callback, but update/rebuild work only
@@ -593,6 +611,7 @@ static void init(void) {
     scene_register_view(&g_scene, VIEW_ROTAE,     &rotae_vtable);
     scene_register_view(&g_scene, VIEW_SAEC,      &saec_vtable);
     scene_register_view(&g_scene, VIEW_ORBIS,     &orbis_vtable);
+    scene_register_view(&g_scene, VIEW_LVMEN,     &lumen_vtable);
     scene_init_views(&g_scene, &g_tempus);
 
     if (g_cfg_sweep_override >= 0)

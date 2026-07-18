@@ -34,6 +34,14 @@ struct SkyViewState {
     // view — they place the dusk and dawn visibility windows
     float rise_hr, set_hr;
 
+    // Luminary chart targets, published for the orrery's composition:
+    // the sun and moon are SINGLE objects — the orrery composes their
+    // parameters across every station (this chart included, using
+    // these targets) and VIEW_LVMEN draws them once, above everything.
+    float lum_sun_x, lum_sun_y, lum_sun_r;
+    float lum_moon_x, lum_moon_y, lum_moon_r;
+    float lum_moon_light[3];
+
     // The orrery's state: its published live sun/moon positions are the
     // machine-side endpoints of the morph, read at render time — every
     // flight starts from where the bodies actually are, whatever
@@ -201,6 +209,30 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         planets_sky_azalt(i * 30.0, 0.0, jd_frame, lat, lon, &az, &alt);
         st->sign_az[i] = (float)az;
         st->sign_alt[i] = (float)alt;
+    }
+
+    // Luminary chart targets: positions on this chart, arrival sizes,
+    // and the moon's phase light aimed at the sun's chart position
+    {
+        float sx, sy, mx2, my2;
+        sky__project(st->body_az[BODY_SUN], st->body_alt[BODY_SUN],
+                     &sx, &sy);
+        sky__project(st->body_az[BODY_MOON], st->body_alt[BODY_MOON],
+                     &mx2, &my2);
+        st->lum_sun_x = sx;
+        st->lum_sun_y = sy;
+        st->lum_sun_r = orr__pip_r(st->now.mag[BODY_SUN]);
+        st->lum_moon_x = mx2;
+        st->lum_moon_y = my2;
+        st->lum_moon_r = orr__pip_r(st->now.mag[BODY_MOON]) + 12.0f;
+        double phb = globe_moon_phase(st->cache_jd);
+        float bb = (float)(phb * 2.0 * M_PI);
+        float ux = sx - mx2, uy = sy - my2;
+        float un = sqrtf(ux * ux + uy * uy);
+        if (un > 1.0e-4f) { ux /= un; uy /= un; }
+        st->lum_moon_light[0] = ux * sinf(bb);
+        st->lum_moon_light[1] = uy * sinf(bb);
+        st->lum_moon_light[2] = -cosf(bb);
     }
 }
 
@@ -540,7 +572,11 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // Beads leave their orbit rings and fly to where they truly hang in
     // your sky; anything below the horizon exits through the rim and
     // fades — which is what setting is.
-    for (int b = BODY_COUNT - 1; b >= 0; b--) {   // sun and moon last
+    for (int b = BODY_COUNT - 1; b >= 0; b--) {
+        // The sun and moon are VIEW_LVMEN's: single objects composed
+        // by the orrery across every station, drawn once above both
+        // machine and sky. This chart never draws its own copies.
+        if (b == BODY_SUN || b == BODY_MOON) continue;
         float sx, sy;
         sky__project_clamped(st->body_az[b], st->body_alt[b], &sx, &sy);
 

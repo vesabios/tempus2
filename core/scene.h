@@ -18,6 +18,7 @@
 #include "views/view_rotae.h"
 #include "views/view_saec.h"
 #include "views/view_orbis.h"
+#include "views/view_lumen.h"
 
 // ---- Transitions ----
 
@@ -67,6 +68,7 @@ struct Scene {
     RotaeViewState    rotae_state;
     SaecViewState     saec_state;
     OrbisViewState    orbis_state;
+    LumenViewState    lumen_state;
 
     // Active layer stack (back to front)
     ViewId      layers[SCENE_MAX_LAYERS];
@@ -133,6 +135,7 @@ struct Scene {
 #include "views/view_rotae.h"
 #include "views/view_saec.h"
 #include "views/view_orbis.h"
+#include "views/view_lumen.h"
 
 // ---- Layer management ----
 
@@ -210,6 +213,7 @@ static inline void scene_init(Scene *sc, const Tempus *t) {
     sc->views[VIEW_ROTAE].state    = &sc->rotae_state;
     sc->views[VIEW_SAEC].state     = &sc->saec_state;
     sc->views[VIEW_ORBIS].state    = &sc->orbis_state;
+    sc->views[VIEW_LVMEN].state    = &sc->lumen_state;
 }
 
 static inline void scene_register_view(Scene *sc, ViewId id, const ViewVtable *vt) {
