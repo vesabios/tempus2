@@ -502,10 +502,11 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_text_curved(d, FONT_month, 0, 0, rn, ah,
                          horae__genitive[ridx], 1.2f, 1.0f);
 
-        // The ruler's pip rides the week ring's outer rim at the
-        // contact — hand, pip, name, hour: one radial procession
+        // The ruler's pip sits directly ON the week ring's outer rim
+        // at the contact, a bead threaded on the line — hand, pip,
+        // name, hour: one radial procession
         {
-            float pr = HORAE_RING_OUT - HORAE_ECC + 9.0f;
+            float pr = HORAE_RING_OUT - HORAE_ECC;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, 0.95f));
             draw_circle_filled(d, hdx * pr, hdy * pr, 6.5f);
