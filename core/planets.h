@@ -282,38 +282,99 @@ static inline double planets_sky_altitude(double lon_deg, double lat_deg,
     return asin(salt) / d2r;
 }
 
+// Geocentric ecliptic lon/lat of one body (deg) — the Moon moves 13
+// deg/day, so observability sweeps recompute this per sample
+static inline void planets__body_lonlat(int b, double jd_ut,
+                                        double *lon, double *lat) {
+    if (b == BODY_MOON) {
+        *lon = planets_moon_lon(jd_ut);
+        *lat = planets_moon_lat(jd_ut);
+        return;
+    }
+    double e[3];
+    planets_helio_xyz(PL_EARTH, jd_ut, e);
+    double prec = planets__precession(jd_ut);
+    if (b == BODY_SUN) {
+        *lon = planets__wrap360(atan2(-e[1], -e[0]) * 180.0 / M_PI + prec);
+        *lat = 0.0;
+        return;
+    }
+    double p[3];
+    planets_helio_xyz(planets_body_pl(b), jd_ut, p);
+    double dx = p[0] - e[0], dy = p[1] - e[1], dz = p[2] - e[2];
+    double dr = sqrt(dx * dx + dy * dy + dz * dz);
+    *lon = planets__wrap360(atan2(dy, dx) * 180.0 / M_PI + prec);
+    *lat = (dr > 1e-9) ? asin(dz / dr) * 180.0 / M_PI : 0.0;
+}
+
+// A body is "observable" when it clears the horizon while the sky is
+// dark enough FOR THAT BODY. One threshold cannot serve all: the moon
+// shines through any twilight, Venus and Mercury are twilight objects
+// by definition (Mercury never sees a fully dark high-latitude sky),
+// and the dim outer planets need real darkness. Planets near solar
+// conjunction fail their test for weeks to months — the season-scale
+// answer to "can I see it from here", not the hour-scale one.
+typedef struct { float sun_below; float min_alt; } PlanetsObsReq;
+
+static inline PlanetsObsReq planets__obs_req(int b) {
+    switch (b) {
+        case BODY_MOON:    return (PlanetsObsReq){  0.0f, 2.0f };
+        case BODY_MERCURY: return (PlanetsObsReq){ -5.0f, 4.0f };
+        case BODY_VENUS:   return (PlanetsObsReq){ -4.0f, 3.0f };
+        default:           return (PlanetsObsReq){ -8.0f, 5.0f };
+    }
+}
+
 typedef struct {
-    double alt[BODY_COUNT];    // altitude of each body, deg
+    double alt[BODY_COUNT];    // altitude right now, deg
     // Altitude of the ecliptic itself, sampled every 5 deg of longitude
     // (72 samples): the horizon's cut through the zodiac dial
     float  ecl_alt[72];
+    // Season-scale visibility: best altitude reached during dark sky
+    // over the coming 24h, and the verdict
+    float  best_dark_alt[BODY_COUNT];
+    bool   observable[BODY_COUNT];
 } PlanetsSky;
 
 static inline void planets_sky_compute(PlanetsSky *sky, const PlanetsNow *pn,
                                        double obs_lat_deg,
                                        double obs_lon_deg) {
     double jd_ut = pn->jd_ut;
-    double e[3];
-    planets_helio_xyz(PL_EARTH, jd_ut, e);
 
     for (int b = 0; b < BODY_COUNT; b++) {
-        double blat = 0.0;
-        if (b == BODY_MOON) {
-            blat = planets_moon_lat(jd_ut);
-        } else if (b != BODY_SUN) {
-            double p[3];
-            planets_helio_xyz(planets_body_pl(b), jd_ut, p);
-            double dx = p[0] - e[0], dy = p[1] - e[1], dz = p[2] - e[2];
-            double dr = sqrt(dx * dx + dy * dy + dz * dz);
-            if (dr > 1e-9) blat = asin(dz / dr) * 180.0 / M_PI;
-        }
-        sky->alt[b] = planets_sky_altitude(pn->geo_lon[b], blat, jd_ut,
+        double lon, lat;
+        planets__body_lonlat(b, jd_ut, &lon, &lat);
+        sky->alt[b] = planets_sky_altitude(lon, lat, jd_ut,
                                            obs_lat_deg, obs_lon_deg);
     }
     for (int i = 0; i < 72; i++)
         sky->ecl_alt[i] = (float)planets_sky_altitude(i * 5.0, 0.0, jd_ut,
                                                       obs_lat_deg,
                                                       obs_lon_deg);
+
+    // Observability sweep: the coming 24h in 15-minute steps
+    for (int b = 0; b < BODY_COUNT; b++)
+        sky->best_dark_alt[b] = -90.0f;
+    for (int s = 0; s < 96; s++) {
+        double jd = jd_ut + s / 96.0;
+        double slon, slat;
+        planets__body_lonlat(BODY_SUN, jd, &slon, &slat);
+        double sun_alt = planets_sky_altitude(slon, slat, jd,
+                                              obs_lat_deg, obs_lon_deg);
+        for (int b = BODY_MOON; b < BODY_COUNT; b++) {
+            if (sun_alt > planets__obs_req(b).sun_below) continue;
+            double lon, lat;
+            planets__body_lonlat(b, jd, &lon, &lat);
+            double alt = planets_sky_altitude(lon, lat, jd,
+                                              obs_lat_deg, obs_lon_deg);
+            if (alt > sky->best_dark_alt[b])
+                sky->best_dark_alt[b] = (float)alt;
+        }
+    }
+    sky->observable[BODY_SUN] = true;   // trivially: it is the daytime
+    for (int b = BODY_MOON; b < BODY_COUNT; b++)
+        sky->observable[b] =
+            sky->best_dark_alt[b] > planets__obs_req(b).min_alt;
 }
 
 // ---- Aspects ----

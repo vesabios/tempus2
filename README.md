@@ -48,10 +48,14 @@ equilateral triangle drawn across the whole instrument, live.
 
 The local horizon cuts through the dial as the chart's ascendant axis:
 the below-horizon arc of the zodiac shades dark in the moat and wheels
-around once a day, and each body's marker answers "can I see it right
-now" — filled above your horizon, hollow once set, washed out while the
-sun is up. Sky math (equatorial conversion + sidereal time) is validated
-against SPA to arcminutes.
+around once a day. Each body's marker answers the season-scale "can I
+see it from here at all" — filled if it reaches dark-enough sky tonight
+(per-body thresholds: the moon shines through twilight, Mercury never
+escapes it, the dim outer planets need real darkness), hollow while
+it's lost for weeks behind the sun or pinned below the horizon. The
+gold combust wedge around the sun's marker shows the glare zone that
+swallows them. Sky math (equatorial conversion + sidereal time) is
+validated against SPA to arcminutes.
 
 Solar math is NREL's SPA (`core/spa.c`); sunrise/sunset via `core/sunset.h`.
 The instrument is astronomically honest: the clock shows machine wall time,

@@ -467,21 +467,34 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
 
         // Geocentric markers on the dial + the classic retrograde R.
-        // Marker state reads visibility: filled = above the observer's
-        // horizon, hollow = set; up-markers wash out while the sun is up
-        // (nothing outshines daylight — except the sun, whose own marker
-        // simply follows the same rule: filled by day, hollow by night).
+        // Marker state reads SEASONAL visibility: filled = reaches dark
+        // sky from the observer's location tonight, hollow = out of view
+        // for now (lost behind the sun, or never clearing the horizon in
+        // darkness at this latitude). The combust wedge below shows why
+        // most hollow markers are hollow.
         if (a_zod > 0.001f) {
+            // Solar glare sector: bodies whose markers fall inside it
+            // rise and set with the sun — invisible for weeks around
+            // conjunction. The classic "combust" zone, made geometric.
+            {
+                double ls = pn->geo_lon[BODY_SUN];
+                float ga0 = (float)((0.75 + (ls - 16.0) / 360.0)
+                                    * 2.0 * M_PI - M_PI * 0.5);
+                float ga1 = (float)((0.75 + (ls + 16.0) / 360.0)
+                                    * 2.0 * M_PI - M_PI * 0.5);
+                d->alpha = base_alpha * a_zod;
+                draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.10f));
+                draw_arc_filled(d, 0, 0, ORR_WEB_R - 26.0f,
+                                ORR_WEB_R + 14.0f, ga0, ga1, 24);
+            }
             int rw = _font_compat[FONT_seconds].weight;
-            bool daylight = st->sky.alt[BODY_SUN] > -6.0;   // civil dusk
             for (int b = 0; b < BODY_COUNT; b++) {
-                bool up = st->sky.alt[b] > 0.0;
-                float glare = (daylight && b != BODY_SUN) ? 0.55f : 1.0f;
-                d->alpha = base_alpha * a_zod * (up ? glare : 0.45f);
+                bool vis = st->sky.observable[b];
+                d->alpha = base_alpha * a_zod * (vis ? 1.0f : 0.5f);
                 draw_set_color(d, dca(orr__body_col[b][0] / 255.0f,
                                       orr__body_col[b][1] / 255.0f,
                                       orr__body_col[b][2] / 255.0f, 0.9f));
-                if (up)
+                if (vis)
                     draw_circle_filled(d, mpx[b], mpy[b], 4.0f);
                 else
                     draw_circle_stroked(d, mpx[b], mpy[b], 4.0f, 1.0f);

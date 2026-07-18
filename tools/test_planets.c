@@ -181,6 +181,33 @@ int main(void) {
               worst_alt, 0.0, 0.3);
     }
 
+    // ---- Seasonal observability (Berlin, 2026-07-18) ----
+    // Jupiter and Mercury sit within ~8 deg of the sun (conjunction
+    // season): invisible for weeks. Saturn (100 deg elongation) owns the
+    // morning sky. Public almanac facts for the date.
+    printf("Seasonal observability:\n");
+    {
+        PlanetsNow pn;
+        PlanetsSky sk;
+        planets_compute(&pn, jd_ut(2026, 7, 18, 10.0));
+        planets_sky_compute(&sk, &pn, 52.52, 13.405);
+        static const char *nm[BODY_COUNT] = {
+            "Sun", "Moon", "Mercury", "Venus", "Mars",
+            "Jupiter", "Saturn", "Uranus", "Neptune", "Pluto" };
+        for (int b = 0; b < BODY_COUNT; b++)
+            printf("    %-8s best dark alt %+6.1f  %s\n", nm[b],
+                   sk.best_dark_alt[b],
+                   sk.observable[b] ? "observable" : "out of view");
+        check(!sk.observable[BODY_JUPITER], "Jupiter lost in the sun",
+              sk.observable[BODY_JUPITER], 0, 0);
+        check(!sk.observable[BODY_MERCURY], "Mercury lost in the sun",
+              sk.observable[BODY_MERCURY], 0, 0);
+        check(sk.observable[BODY_SATURN], "Saturn in the morning sky",
+              sk.observable[BODY_SATURN], 1, 0);
+        check(sk.observable[BODY_MOON], "Moon observable",
+              sk.observable[BODY_MOON], 1, 0);
+    }
+
     // ---- Aspect finder smoke test ----
     printf("Aspect finder:\n");
     {
