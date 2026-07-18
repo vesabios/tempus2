@@ -184,6 +184,19 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // counterpart fades in late.
     float mb = (float)st->blend;               // morph position
     float fb = (float)tempus_smoothstep(0.25, 0.95, st->blend);
+    // Machine-counterpart weight: only MACHINA has zodiac/rings/beads
+    // to hand off. Parked there (system stage 1) every element takes
+    // the full ownership flight from its machine slot; parked anywhere
+    // else there is NOTHING to fly from, so the sky's planets and
+    // chart lines are born AT their sky positions and simply fade in
+    // place (and fade out the same way leaving). mw scales the
+    // machine-side position/alpha, sw is the sky-side alpha ramp.
+    float ms = st->orr ? (float)st->orr->sys : 1.0f;
+    if (ms < 0) ms = 0;
+    if (ms > 1) ms = 1;
+    float fin = (float)tempus_smoothstep(0.10, 0.75, st->blend);
+    float mw = ms * (1.0f - mb);
+    float sw = ms * mb + (1.0f - ms) * fin;
     float wheel_R = s->calendar_base_radius
                   * (float)tempus_wheel_scale(1.0);   // MACHINA station
 
@@ -241,12 +254,12 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             orr__ecl_dir(l1, &rx1, &ry1);
             sky__project_clamped(st->ecl_az[i], st->ecl_alt[i], &sx0, &sy0);
             sky__project_clamped(st->ecl_az[j], st->ecl_alt[j], &sx1, &sy1);
-            float x0 = rx0 * ORR_WEB_R * (1 - mb) + sx0 * mb;
-            float y0 = ry0 * ORR_WEB_R * (1 - mb) + sy0 * mb;
-            float x1 = rx1 * ORR_WEB_R * (1 - mb) + sx1 * mb;
-            float y1 = ry1 * ORR_WEB_R * (1 - mb) + sy1 * mb;
+            float x0 = rx0 * ORR_WEB_R * mw + sx0 * (1 - mw);
+            float y0 = ry0 * ORR_WEB_R * mw + sy0 * (1 - mw);
+            float x1 = rx1 * ORR_WEB_R * mw + sx1 * (1 - mw);
+            float y1 = ry1 * ORR_WEB_R * mw + sy1 * (1 - mw);
             bool vis = st->ecl_alt[i] > 0.0f && st->ecl_alt[j] > 0.0f;
-            float a = 0.22f * (1 - mb) + (vis ? 0.30f : 0.13f) * mb;
+            float a = 0.22f * mw + (vis ? 0.30f : 0.13f) * sw;
             draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
             draw_line(d, x0, y0, x1, y1, 1.0f);
         }
@@ -255,10 +268,10 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             float rx, ry, sx, sy;
             orr__ecl_dir(i * 30.0f, &rx, &ry);
             sky__project_clamped(st->sign_az[i], st->sign_alt[i], &sx, &sy);
-            float x = rx * ORR_WEB_R * (1 - mb) + sx * mb;
-            float y = ry * ORR_WEB_R * (1 - mb) + sy * mb;
+            float x = rx * ORR_WEB_R * mw + sx * (1 - mw);
+            float y = ry * ORR_WEB_R * mw + sy * (1 - mw);
             bool vis = st->sign_alt[i] > 0.0f;
-            float a = 0.30f * (1 - mb) + (vis ? 0.45f : 0.22f) * mb;
+            float a = 0.30f * mw + (vis ? 0.45f : 0.22f) * sw;
             draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
             draw_line(d, x - 4.0f, y - 4.0f, x + 4.0f, y + 4.0f, 1.0f);
             draw_line(d, x - 4.0f, y + 4.0f, x + 4.0f, y - 4.0f, 1.0f);
@@ -312,12 +325,12 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                     rx = gx * orbr;
                     ry = gy * orbr;
                 }
-                *out_x = rx * (1 - mb) + sx * mb;
-                *out_y = ry * (1 - mb) + sy * mb;
+                *out_x = rx * mw + sx * (1 - mw);
+                *out_y = ry * mw + sy * (1 - mw);
             }
             bool vis = st->path[b][i][1] > 0.0f
                     && st->path[b][i + 1][1] > 0.0f;
-            float a = ra * (1 - mb) + (vis ? pa : pa * 0.45f) * mb;
+            float a = ra * mw + (vis ? pa : pa * 0.45f) * sw;
             if (a < 0.004f) continue;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, a));
@@ -369,19 +382,23 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             rsz = orr__planet[pl].size;
         }
 
-        float x = rx * (1 - mb) + sx * mb;
-        float y = ry * (1 - mb) + sy * mb;
+        bool handoff = (b == BODY_SUN || b == BODY_MOON);
+        float pw = handoff ? (1 - mb) : mw;
+        float x = rx * pw + sx * (1 - pw);
+        float y = ry * pw + sy * (1 - pw);
         // Below the horizon is a place on this chart, not an exit:
         // bodies in the earth annulus just read slightly subdued
         float ba = st->body_alt[b] < 0.0f ? 0.78f : 1.0f;
-        float pr = rsz * (1 - mb) + orr__pip_r(st->now.mag[b]) * mb;
+        if (!handoff)
+            ba *= ms + (1.0f - ms) * fin;   // born in place, fading in
+        float pr = rsz * pw + orr__pip_r(st->now.mag[b]) * (1 - pw);
 
         if (b == BODY_MOON) {
             // The moon as a phase-lit globe, its bright limb aimed at
             // the sun's place in (or under) the sky
             d->alpha = base_alpha * ba;
             GlobeCmd *gm = draw_globe_slot(d, x, y,
-                rsz * (1 - mb) + (orr__pip_r(st->now.mag[b]) + 12.0f) * mb);
+                rsz * pw + (orr__pip_r(st->now.mag[b]) + 12.0f) * (1 - pw));
             d->alpha = base_alpha;
             if (gm) {
                 double phb = globe_moon_phase(st->cache_jd);
