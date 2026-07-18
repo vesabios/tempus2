@@ -125,6 +125,16 @@ static const char *orr__sign_names[12] = {
     "LIBRA", "SCORPIO", "SAGITTARIUS", "CAPRICORNUS", "AQUARIUS", "PISCES",
 };
 
+// Pip radius from apparent magnitude: how bright a body looks in the
+// real sky is how big its dial marker draws. Clamped so the sun and
+// moon don't flood the ring and Pluto stays a defiant speck.
+static inline float orr__pip_r(double mag) {
+    float r = 5.2f - 0.55f * (float)mag;
+    if (r < 1.4f) r = 1.4f;
+    if (r > 8.5f) r = 8.5f;
+    return r;
+}
+
 // Screen direction of an ecliptic-of-date longitude. The wheel anchors
 // yule (December solstice) at screen-top, where the sun's geocentric
 // longitude is exactly 270 and the sun (at wheel center) is seen from
@@ -483,21 +493,24 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 float ga1 = (float)((0.75 + (ls + 16.0) / 360.0)
                                     * 2.0 * M_PI - M_PI * 0.5);
                 d->alpha = base_alpha * a_zod;
-                draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.10f));
-                draw_arc_filled(d, 0, 0, ORR_WEB_R - 26.0f,
-                                ORR_WEB_R + 14.0f, ga0, ga1, 24);
+                draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.17f));
+                draw_arc_filled(d, 0, 0, ORR_WEB_R - 28.0f,
+                                ORR_WEB_R + 16.0f, ga0, ga1, 24);
             }
             int rw = _font_compat[FONT_seconds].weight;
             for (int b = 0; b < BODY_COUNT; b++) {
-                // Filled vs outlined at full strength — the shape carries
-                // the verdict, no dimming on top
+                // Pip size = apparent magnitude; filled vs outlined at
+                // full strength carries the seasonal verdict. Venus
+                // blooms, Mars breathes with its oppositions, Pluto
+                // stays a speck no matter how close its aspect.
+                float pr = orr__pip_r(pn->mag[b]);
                 draw_set_color(d, dca(orr__body_col[b][0] / 255.0f,
                                       orr__body_col[b][1] / 255.0f,
                                       orr__body_col[b][2] / 255.0f, 0.9f));
                 if (st->sky.observable[b])
-                    draw_circle_filled(d, mpx[b], mpy[b], 4.0f);
+                    draw_circle_filled(d, mpx[b], mpy[b], pr);
                 else
-                    draw_circle_stroked(d, mpx[b], mpy[b], 4.0f, 1.2f);
+                    draw_circle_stroked(d, mpx[b], mpy[b], pr, 1.2f);
                 if (pn->retro[b]) {
                     float dx, dy;
                     orr__ecl_dir(pn->geo_lon[b], &dx, &dy);

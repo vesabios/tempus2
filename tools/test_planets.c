@@ -208,6 +208,28 @@ int main(void) {
               sk.observable[BODY_MOON], 1, 0);
     }
 
+    // ---- Apparent magnitudes in known ranges ----
+    printf("Apparent magnitudes (2026-07-18):\n");
+    {
+        PlanetsNow pn;
+        planets_compute(&pn, jd_ut(2026, 7, 18, 10.0));
+        static const char *nm[BODY_COUNT] = {
+            "Sun", "Moon", "Mercury", "Venus", "Mars",
+            "Jupiter", "Saturn", "Uranus", "Neptune", "Pluto" };
+        for (int b = 0; b < BODY_COUNT; b++)
+            printf("    %-8s m = %+6.2f\n", nm[b], pn.mag[b]);
+        check(pn.mag[BODY_VENUS] > -5.0 && pn.mag[BODY_VENUS] < -3.5,
+              "Venus in [-5, -3.5]", pn.mag[BODY_VENUS], -4.2, 0.8);
+        check(pn.mag[BODY_JUPITER] > -3.0 && pn.mag[BODY_JUPITER] < -1.2,
+              "Jupiter in [-3, -1.2]", pn.mag[BODY_JUPITER], -1.9, 0.9);
+        check(pn.mag[BODY_URANUS] > 5.0 && pn.mag[BODY_URANUS] < 6.5,
+              "Uranus in [5, 6.5]", pn.mag[BODY_URANUS], 5.7, 0.8);
+        check(pn.mag[BODY_NEPTUNE] > 7.0 && pn.mag[BODY_NEPTUNE] < 8.5,
+              "Neptune in [7, 8.5]", pn.mag[BODY_NEPTUNE], 7.8, 0.8);
+        check(pn.mag[BODY_PLUTO] > 13.0 && pn.mag[BODY_PLUTO] < 16.0,
+              "Pluto in [13, 16]", pn.mag[BODY_PLUTO], 14.4, 1.5);
+    }
+
     // ---- Aspect finder smoke test ----
     printf("Aspect finder:\n");
     {

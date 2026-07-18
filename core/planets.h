@@ -201,6 +201,7 @@ typedef struct {
     // All display bodies, BODY_* order: for the zodiac dial + aspects
     double geo_lon[BODY_COUNT];   // deg
     bool   retro[BODY_COUNT];     // apparent longitude currently decreasing
+    double mag[BODY_COUNT];       // apparent visual magnitude
 } PlanetsNow;
 
 // BODY_* index -> PL_* index (-1 for Sun/Moon)
@@ -245,6 +246,52 @@ static inline void planets_compute(PlanetsNow *pn, double jd_ut) {
     planets__geo_lons(jd_ut + 0.5, after);
     for (int b = 0; b < BODY_COUNT; b++)
         pn->retro[b] = planets_lon_diff(after[b], before[b]) < 0.0;
+
+    // Apparent magnitudes (Harris/Meeus): absolute term + distance
+    // dimming + phase darkening. r = sun distance, D = earth distance,
+    // i = phase angle at the planet. Saturn's ring-tilt term is skipped
+    // (up to ~0.5 mag) — this feeds pip sizes, not photometry.
+    {
+        double e[3];
+        planets_helio_xyz(PL_EARTH, jd_ut, e);
+        double R = pn->helio_r[PL_EARTH];
+        // {m0, phase c1, c2, c3} per PL_* planet
+        static const double ph[PL_COUNT][4] = {
+            { -0.42, 3.80e-2, -2.73e-4, 2.00e-6 },   // Mercury
+            { -4.40, 9.00e-4,  2.39e-4, -6.5e-7 },   // Venus
+            {  0.0,  0.0,      0.0,      0.0    },   // (Earth)
+            { -1.52, 1.60e-2,  0.0,      0.0    },   // Mars
+            { -9.40, 5.00e-3,  0.0,      0.0    },   // Jupiter
+            { -8.88, 4.40e-2,  0.0,      0.0    },   // Saturn (no rings)
+            { -7.19, 0.0,      0.0,      0.0    },   // Uranus
+            { -6.87, 0.0,      0.0,      0.0    },   // Neptune
+            { -1.01, 0.0,      0.0,      0.0    },   // Pluto
+        };
+        pn->mag[BODY_SUN] = -26.74;
+        // Moon: full is -12.7; phase angle ~ 180 - elongation
+        {
+            double el = fabs(planets_lon_diff(pn->geo_lon[BODY_MOON],
+                                              pn->geo_lon[BODY_SUN]));
+            double a = 180.0 - el;
+            pn->mag[BODY_MOON] = -12.73 + 0.026 * a
+                               + 4.0e-9 * a * a * a * a;
+        }
+        for (int b = BODY_MERCURY; b < BODY_COUNT; b++) {
+            int pl = planets_body_pl(b);
+            double p[3];
+            planets_helio_xyz(pl, jd_ut, p);
+            double dx = p[0] - e[0], dy = p[1] - e[1], dz = p[2] - e[2];
+            double D = sqrt(dx * dx + dy * dy + dz * dz);
+            double r = pn->helio_r[pl];
+            double ci = (r * r + D * D - R * R) / (2.0 * r * D);
+            if (ci > 1.0) ci = 1.0;
+            if (ci < -1.0) ci = -1.0;
+            double i = acos(ci) * 180.0 / M_PI;
+            pn->mag[b] = ph[pl][0] + 5.0 * log10(r * D)
+                       + ph[pl][1] * i + ph[pl][2] * i * i
+                       + ph[pl][3] * i * i * i;
+        }
+    }
 }
 
 // ---- The local sky: who is above the horizon ----
