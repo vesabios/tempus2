@@ -336,8 +336,9 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         }
 
         // Calendar wheel: film-strip drag anywhere on the band (numerals
-        // through month text), excluding the globe's interior
-        {
+        // through month text), excluding the globe's interior. Helio only
+        // — in geo the wheel doesn't pan, so dragging feels broken.
+        if (sc->helio_blend > 0.5) {
             float R = sc->style.calendar_base_radius
                     + (float)c->zoom * sc->style.zoom_in_radius;
             double ypct = tempus_year_pct(t);

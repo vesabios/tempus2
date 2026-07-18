@@ -51,28 +51,40 @@ static void clock_render(const void *buf, DrawCtx *d, const Tempus *t, const Ren
     draw_set_color(d, s->logo_text);
     draw_text_centered(d, FONT_logo, 0, 80.0f, "T E M P V S");
 
-    // Hour numbers
+    // The globe occupies the 12 position: numeral 12 is not drawn, and
+    // ticks are clipped against the globe's margin disc so they stop at
+    // its edge instead of running underneath.
+    float mcy = s->sunrise_dial_offset;
+    float mrad = s->sunrise_dial_radius + 16.0f;
+
+    // Hour numbers (12 skipped — the planet is the 12)
     draw_set_color(d, s->clock_lines_strong);
-    for (int i = 0; i < 12; i++) {
+    for (int i = 1; i < 12; i++) {
         float a = (float)i / 12.0f;
         float px, py;
         clock__fc(a, 225.0f, &px, &py);
         char num[4];
-        if (i == 0) { num[0]='1'; num[1]='2'; num[2]=0; }
-        else snprintf(num, sizeof(num), "%d", i);
+        snprintf(num, sizeof(num), "%d", i);
         draw_text_centered(d, FONT_clock, px, py, num);
     }
 
-    // Tick marks
+    // Tick marks, clipped at the globe margin
     for (int i = 0; i < 60; i++) {
         float a = (float)i / 60.0f;
         float outer = 300.0f;
         float inner = (i % 5 == 0) ? 250.0f : 270.0f;
+        float ux = sinf(a * 2.0f * (float)M_PI);
+        float uy = -cosf(a * 2.0f * (float)M_PI);
+        // Ray s*u vs disc centered (0, mcy): clip the inner end outward
+        float uc = uy * mcy;
+        float disc = uc * uc - (mcy * mcy - mrad * mrad);
+        if (disc > 0) {
+            float sb = uc + sqrtf(disc);
+            if (sb > inner) inner = sb;
+            if (inner >= outer) continue;   // tick fully under the globe
+        }
         draw_set_color(d, (i % 5 == 0) ? s->clock_lines_strong : s->clock_lines);
-        float x0, y0, x1, y1;
-        clock__fc(a, outer, &x0, &y0);
-        clock__fc(a, inner, &x1, &y1);
-        draw_line_thin(d, x0, y0, x1, y1);
+        draw_line_thin(d, ux * outer, uy * outer, ux * inner, uy * inner);
     }
 
     // Hour hand

@@ -111,9 +111,10 @@ static void set_view_opacities(void) {
     g_scene.views[VIEW_CALENDAR].opacity = 1.0;
     g_scene.views[VIEW_SOLAR].opacity = 0.0;    // data only, never draws
     g_scene.views[VIEW_ORRERY].opacity = 1.0;   // owns the earth instrument
-    // Hands fade out in the first half of the transit (and back in during
-    // the last half of the return) so they don't ghost over the planet
-    double clock_vis = 1.0 - hb * 2.0;
+    // Clock face and hands exit in the first quarter of the transit (and
+    // return in the last quarter coming home) — they're geocentric
+    // furniture and have no business lingering over the flight
+    double clock_vis = 1.0 - hb * 4.0;
     g_scene.views[VIEW_CLOCK].opacity = clock_vis < 0 ? 0.0 : clock_vis;
 }
 
@@ -249,11 +250,15 @@ static void debug_gui(void) {
                 NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_TITLE |
                 NK_WINDOW_MINIMIZABLE)) {
 
-            // Time override toggle
+            // Time override toggle. Engaging captures the CURRENT moment
+            // (stale slider values would make time jump).
             nk_layout_row_dynamic(ctx, 25, 1);
             int override = g_tempus.time_override;
             nk_checkbox_label(ctx, "Manual Time", &override);
-            g_tempus.time_override = override;
+            if (override && !g_tempus.time_override)
+                scene__begin_override(&g_tempus);
+            else if (!override)
+                g_tempus.time_override = false;
 
             if (g_tempus.time_override) {
                 nk_layout_row_dynamic(ctx, 25, 1);
