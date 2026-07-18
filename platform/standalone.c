@@ -195,9 +195,13 @@ static void set_worldview(Worldview wv) {
                         g_scene.saec_blend, wv == WV_SAECVLVM ? 1.0 : 0.0,
                         fly_delay, 3.0, EASE_IN_OUT_CUBIC);
     tween_cancel_target(&g_scene.tweens, &g_scene.orbis_blend);
+    // The closeup composes GEOMETRICALLY with the station flight (the
+    // globe's radius blends against the moving base morph), so it rides
+    // the same clock as the flight — a shorter tween finishes early and
+    // drops the earth onto a base that hasn't arrived yet.
     tween_start_delayed(&g_scene.tweens, &g_scene.orbis_blend,
                         g_scene.orbis_blend, wv == WV_ORBIS ? 1.0 : 0.0,
-                        fly_delay, 3.0, EASE_IN_OUT_CUBIC);
+                        fly_delay, 3.5, EASE_IN_OUT_CUBIC);
     switch (wv) {
         case WV_HOROLOGIVM: fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
         case WV_HORAE:      fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;

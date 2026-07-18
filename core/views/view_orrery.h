@@ -308,7 +308,15 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     if (ob > 0.001f) {
         ex *= (1.0f - ob);
         ey *= (1.0f - ob);
-        earth_r += (ORBIS_GLOBE_R - earth_r) * ob;
+        // Slow-release radius: composed with a station flight, a linear
+        // release lets the closeup collapse faster than the base morph
+        // grows the destination globe (the base radius stays dial-small
+        // through the middle of the flight), so the earth dips under
+        // its final size and settles back up — the sun's overshoot
+        // problem in another coat. The square root holds the closeup
+        // while the flight catches up; the composed path is monotone
+        // from every origin station.
+        earth_r += (ORBIS_GLOBE_R - earth_r) * sqrtf(ob);
         geo_a   *= (1.0f - ob);
         helio_a *= (1.0f - ob);
     }
