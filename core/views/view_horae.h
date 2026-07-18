@@ -70,6 +70,23 @@ static const char *horae__genitive[7] = {
 // Weekday (0 = Sunday) -> Chaldean index of the day's ruler
 static const uint8_t horae__day_ruler[7] = { 3, 6, 2, 5, 1, 4, 0 };
 
+// The seven rulers in their ALCHEMICAL colors — the planet-metal
+// scheme of the old plates (the Azoth's seven rays): lead-black
+// Saturn, tin-violet Jupiter, iron-red Mars, the yellow ray of Sol,
+// Venus in copper's verdigris, quicksilver-tawny Mercury, silver
+// Luna. This is the hours' own tradition — the astronomical
+// appearance palette stays with the physical views. Chaldean order;
+// lead lightens to graphite so its wash reads on a black plate.
+static const uint8_t horae__metal_col[7][3] = {
+    { 105, 102, 112 },   // SATVRNVS — plumbum
+    { 148, 105, 176 },   // IVPPITER — stannum
+    { 198,  74,  56 },   // MARS — ferrum
+    { 216, 170,  44 },   // SOL — aurum
+    {  82, 158, 110 },   // VENVS — cuprum
+    { 208, 132,  58 },   // MERCVRIVS — argentum vivum
+    { 224, 221, 212 },   // LVNA — argentum
+};
+
 // Weekday names in dial order Sunday..Saturday (dies Solis..Saturni)
 static const char *horae__dies[7] = {
     "SOLIS", "LVNAE", "MARTIS", "MERCVRII",
@@ -371,8 +388,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         float lsz = _font_compat[FONT_date].size;
         for (int i = 0; i < 7; i++) {
             float q0 = now - horae__wrap((float)i - m_now, 7.0f) / 7.0f;
-            const uint8_t *c =
-                orr__body_col[horae__chaldean_body[horae__day_ruler[i]]];
+            const uint8_t *c = horae__metal_col[horae__day_ruler[i]];
             bool today = i == w;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, today ? 0.16f : 0.06f));
@@ -490,7 +506,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     // The hand points through the mesh to the ruling planet; the words
     // follow the touch around the dial.
     {
-        const uint8_t *c = orr__body_col[horae__chaldean_body[ridx]];
+        const uint8_t *c = horae__metal_col[ridx];
         float na = fmodf(ah, 2.0f * (float)M_PI);
         if (na < 0) na += 2.0f * (float)M_PI;
         bool lflip = (na > (float)M_PI * 0.5f && na < (float)M_PI * 1.5f);
