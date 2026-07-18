@@ -17,6 +17,7 @@
 #include "views/view_horae.h"
 #include "views/view_rotae.h"
 #include "views/view_saec.h"
+#include "views/view_orbis.h"
 
 // ---- Transitions ----
 
@@ -65,6 +66,7 @@ struct Scene {
     HoraeViewState    horae_state;
     RotaeViewState    rotae_state;
     SaecViewState     saec_state;
+    OrbisViewState    orbis_state;
 
     // Active layer stack (back to front)
     ViewId      layers[SCENE_MAX_LAYERS];
@@ -114,6 +116,10 @@ struct Scene {
     // wheels (ROTAE) and the years of a life (SAECVLVM)
     double      rotae_blend;
     double      saec_blend;
+
+    // Instrument <-> the world chart (ORBIS TERRARVM): the only station
+    // where the observer's location can be changed
+    double      orbis_blend;
 };
 
 // Now Scene is defined — include view function implementations
@@ -126,6 +132,7 @@ struct Scene {
 #include "views/view_horae.h"
 #include "views/view_rotae.h"
 #include "views/view_saec.h"
+#include "views/view_orbis.h"
 
 // ---- Layer management ----
 
@@ -202,6 +209,7 @@ static inline void scene_init(Scene *sc, const Tempus *t) {
     sc->views[VIEW_HORAE].state    = &sc->horae_state;
     sc->views[VIEW_ROTAE].state    = &sc->rotae_state;
     sc->views[VIEW_SAEC].state     = &sc->saec_state;
+    sc->views[VIEW_ORBIS].state    = &sc->orbis_state;
 }
 
 static inline void scene_register_view(Scene *sc, ViewId id, const ViewVtable *vt) {
@@ -389,6 +397,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
     OrreryViewState *o = &sc->orrery_state;
     CalendarViewState *c = &sc->calendar_state;
     HoraeViewState *ho = &sc->horae_state;
+    OrbisViewState *ob = &sc->orbis_state;
 
     bool sys = sc->system_blend > 0.5;
     // In the sky view the machine is parked invisible underneath: the
@@ -398,6 +407,18 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
     bool in_sky = sc->sky_blend > 0.5;
 
     if (phase == 0) {
+        // ORBIS: drag anywhere on the chart to turn the world under the
+        // reticle — this is the location picker, live and deliberate
+        if (sc->orbis_blend > 0.5) {
+            float rp2 = wx * wx + wy * wy;
+            if (rp2 < ORBIS_R * ORBIS_R) {
+                ob->dragging = true;
+                ob->last_wx = wx;
+                ob->last_wy = wy;
+                return;
+            }
+        }
+
         // System view: the sun bead is invisible — instead, grab the
         // planet itself and drag it around its orbit (the wheel).
         if (sys && !in_sky) {
@@ -451,7 +472,8 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         // — in geo the wheel doesn't pan, so dragging feels broken —
         // plus the fixed-wheel stations (HORAE) where it maps 1:1.
         if (sc->helio_blend > 0.5 || sc->horae_blend > 0.5
-            || sc->rotae_blend > 0.5 || sc->saec_blend > 0.5) {
+            || sc->rotae_blend > 0.5 || sc->saec_blend > 0.5
+            || sc->orbis_blend > 0.5) {
             float base_w = (float)tempus_wheel_radius(
                 sc->style.calendar_base_radius, sc->system_blend,
                 sc->sky_blend);
@@ -497,7 +519,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
             float along = dxf * tx + dyf * ty;
             double dv;
             if (sys || sc->horae_blend > 0.5 || sc->rotae_blend > 0.5
-                || sc->saec_blend > 0.5) {
+                || sc->saec_blend > 0.5 || sc->orbis_blend > 0.5) {
                 // System view: the wheel is fixed and the EARTH is what
                 // moves — the pointer/planet follows the finger, arc
                 // length mapping 1:1 to angle at the band radius. (The
@@ -517,6 +539,24 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         }
         c->last_wx = wx;
         c->last_wy = wy;
+    } else if (phase == 1 && ob->dragging) {
+        // Pan: the world follows the finger. Equidistant scale is
+        // uniform (180 deg over the disc radius); dragging down brings
+        // northern land to the reticle, dragging right brings the west
+        // around, arc widened to longitude by the shrinking parallels.
+        float ddx = wx - ob->last_wx, ddy = wy - ob->last_wy;
+        double k = 180.0 / ORBIS_R;
+        double lat = t->config.latitude + (double)ddy * k;
+        if (lat > 85.0) lat = 85.0;
+        if (lat < -85.0) lat = -85.0;
+        double cl = cos(lat * M_PI / 180.0);
+        if (cl < 0.15) cl = 0.15;
+        double lon = t->config.longitude - (double)ddx * k / cl;
+        while (lon > 180.0) lon -= 360.0;
+        while (lon < -180.0) lon += 360.0;
+        tempus_set_location(t, lat, lon);
+        ob->last_wx = wx;
+        ob->last_wy = wy;
     } else if (phase == 1 && ho->ring_dragging) {
         // Incremental angle about the LIVE ring center (it wobbles as
         // time moves under the drag); clockwise = forward
@@ -561,6 +601,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         o->drag_earth = false;
         c->wheel_dragging = false;
         ho->ring_dragging = false;
+        ob->dragging = false;
     }
 }
 
