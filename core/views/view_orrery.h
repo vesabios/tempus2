@@ -171,6 +171,25 @@ static inline float orr__pip_r(double mag) {
     return r;
 }
 
+// Dashed straight line — the aspect chords wear this so they read
+// distinct from the solid curved sight-lines at a glance
+static inline void orr__dashed_line(DrawCtx *d, float x0, float y0,
+                                    float x1, float y1, float w,
+                                    float dash, float gap) {
+    float dx = x1 - x0, dy = y1 - y0;
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len < 1.0e-3f) return;
+    float ux = dx / len, uy = dy / len;
+    float t = 0.0f;
+    while (t < len) {
+        float e = t + dash;
+        if (e > len) e = len;
+        draw_line(d, x0 + ux * t, y0 + uy * t,
+                  x0 + ux * e, y0 + uy * e, w);
+        t = e + gap;
+    }
+}
+
 // Screen direction of an ecliptic-of-date longitude. The wheel anchors
 // yule (December solstice) at screen-top, where the sun's geocentric
 // longitude is exactly 270 and the sun (at wheel center) is seen from
@@ -597,8 +616,9 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                              * (0.05f + 0.60f * sharp);
                     draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                           c[2] / 255.0f, 1.0f));
-                    draw_line(d, mpx[A->a], mpy[A->a],
-                              mpx[A->b], mpy[A->b], wdt);
+                    orr__dashed_line(d, mpx[A->a], mpy[A->a],
+                                     mpx[A->b], mpy[A->b], wdt,
+                                     9.0f, 7.0f);
                 }
             }
             d->alpha = base_alpha;
