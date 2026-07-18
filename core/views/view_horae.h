@@ -284,7 +284,8 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                 if (na < 0) na += 2.0f * (float)M_PI;
                 bool lflip = (na > (float)M_PI * 0.5f
                               && na < (float)M_PI * 1.5f);
-                float mid = (HORAE_RING_IN + HORAE_RING_OUT) * 0.5f;
+                float mid = (HORAE_RING_IN + HORAE_RING_OUT) * 0.5f
+                          + 12.0f;   // clear of the meshing ticks
                 float lr = mid - lsz * 0.5f
                          + lsz * (lflip ? 0.51f : 0.37f);
                 draw_set_color(d, today
@@ -297,22 +298,20 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
 
         // The 168-hour chain as ticks on the meshing edge
         for (int dd = 0; dd < 7; dd++) {
-            int dri = horae__day_ruler[dd];
             for (int h = 0; h < 24; h++) {
                 float mc = dd + rise + (u[h] + u[h + 1]) * 0.5f;
                 float q = now + horae__wrap(mc - m_now, 7.0f) / 7.0f;
                 float aq = q * 2.0f * (float)M_PI;
                 float sx = sinf(aq), sy = -cosf(aq);
 
-                int rr = (dri + h) % 7;
-                const uint8_t *c =
-                    orr__body_col[horae__chaldean_body[rr]];
                 bool is_day = h < 12;
                 bool cur = (dd == pd && h == hcur);
-                float len = cur ? 22.0f : (is_day ? 13.0f : 8.0f);
-                float al = cur ? 1.0f : (is_day ? 0.75f : 0.40f);
-                draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
-                                      c[2] / 255.0f, al));
+                float len = cur ? 18.0f : (is_day ? 11.0f : 6.5f);
+                // Neutral engraving — length carries day/night, the
+                // reading at the contact carries the planet
+                draw_set_color(d, cur
+                    ? dca(0.85f, 0.82f, 0.75f, 1.0f)
+                    : dca(0.62f, 0.60f, 0.55f, is_day ? 0.55f : 0.28f));
                 draw_line(d, rcx + sx * (HORAE_RING_IN + 2.0f),
                           rcy + sy * (HORAE_RING_IN + 2.0f),
                           rcx + sx * (HORAE_RING_IN + 2.0f + len),
@@ -364,20 +363,39 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     // follow the touch around the dial.
     {
         const uint8_t *c = orr__body_col[horae__chaldean_body[ridx]];
-        float tr = HORAE_RING_OUT - HORAE_ECC + 46.0f;
-        float tx = hdx * tr, ty = hdy * tr;
+        float na = fmodf(ah, 2.0f * (float)M_PI);
+        if (na < 0) na += 2.0f * (float)M_PI;
+        bool lflip = (na > (float)M_PI * 0.5f && na < (float)M_PI * 1.5f);
 
-        draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
-                              c[2] / 255.0f, 0.95f));
-        draw_circle_filled(d, tx, ty - 34.0f, 6.5f);
+        // Planet name on its own arc, waist-centered
+        float nsz = _font_compat[FONT_month].size;
+        float rn = 312.0f - nsz * 0.5f + nsz * (lflip ? 0.51f : 0.37f);
         draw_set_color(d, dca(0.80f, 0.77f, 0.70f, 0.95f));
-        draw_text_centered(d, FONT_month, tx, ty, horae__genitive[ridx]);
+        draw_text_curved(d, FONT_month, 0, 0, rn, ah,
+                         horae__genitive[ridx], 1.2f, 1.0f);
 
+        // The ruler's pip leads the name along the arc
+        {
+            float tw2 = (sdf_measure_width(_font_compat[FONT_month].weight,
+                                           horae__genitive[ridx])
+                         + 1.2f * (float)strlen(horae__genitive[ridx]))
+                      * nsz;
+            float off = (tw2 * 0.5f + 20.0f) / 312.0f;
+            float ap = ah + (lflip ? off : -off);
+            draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
+                                  c[2] / 255.0f, 0.95f));
+            draw_circle_filled(d, sinf(ap) * 312.0f,
+                               -cosf(ap) * 312.0f, 6.0f);
+        }
+
+        // The hour line on the arc beyond
         char hb[28];
         snprintf(hb, sizeof(hb), "HORA %s %s", horae__roman[hcur % 12],
                  hcur < 12 ? "DIEI" : "NOCTIS");
+        float isz = _font_compat[FONT_date].size * 0.9f;
+        float ri = 348.0f - isz * 0.5f + isz * (lflip ? 0.51f : 0.37f);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.60f));
-        draw_text_centered(d, FONT_date, tx, ty + 26.0f, hb);
+        draw_text_curved(d, FONT_date, 0, 0, ri, ah, hb, 0.8f, 0.9f);
     }
 
     d->alpha = base_alpha;
