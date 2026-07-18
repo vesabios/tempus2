@@ -13,6 +13,7 @@
 #include "views/view_calendar.h"
 #include "views/view_solar.h"
 #include "views/view_orrery.h"
+#include "views/view_sky.h"
 
 // ---- Transitions ----
 
@@ -45,7 +46,7 @@ static inline PacePolicy pace_default(void) {
 
 // ---- Scene ----
 
-#define SCENE_MAX_LAYERS  4
+#define SCENE_MAX_LAYERS  6
 #define SCENE_MAX_CYCLE  16
 
 struct Scene {
@@ -57,6 +58,7 @@ struct Scene {
     CalendarViewState calendar_state;
     SolarViewState    solar_state;
     OrreryViewState   orrery_state;
+    SkyViewState      sky_state;
 
     // Active layer stack (back to front)
     ViewId      layers[SCENE_MAX_LAYERS];
@@ -90,6 +92,12 @@ struct Scene {
     // zoom-out on the same axis; the shell also rides a global camera
     // scale on this so the outer orbits fit the frame.
     double      system_blend;
+
+    // Instrument <-> the local sky (CAELVM). A frame inversion, not a
+    // camera move: the machine dissolves and the first-person sky chart
+    // fades up. The machine parks at the MACHINA station underneath so
+    // the zodiac ring hands off to the horizon rim at matching size.
+    double      sky_blend;
 };
 
 // Now Scene is defined — include view function implementations
@@ -98,6 +106,7 @@ struct Scene {
 #include "views/view_calendar.h"
 #include "views/view_solar.h"
 #include "views/view_orrery.h"
+#include "views/view_sky.h"
 
 // ---- Layer management ----
 
@@ -170,6 +179,7 @@ static inline void scene_init(Scene *sc, const Tempus *t) {
     sc->views[VIEW_CALENDAR].state = &sc->calendar_state;
     sc->views[VIEW_SOLAR].state    = &sc->solar_state;
     sc->views[VIEW_ORRERY].state   = &sc->orrery_state;
+    sc->views[VIEW_SKY].state      = &sc->sky_state;
 }
 
 static inline void scene_register_view(Scene *sc, ViewId id, const ViewVtable *vt) {
@@ -341,6 +351,15 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                                  float wx, float wy) {
     OrreryViewState *o = &sc->orrery_state;
     CalendarViewState *c = &sc->calendar_state;
+
+    // In the sky view the machine is parked invisible underneath —
+    // don't let drags grab ghosts
+    if (sc->sky_blend > 0.5) {
+        o->dragging = false;
+        o->drag_earth = false;
+        c->wheel_dragging = false;
+        return;
+    }
 
     bool sys = sc->system_blend > 0.5;
 

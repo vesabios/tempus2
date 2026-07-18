@@ -46,6 +46,16 @@ the sacred divisions (conjunction, sextile, square, trine, opposition,
 plus the minors), brightening as the aspect tightens. A grand trine is an
 equilateral triangle drawn across the whole instrument, live.
 
+And the fourth station, CAELVM: the local sky itself, first person. An
+all-sky chart — zenith at center, horizon at the rim, north up and east
+LEFT (you are looking up, not down at a map) — with every body at its
+true azimuth and altitude, sized by apparent magnitude, tracing its
+diurnal arc from rising to setting. The ecliptic lies across the bowl
+with the sign cusps ticked, the background breathes with the sun's own
+altitude through the twilights, and the moon hangs as a phase-lit globe
+with its bright limb aimed at the sun. The stations are named on the
+instrument: HOROLOGIVM, TELLVS, MACHINA MVNDI, CAELVM.
+
 The local horizon cuts through the dial as the chart's ascendant axis:
 the below-horizon arc of the zodiac shades dark in the moat and wheels
 around once a day. Each body's marker answers the season-scale "can I

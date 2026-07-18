@@ -151,7 +151,7 @@ int main(void) {
     //      equatorial conversion + sidereal time + hour angle) ----
     printf("Sun altitude vs SPA (Berlin):\n");
     {
-        double worst_alt = 0;
+        double worst_alt = 0, worst_az = 0;
         for (int i = 0; i < 60; i++) {
             int y = 2004 + (i * 5) % 22;
             int m = 1 + (i * 7) % 12;
@@ -176,9 +176,17 @@ int main(void) {
             planets_sky_compute(&sk, &pn, 52.52, 13.405);
             double err = fabs(sk.alt[BODY_SUN] - alt_spa);
             if (err > worst_alt) worst_alt = err;
+
+            double saz, salt2;
+            planets_sky_azalt(pn.geo_lon[BODY_SUN], 0.0, pn.jd_ut,
+                              52.52, 13.405, &saz, &salt2);
+            double aerr = fabs(planets_lon_diff(saz, s.azimuth));
+            if (aerr > worst_az) worst_az = aerr;
         }
         check(worst_alt < 0.3, "max |sun alt - SPA| over 60 samples",
               worst_alt, 0.0, 0.3);
+        check(worst_az < 0.5, "max |sun az - SPA| over 60 samples",
+              worst_az, 0.0, 0.5);
     }
 
     // ---- Seasonal observability (Berlin, 2026-07-18) ----

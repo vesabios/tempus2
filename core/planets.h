@@ -308,11 +308,13 @@ static inline double planets__gmst(double jd_ut) {
                             + 0.000387933 * T * T);
 }
 
-// Altitude (deg) of a sky position given in ecliptic-of-date lon/lat
-static inline double planets_sky_altitude(double lon_deg, double lat_deg,
-                                          double jd_ut,
-                                          double obs_lat_deg,
-                                          double obs_lon_deg) {
+// Azimuth (deg from north, eastward) and altitude (deg) of a sky
+// position given in ecliptic-of-date lon/lat
+static inline void planets_sky_azalt(double lon_deg, double lat_deg,
+                                     double jd_ut,
+                                     double obs_lat_deg,
+                                     double obs_lon_deg,
+                                     double *az_deg, double *alt_deg) {
     double d2r = M_PI / 180.0;
     double T = (jd_ut - 2451545.0) / 36525.0;
     double eps = (23.439291 - 0.0130042 * T) * d2r;
@@ -323,10 +325,27 @@ static inline double planets_sky_altitude(double lon_deg, double lat_deg,
     double ra = atan2(sin(lam) * cos(eps) - tan(bet) * sin(eps), cos(lam));
 
     double lst = (planets__gmst(jd_ut) + obs_lon_deg) * d2r;
-    double H = lst - ra;   // hour angle
+    double H = lst - ra;   // hour angle, positive west
     double phi = obs_lat_deg * d2r;
-    double salt = sin(phi) * sdec + cos(phi) * cos(dec) * cos(H);
-    return asin(salt) / d2r;
+
+    // Horizontal frame: north, east, up
+    double xN = -cos(dec) * cos(H) * sin(phi) + sdec * cos(phi);
+    double xE = -cos(dec) * sin(H);
+    double xU = sin(phi) * sdec + cos(phi) * cos(dec) * cos(H);
+    if (xU > 1.0) xU = 1.0;
+    if (xU < -1.0) xU = -1.0;
+    *alt_deg = asin(xU) / d2r;
+    *az_deg = planets__wrap360(atan2(xE, xN) / d2r);
+}
+
+static inline double planets_sky_altitude(double lon_deg, double lat_deg,
+                                          double jd_ut,
+                                          double obs_lat_deg,
+                                          double obs_lon_deg) {
+    double az, alt;
+    planets_sky_azalt(lon_deg, lat_deg, jd_ut, obs_lat_deg, obs_lon_deg,
+                      &az, &alt);
+    return alt;
 }
 
 // Geocentric ecliptic lon/lat of one body (deg) — the Moon moves 13

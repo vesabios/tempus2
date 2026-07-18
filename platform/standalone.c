@@ -103,11 +103,12 @@ typedef enum {
     WV_HOROLOGIVM = 0,   // geocentric dial + clock
     WV_TELLVS,           // heliocentric earth
     WV_MACHINA,          // full system + zodiac + aspect web
+    WV_CAELVM,           // the local sky, first person
     WV_COUNT
 } Worldview;
 
 static const char *g_worldview_names[WV_COUNT] = {
-    "HOROLOGIVM", "TELLVS", "MACHINA MVNDI",
+    "HOROLOGIVM", "TELLVS", "MACHINA MVNDI", "CAELVM",
 };
 
 static Worldview g_worldview = WV_HOROLOGIVM;
@@ -118,7 +119,12 @@ static float g_wv_btn[WV_COUNT][4];   // x0, y0, x1, y1
 
 #define SYS_CAMERA_ZOOM 0.62f
 static float sys_camera_scale(void) {
-    return 1.0f - (1.0f - SYS_CAMERA_ZOOM) * (float)g_scene.system_blend;
+    float k = 1.0f - (1.0f - SYS_CAMERA_ZOOM) * (float)g_scene.system_blend;
+    // CAELVM: the sky chart is composed for the plain frame, so the
+    // camera eases home as the machine dissolves — the zodiac ring
+    // (930 * 0.62) hands off to the horizon rim (560) at near-matching
+    // screen size.
+    return k + (1.0f - k) * (float)g_scene.sky_blend;
 }
 
 // Fly the instrument to a worldview station: geo (0,0,0), heliocentric
@@ -140,10 +146,16 @@ static void fly_worldview(double m, double z, double s, double dur) {
 static void set_worldview(Worldview wv) {
     if (wv == g_worldview) return;
     g_worldview = wv;
+    tween_cancel_target(&g_scene.tweens, &g_scene.sky_blend);
+    tween_start(&g_scene.tweens, &g_scene.sky_blend, g_scene.sky_blend,
+                wv == WV_CAELVM ? 1.0 : 0.0, 3.0, EASE_IN_OUT_CUBIC);
     switch (wv) {
         case WV_HOROLOGIVM: fly_worldview(0.0, 0.0, 0.0, 3.5); break;
         case WV_TELLVS:     fly_worldview(1.0, 1.0, 0.0, 3.5); break;
         case WV_MACHINA:    fly_worldview(1.0, 0.0, 1.0, 3.5); break;
+        // The machine parks at MACHINA under the fade, so leaving the
+        // sky always resumes from the adjacent station
+        case WV_CAELVM:     fly_worldview(1.0, 0.0, 1.0, 3.5); break;
         default: break;
     }
 }
@@ -158,18 +170,23 @@ static void apply_view_mode(void) {
     scene_add_layer(&g_scene, VIEW_SOLAR);
     scene_add_layer(&g_scene, VIEW_ORRERY);
     scene_add_layer(&g_scene, VIEW_CLOCK);
+    scene_add_layer(&g_scene, VIEW_SKY);
 }
 
 static void set_view_opacities(void) {
     double hb = g_scene.helio_blend;
-    g_scene.views[VIEW_CALENDAR].opacity = 1.0;
+    double sky = g_scene.sky_blend;
+    // The whole machine dissolves under the sky chart
+    g_scene.views[VIEW_CALENDAR].opacity = 1.0 - sky;
     g_scene.views[VIEW_SOLAR].opacity = 0.0;    // data only, never draws
-    g_scene.views[VIEW_ORRERY].opacity = 1.0;   // owns the earth instrument
+    g_scene.views[VIEW_ORRERY].opacity = 1.0 - sky;
     // Clock face and hands exit in the first quarter of the transit (and
     // return in the last quarter coming home) — they're geocentric
     // furniture and have no business lingering over the flight
     double clock_vis = 1.0 - hb * 4.0;
-    g_scene.views[VIEW_CLOCK].opacity = clock_vis < 0 ? 0.0 : clock_vis;
+    if (clock_vis < 0) clock_vis = 0.0;
+    g_scene.views[VIEW_CLOCK].opacity = clock_vis * (1.0 - sky);
+    g_scene.views[VIEW_SKY].opacity = sky;
 }
 
 // Pacing: vsync drives the frame callback, but update/rebuild work only
@@ -487,6 +504,7 @@ static void init(void) {
     scene_register_view(&g_scene, VIEW_CALENDAR,  &calendar_vtable);
     scene_register_view(&g_scene, VIEW_SOLAR,     &solar_vtable);
     scene_register_view(&g_scene, VIEW_ORRERY,    &orrery_vtable);
+    scene_register_view(&g_scene, VIEW_SKY,       &sky_vtable);
     scene_init_views(&g_scene, &g_tempus);
 
     if (g_cfg_sweep_override >= 0)
@@ -504,6 +522,14 @@ static void init(void) {
         g_worldview = WV_MACHINA;
         g_scene.helio_blend = 1.0;
         g_scene.system_blend = 1.0;
+        g_scene.calendar_state.zoom = 0.0;
+        g_scene.calendar_state.target_zoom = 0.0;
+    }
+    if (getenv("TEMPUS_SKY")) {
+        g_worldview = WV_CAELVM;
+        g_scene.helio_blend = 1.0;
+        g_scene.system_blend = 1.0;
+        g_scene.sky_blend = 1.0;
         g_scene.calendar_state.zoom = 0.0;
         g_scene.calendar_state.target_zoom = 0.0;
     }
