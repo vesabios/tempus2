@@ -410,27 +410,32 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             }
         }
 
-        // The 168-hour chain as ticks on the meshing edge
+        // The 168 hours as an alternating light/dark chapter band on
+        // the meshing edge — the chemin de fer of the week (168 is
+        // even, so the alternation closes seamlessly around the loop).
+        // Day hours stand taller than night hours; the current one
+        // wears gold at the touch.
         for (int dd = 0; dd < 7; dd++) {
             for (int h = 0; h < 24; h++) {
-                float mc = dd + rise + (u[h] + u[h + 1]) * 0.5f;
-                float q = now + horae__wrap(mc - m_now, 7.0f) / 7.0f;
-                float aq = q * 2.0f * (float)M_PI;
-                float sx = sinf(aq), sy = -cosf(aq);
+                float m0 = dd + rise + u[h];
+                float m1 = dd + rise + u[h + 1];
+                float q0 = now + horae__wrap(m0 - m_now, 7.0f) / 7.0f;
+                float q1 = now + horae__wrap(m1 - m_now, 7.0f) / 7.0f;
+                if (q1 < q0) continue;   // the seam cell opposite now
 
                 bool is_day = h < 12;
                 bool cur = (dd == pd && h == hcur);
-                float len = cur ? 20.0f : (is_day ? 12.0f : 7.0f);
-                // Neutral engraving — length carries day/night, the
-                // reading at the contact carries the planet
-                draw_set_color(d, cur
-                    ? dca(0.85f, 0.82f, 0.75f, 1.0f)
-                    : dca(0.62f, 0.60f, 0.55f, is_day ? 0.55f : 0.28f));
-                draw_line(d, rcx + sx * (HORAE_RING_IN + 2.0f),
-                          rcy + sy * (HORAE_RING_IN + 2.0f),
-                          rcx + sx * (HORAE_RING_IN + 2.0f + len),
-                          rcy + sy * (HORAE_RING_IN + 2.0f + len),
-                          cur ? 2.2f : 1.4f);
+                float r1 = HORAE_RING_IN + (is_day ? 16.0f : 10.0f);
+                if (cur) {
+                    draw_set_color(d, dc_scale(s->sunrise_handle, 1.15f));
+                    r1 = HORAE_RING_IN + 20.0f;
+                } else if (((dd * 24 + h) & 1) == 0) {
+                    draw_set_color(d, dca(0.86f, 0.84f, 0.78f, 0.75f));
+                } else {
+                    draw_set_color(d, dca(0.04f, 0.04f, 0.04f, 0.85f));
+                }
+                horae__cell(d, rcx, rcy, HORAE_RING_IN + 2.0f, r1,
+                            q0, q1);
             }
         }
 
