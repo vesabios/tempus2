@@ -37,6 +37,8 @@ struct CalendarViewState {
     float   last_wx, last_wy;   // pointer position at last event
     double  drag_accum;         // days moved since last update tick
     double  fling_vel;          // days/second; nonzero = coasting
+    bool    fling_keep_time;    // the fling's source: day-only (HORAE
+                                // band) vs fractional (ring, elsewhere)
 
     CachedTick ticks[CAL_MAX_TICKS];
     int        num_ticks;

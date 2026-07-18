@@ -248,7 +248,8 @@ static inline void scene_update(Scene *sc, Tempus *t, double dt) {
             if (c->fling_vel > 60.0) c->fling_vel = 60.0;
             if (c->fling_vel < -60.0) c->fling_vel = -60.0;
         } else if (c->fling_vel != 0.0 && t->time_override) {
-            scene__advance_override_days(t, c->fling_vel * dt, false);
+            scene__advance_override_days(t, c->fling_vel * dt,
+                                         c->fling_keep_time);
             c->fling_vel *= exp2(-dt / 0.7);   // half-life ~0.7s
             if (fabs(c->fling_vel) < 0.05) c->fling_vel = 0.0;
         } else {
@@ -439,6 +440,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 ho->last_wy = wy;
                 c->fling_vel = 0;
                 c->drag_accum = 0;
+                c->fling_keep_time = false;   // the ring scrubs hours
                 scene__begin_override(t);
                 return;
             }
@@ -468,6 +470,9 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 c->last_wy = wy;
                 c->fling_vel = 0;    // grabbing stops the flywheel
                 c->drag_accum = 0;
+                // In HORAE the band scrubs whole days (the ring is the
+                // hour control); elsewhere it scrubs fractionally
+                c->fling_keep_time = sc->horae_blend > 0.5;
                 scene__begin_override(t);
             }
         }
@@ -507,7 +512,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 dv = -(double)along / (2.0 * M_PI * (double)denom)
                    * t->total_days;
             }
-            scene__advance_override_days(t, dv, false);
+            scene__advance_override_days(t, dv, c->fling_keep_time);
             c->drag_accum += dv;
         }
         c->last_wx = wx;
