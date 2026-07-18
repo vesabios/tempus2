@@ -108,12 +108,13 @@ typedef enum {
     WV_MACHINA,          // full system + zodiac + aspect web
     WV_CAELVM,           // the local sky, first person
     WV_ORBIS,            // the world chart: choose your place on earth
+    WV_OFFICIVM,         // the book of hours: the canonical offices
     WV_COUNT
 } Worldview;
 
 static const char *g_worldview_names[WV_COUNT] = {
     "HOROLOGIVM", "HORAE", "ROTAE", "SAECVLVM",
-    "TELLVS", "MACHINA MVNDI", "CAELVM", "ORBIS",
+    "TELLVS", "MACHINA MVNDI", "CAELVM", "ORBIS", "OFFICIVM",
 };
 
 static Worldview g_worldview = WV_HOROLOGIVM;
@@ -185,6 +186,10 @@ static void set_worldview(Worldview wv) {
     tween_start_delayed(&g_scene.tweens, &g_scene.saec_blend,
                         g_scene.saec_blend, wv == WV_SAECVLVM ? 1.0 : 0.0,
                         fly_delay, 3.0, EASE_IN_OUT_CUBIC);
+    tween_cancel_target(&g_scene.tweens, &g_scene.offic_blend);
+    tween_start_delayed(&g_scene.tweens, &g_scene.offic_blend,
+                        g_scene.offic_blend, wv == WV_OFFICIVM ? 1.0 : 0.0,
+                        fly_delay, 3.0, EASE_IN_OUT_CUBIC);
     tween_cancel_target(&g_scene.tweens, &g_scene.orbis_blend);
     // The closeup composes GEOMETRICALLY with the station flight (the
     // globe's radius blends against the moving base morph), so it rides
@@ -208,6 +213,7 @@ static void set_worldview(Worldview wv) {
         // from the same parked state and flies direct to the target.
         case WV_CAELVM:     break;
         case WV_ORBIS:      fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
+        case WV_OFFICIVM:   fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
         default: break;
     }
 }
@@ -231,6 +237,7 @@ static void apply_view_mode(void) {
     scene_add_layer(&g_scene, VIEW_ROTAE);
     scene_add_layer(&g_scene, VIEW_SAEC);
     scene_add_layer(&g_scene, VIEW_ORBIS);
+    scene_add_layer(&g_scene, VIEW_OFFIC);
 }
 
 static void set_view_opacities(void) {
@@ -244,10 +251,12 @@ static void set_view_opacities(void) {
     double rotae = g_scene.rotae_blend;
     double saec = g_scene.saec_blend;
     double orbis = g_scene.orbis_blend;
+    double offic = g_scene.offic_blend;
     double fade = (1.0 - tempus_smoothstep(0.0, 0.55, sky))
                 * (1.0 - tempus_smoothstep(0.0, 0.55, horae))
                 * (1.0 - tempus_smoothstep(0.0, 0.55, rotae))
-                * (1.0 - tempus_smoothstep(0.0, 0.55, saec));
+                * (1.0 - tempus_smoothstep(0.0, 0.55, saec))
+                * (1.0 - tempus_smoothstep(0.0, 0.55, offic));
     // ORBIS keeps the orrery: the globe IS the station (it grows to the
     // closeup inside the orrery itself). Only the clock chrome bows out.
     double orbis_fade = 1.0 - tempus_smoothstep(0.0, 0.55, orbis);
@@ -271,6 +280,7 @@ static void set_view_opacities(void) {
     g_scene.views[VIEW_ROTAE].opacity = rotae;
     g_scene.views[VIEW_SAEC].opacity = saec;
     g_scene.views[VIEW_ORBIS].opacity = orbis;
+    g_scene.views[VIEW_OFFIC].opacity = offic;
     // The luminaries ride whichever surface is up: the machine's fade
     // or the sky — never both gone unless an overlay dial owns the
     // stage. This is what makes the sun and moon SINGLE objects: one
@@ -612,6 +622,7 @@ static void init(void) {
     scene_register_view(&g_scene, VIEW_SAEC,      &saec_vtable);
     scene_register_view(&g_scene, VIEW_ORBIS,     &orbis_vtable);
     scene_register_view(&g_scene, VIEW_LVMEN,     &lumen_vtable);
+    scene_register_view(&g_scene, VIEW_OFFIC,     &offic_vtable);
     scene_init_views(&g_scene, &g_tempus);
 
     if (g_cfg_sweep_override >= 0)
@@ -643,6 +654,10 @@ static void init(void) {
     if (getenv("TEMPUS_HORAE")) {
         g_worldview = WV_HORAE;
         g_scene.horae_blend = 1.0;
+    }
+    if (getenv("TEMPUS_OFFICIVM")) {
+        g_worldview = WV_OFFICIVM;
+        g_scene.offic_blend = 1.0;
     }
     if (getenv("TEMPUS_ORBIS")) {
         g_worldview = WV_ORBIS;
