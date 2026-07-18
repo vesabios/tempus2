@@ -38,6 +38,9 @@ struct OrreryViewState {
     // helio mode (rotating the sun's direction = choosing the date)
     float bead_x, bead_y;   // bead position, world coords
     float bead_hit;         // hit radius
+    float bead_r;           // drawn size (CAELVM movers seam to it live)
+    float moon_x, moon_y;   // live moon center + size, same purpose
+    float moon_r;
     float glob_x, glob_y;   // globe center, world coords
     float glob_r;           // globe radius (wheel drags exclude the globe)
     float glob_rot[16];     // live earth->view rotation (ORBIS city pips)
@@ -956,6 +959,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         OrreryViewState *wst = (OrreryViewState *)(uintptr_t)buf;
         wst->bead_x = px;
         wst->bead_y = py;
+        wst->bead_r = sz;
         wst->bead_hit = s->sun_size * earth_r / dial_r + 16.0f;
         wst->glob_x = ex;
         wst->glob_y = ey;
@@ -1020,6 +1024,12 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         } else {
             memcpy(ml, m > 0.5f ? hl2 : gl2, sizeof(ml));
         }
+
+        // Publish the live moon for CAELVM's mover — the sky morph
+        // starts every flight from where the moon actually is
+        stw->moon_x = mmx;
+        stw->moon_y = mmy;
+        stw->moon_r = mmr;
 
         GlobeCmd *gm = (sky_owns || ob > 0.999f) ? NULL
                      : draw_globe_slot(d, mmx, mmy, mmr);

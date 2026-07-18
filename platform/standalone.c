@@ -162,21 +162,12 @@ static void set_worldview(Worldview wv) {
         config_save(&g_tempus.config);
     g_worldview = wv;
 
-    // CAELVM lies beyond MACHINA on the line of stations, and the sky
-    // morph's machine-side endpoints only exist at machina geometry —
-    // so any flight between the sky and a distant station must pass
-    // THROUGH MACHINA. Departing: the sky folds back into the orrery
-    // first, then the machine flies on (delayed). Arriving from afar:
-    // the machine reaches MACHINA first, then the sky rises. Between
-    // CAELVM and MACHINA themselves nothing needs sequencing.
-    bool at_machina = g_scene.system_blend > 0.99
-                   && g_scene.helio_blend > 0.99
-                   && g_scene.calendar_state.zoom < 0.01;
-    bool depart_sky = g_scene.sky_blend > 0.01
-                   && wv != WV_CAELVM && wv != WV_MACHINA;
-    bool arrive_sky = wv == WV_CAELVM && !at_machina;
-    double fly_delay = depart_sky ? 2.2 : 0.0;
-    double sky_delay = arrive_sky ? 2.8 : 0.0;
+    // Sky flights run simultaneously with the machine flight: the sky
+    // morph's sun/moon endpoints track the orrery's LIVE published
+    // positions, so direct flights from any station are continuous —
+    // no routing through MACHINA.
+    double fly_delay = 0.0;
+    double sky_delay = 0.0;
 
     tween_cancel_target(&g_scene.tweens, &g_scene.sky_blend);
     tween_start_delayed(&g_scene.tweens, &g_scene.sky_blend,

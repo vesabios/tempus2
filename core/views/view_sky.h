@@ -30,6 +30,12 @@ struct SkyViewState {
     PlanetsSky sky;
     double     cache_jd;
 
+    // The orrery's state: its published live sun/moon positions are the
+    // machine-side endpoints of the morph, read at render time — every
+    // flight starts from where the bodies actually are, whatever
+    // station the machine is at or between
+    const OrreryViewState *orr;
+
     // Everything projected, refreshed when the clock minute moves
     float body_az[BODY_COUNT], body_alt[BODY_COUNT];
     float path[BODY_COUNT][SKY_PATH_N][2];   // az, alt over +/-12h
@@ -92,6 +98,7 @@ static void sky_exit(void *buf, const Tempus *t, Scene *sc) {
 
 static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     SkyViewState *st = (SkyViewState *)buf;
+    st->orr = &sc->orrery_state;
     (void)dt;
     st->blend = sc->sky_blend;
     if (st->blend < 0.001) return;
@@ -327,20 +334,20 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         float sx, sy;
         sky__project_clamped(st->body_az[b], st->body_alt[b], &sx, &sy);
 
-        // Machine endpoint + size
+        // Machine endpoint + size. Sun and moon come from the orrery's
+        // LIVE published positions — the mover starts from wherever the
+        // machine actually draws them, so direct flights from ANY
+        // station (TELLVS included) are continuous without routing
+        // through MACHINA first.
         float rx = 0, ry = 0, rsz;
         if (b == BODY_SUN) {
-            rx = 0; ry = 0;
-            rsz = 22.0f * 1.45f;
+            rx = st->orr ? st->orr->bead_x : 0;
+            ry = st->orr ? st->orr->bead_y : 0;
+            rsz = st->orr ? st->orr->bead_r : 22.0f * 1.45f;
         } else if (b == BODY_MOON) {
-            double yp = tempus_year_pct(t);
-            float gx, gy;
-            orr__ecl_dir(st->now.geo_lon[BODY_MOON], &gx, &gy);
-            rx = sinf((float)(yp * 2.0 * M_PI)) * wheel_R
-               + gx * 42.0f * 1.55f;
-            ry = -cosf((float)(yp * 2.0 * M_PI)) * wheel_R
-               + gy * 42.0f * 1.55f;
-            rsz = 9.9f;
+            rx = st->orr ? st->orr->moon_x : 0;
+            ry = st->orr ? st->orr->moon_y : 0;
+            rsz = st->orr ? st->orr->moon_r : 9.9f;
         } else {
             int pl = planets_body_pl(b);
             float gx, gy;
@@ -362,7 +369,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             // The moon as a phase-lit globe, its bright limb aimed at
             // the sun's place in (or under) the sky
             d->alpha = base_alpha * ba;
-            GlobeCmd *gm = draw_globe_slot(d, x, y, pr + 12.0f);
+            GlobeCmd *gm = draw_globe_slot(d, x, y,
+                rsz * (1 - mb) + (orr__pip_r(st->now.mag[b]) + 12.0f) * mb);
             d->alpha = base_alpha;
             if (gm) {
                 double phb = globe_moon_phase(st->cache_jd);
