@@ -95,12 +95,26 @@ static int             g_shot_countdown = 0;
 // View mode: geocentric (calendar + solar dial + clock) vs heliocentric
 // (calendar wheel as orbit + orrery earth). The scene's helio_blend
 // morphs between them; layer opacities derive from it every frame.
-static bool g_heliocentric = false;
+// Worldview stations — mutually exclusive vantages, each a point on the
+// (helio_blend, zoom, system_blend) morph axis. Named in the
+// instrument's Latin: the timepiece, the earth as a body, the machine
+// of the world. CAELVM (the local sky) joins as the fourth.
+typedef enum {
+    WV_HOROLOGIVM = 0,   // geocentric dial + clock
+    WV_TELLVS,           // heliocentric earth
+    WV_MACHINA,          // full system + zodiac + aspect web
+    WV_COUNT
+} Worldview;
 
-// Third worldview station: the full solar system with zodiac dial. Rides
-// scene.system_blend; the shell also pulls the camera back so the outer
-// orbits and the zodiac ring fit the 1280-unit frame.
-static bool g_system = false;
+static const char *g_worldview_names[WV_COUNT] = {
+    "HOROLOGIVM", "TELLVS", "MACHINA MVNDI",
+};
+
+static Worldview g_worldview = WV_HOROLOGIVM;
+
+// Annunciator hit rects (chrome space: 1280-tall world units, no camera
+// zoom), published by the frame that draws them
+static float g_wv_btn[WV_COUNT][4];   // x0, y0, x1, y1
 
 #define SYS_CAMERA_ZOOM 0.62f
 static float sys_camera_scale(void) {
@@ -121,6 +135,17 @@ static void fly_worldview(double m, double z, double s, double dur) {
     tween_cancel_target(&g_scene.tweens, &g_scene.system_blend);
     tween_start(&g_scene.tweens, &g_scene.system_blend,
                 g_scene.system_blend, s, dur, EASE_IN_OUT_CUBIC);
+}
+
+static void set_worldview(Worldview wv) {
+    if (wv == g_worldview) return;
+    g_worldview = wv;
+    switch (wv) {
+        case WV_HOROLOGIVM: fly_worldview(0.0, 0.0, 0.0, 3.5); break;
+        case WV_TELLVS:     fly_worldview(1.0, 1.0, 0.0, 3.5); break;
+        case WV_MACHINA:    fly_worldview(1.0, 0.0, 1.0, 3.5); break;
+        default: break;
+    }
 }
 
 static void apply_view_mode(void) {
@@ -357,30 +382,12 @@ static void debug_gui(void) {
             nk_checkbox_label(ctx, "Sweep second hand", &sweep);
             g_scene.style.sweep_seconds = sweep;
 
-            // Geocentric vs heliocentric (tweened camera flight)
+            // Worldview station (tweened camera flight between vantages)
             nk_layout_row_dynamic(ctx, 25, 1);
-            int helio = g_heliocentric;
-            nk_checkbox_label(ctx, "Heliocentric (orrery)", &helio);
-            if ((bool)helio != g_heliocentric) {
-                g_heliocentric = helio;
-                g_system = false;
-                // Zoom rides the same flight: heliocentric arrives at the
-                // big centered planet, geocentric returns to the dial
-                fly_worldview(helio ? 1.0 : 0.0, helio ? 1.0 : 0.0, 0.0, 3.0);
-            }
-
-            // Full system: every planet, zodiac dial, aspect web
-            nk_layout_row_dynamic(ctx, 25, 1);
-            int sys = g_system;
-            nk_checkbox_label(ctx, "Full system (zodiac)", &sys);
-            if ((bool)sys != g_system) {
-                g_system = sys;
-                if (sys)
-                    fly_worldview(1.0, 0.0, 1.0, 4.0);
-                else
-                    fly_worldview(g_heliocentric ? 1.0 : 0.0,
-                                  g_heliocentric ? 1.0 : 0.0, 0.0, 4.0);
-            }
+            int wv = nk_combo(ctx, g_worldview_names, WV_COUNT,
+                              (int)g_worldview, 22, nk_vec2(240, 140));
+            if (wv != (int)g_worldview)
+                set_worldview((Worldview)wv);
 
             // Globe overlay: static encodings of solar motion
             static const char *overlay_names[GLOBE_OVERLAY_COUNT] = {
@@ -487,15 +494,14 @@ static void init(void) {
 
     g_scene.cycle_len = 0;
 
-    g_heliocentric = getenv("TEMPUS_HELIO") != NULL;
-    g_scene.helio_blend = g_heliocentric ? 1.0 : 0.0;
-    if (g_heliocentric) {
+    if (getenv("TEMPUS_HELIO")) {
+        g_worldview = WV_TELLVS;
+        g_scene.helio_blend = 1.0;
         g_scene.calendar_state.zoom = 1.0;
         g_scene.calendar_state.target_zoom = 1.0;
     }
-    g_system = getenv("TEMPUS_SYSTEM") != NULL;
-    if (g_system) {   // full system: heliocentric, wheel at base radius
-        g_heliocentric = false;
+    if (getenv("TEMPUS_SYSTEM")) {
+        g_worldview = WV_MACHINA;
         g_scene.helio_blend = 1.0;
         g_scene.system_blend = 1.0;
         g_scene.calendar_state.zoom = 0.0;
@@ -776,6 +782,34 @@ static void frame(void) {
         g_draw.sy = scale;
         scene_render(&g_scene, &g_draw, &g_tempus);
 
+        // Worldview annunciator: the station names engraved upper-right,
+        // active one lit. Chrome space — plain 1280-tall units, no
+        // camera pull-back — so it holds still while the instrument
+        // flies. Hit rects published for the click handler.
+        {
+            g_draw.sx = g_draw.sy = h / 1280.0f;
+            g_draw.tx = g_draw.ty = 0;
+            float half_w = (w / h) * 640.0f;
+            int wv_w = _font_compat[FONT_date].weight;
+            float wv_sz = 21.0f;
+            float x_r = half_w - 42.0f;
+            float y = -640.0f + 46.0f;
+            for (int i = 0; i < WV_COUNT; i++) {
+                float tw = sdf_measure_width(wv_w, g_worldview_names[i])
+                         * wv_sz;
+                draw_set_color(&g_draw, (int)g_worldview == i
+                    ? dca(0.78f, 0.75f, 0.68f, 0.95f)
+                    : dca(0.50f, 0.49f, 0.46f, 0.38f));
+                draw_text_ex(&g_draw, wv_w, wv_sz, x_r - tw, y,
+                             g_worldview_names[i]);
+                g_wv_btn[i][0] = x_r - tw - 10.0f;
+                g_wv_btn[i][1] = y - 6.0f;
+                g_wv_btn[i][2] = x_r + 10.0f;
+                g_wv_btn[i][3] = y + wv_sz + 6.0f;
+                y += 34.0f;
+            }
+        }
+
         // Build nuklear GUI
         if (g_show_debug)
             debug_gui();
@@ -915,6 +949,20 @@ static void event(const sapp_event *e) {
     // Pass events to nuklear first
     if (snk_handle_event(e))
         return; // nuklear consumed the event
+
+    // Worldview annunciator clicks (chrome space: no camera zoom)
+    if (e->type == SAPP_EVENTTYPE_MOUSE_DOWN) {
+        float cs = sapp_heightf() / 1280.0f;
+        float cx = (e->mouse_x - sapp_widthf() * 0.5f) / cs;
+        float cy = (e->mouse_y - sapp_heightf() * 0.5f) / cs;
+        for (int i = 0; i < WV_COUNT; i++) {
+            if (cx >= g_wv_btn[i][0] && cx <= g_wv_btn[i][2]
+                && cy >= g_wv_btn[i][1] && cy <= g_wv_btn[i][3]) {
+                set_worldview((Worldview)i);
+                return;
+            }
+        }
+    }
 
     // Pointer events in world coordinates (the draw space is a virtual
     // 1280-unit-tall frame centered on screen)
