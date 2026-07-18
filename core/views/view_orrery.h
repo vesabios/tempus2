@@ -778,7 +778,11 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // In helio the real sun sits at the wheel center, so the marker
         // lifts well off the globe toward it — a bead on the sun line.
         // Its tether starts at the PERIMETER, not the globe center.
-        float lift = 1.0f + 0.9f * m;
+        // The ORBIS closeup collapses the lift on its own clock: the
+        // marker pins to the surface as the subsolar point, instead of
+        // wobbling out-and-in while the lift (station clock) and the
+        // radius hold (orbis clock) race each other.
+        float lift = 1.0f + 0.9f * m * (1.0f - ob);
         float mx0 = ex + lx * earth_r * lift, my0 = ey + ly * earth_r * lift;
         float mag = sqrtf(lx * lx + ly * ly);
 

@@ -649,6 +649,11 @@ static void init(void) {
         g_scene.helio_blend = 1.0;
         g_scene.system_blend = atof(sblend);
     }
+    const char *oblend = getenv("TEMPUS_ORBISBLEND");  // dev: pin closeup
+    if (oblend) {
+        g_worldview = WV_ORBIS;
+        g_scene.orbis_blend = atof(oblend);
+    }
     const char *kblend = getenv("TEMPUS_SKYBLEND");  // dev: pin sky morph
     if (kblend) {
         g_worldview = WV_CAELVM;

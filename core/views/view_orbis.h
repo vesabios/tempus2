@@ -133,18 +133,25 @@ static void orbis_render(const void *buf, DrawCtx *d, const Tempus *t,
 
     // ---- The reticle: you are here, always, at center ----
     // The globe underneath is oriented observer-face-on, so the point
-    // under these crosshairs IS the configured location.
+    // under these crosshairs IS the configured location. It rides the
+    // LIVE globe center, so mid-flight it stays on the earth instead
+    // of floating at the station's origin waiting for it.
     {
+        float rx = 0.0f, ry = 0.0f;
+        if (st->orr && st->orr->glob_r > 1.0f) {
+            rx = st->orr->glob_x;
+            ry = st->orr->glob_y;
+        }
         draw_set_color(d, dc_scale(s->sunrise_handle, 1.1f));
-        draw_circle_stroked(d, 0, 0, 12.0f, 1.5f);
+        draw_circle_stroked(d, rx, ry, 12.0f, 1.5f);
         for (int i = 0; i < 4; i++) {
             float a = (float)i * 0.5f * (float)M_PI;
             float cx = cosf(a), cy = sinf(a);
-            draw_line(d, cx * 16.0f, cy * 16.0f, cx * 26.0f, cy * 26.0f,
-                      1.5f);
+            draw_line(d, rx + cx * 16.0f, ry + cy * 16.0f,
+                      rx + cx * 26.0f, ry + cy * 26.0f, 1.5f);
         }
         draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.9f));
-        draw_circle_filled(d, 0, 0, 2.0f);
+        draw_circle_filled(d, rx, ry, 2.0f);
     }
 
     // ---- Readout: the configured coordinates, live under the drag ----
