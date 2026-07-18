@@ -101,21 +101,27 @@ static void horae_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->blend = sc->horae_blend;
 }
 
-// The sky's own colors, keyed to the sun's altitude: day gold, low
-// amber, civil ember, nautical violet, astronomical indigo, night.
-// Rich on purpose — this band is the one place the instrument wears
-// the sky's palette at full voice.
+// The sky's own colors, keyed to the sun's altitude — the Rayleigh
+// story told twice over: azure day, the gold and fire of the
+// crossings, then the BLUE HOUR (the deep saturated blue after
+// sunset), sinking through nautical blue to near-black night. The
+// purple the ramp passes between fire and blue hour is real too —
+// twilight's "purple light". Rich on purpose: this band is the one
+// place the instrument wears the sky at full voice.
 static DrawColor horae__sky(float alt) {
-    static const float k[6][4] = {
-        {  20.0f, 0.95f, 0.72f, 0.22f },
-        {   4.0f, 1.00f, 0.52f, 0.14f },
-        {  -4.0f, 0.80f, 0.24f, 0.20f },
-        { -10.0f, 0.42f, 0.16f, 0.45f },
-        { -16.0f, 0.15f, 0.11f, 0.36f },
-        { -28.0f, 0.05f, 0.05f, 0.15f },
+    static const float k[9][4] = {
+        {  25.0f, 0.30f, 0.55f, 0.95f },   // azure day
+        {   8.0f, 0.55f, 0.64f, 0.90f },   // paling toward the horizon
+        {   3.0f, 0.95f, 0.62f, 0.28f },   // golden hour
+        {   0.0f, 1.00f, 0.45f, 0.15f },   // the crossing: sunset fire
+        {  -3.0f, 0.85f, 0.25f, 0.18f },   // last red
+        {  -7.0f, 0.16f, 0.24f, 0.58f },   // the blue hour
+        { -12.0f, 0.07f, 0.11f, 0.34f },   // nautical blue
+        { -18.0f, 0.03f, 0.05f, 0.17f },   // astronomical
+        { -28.0f, 0.015f, 0.02f, 0.075f }, // night
     };
     if (alt >= k[0][0]) return dc(k[0][1], k[0][2], k[0][3]);
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 8; i++) {
         if (alt >= k[i + 1][0]) {
             float f = (alt - k[i + 1][0]) / (k[i][0] - k[i + 1][0]);
             return dc(k[i + 1][1] + (k[i][1] - k[i + 1][1]) * f,
@@ -123,7 +129,7 @@ static DrawColor horae__sky(float alt) {
                       k[i + 1][3] + (k[i][3] - k[i + 1][3]) * f);
         }
     }
-    return dc(k[5][1], k[5][2], k[5][3]);
+    return dc(k[8][1], k[8][2], k[8][3]);
 }
 
 // Wrap into [-half, half)
