@@ -190,8 +190,11 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
 
     // Full-system ephemeris: clock time is local, the sky runs on UT.
     // Minute granularity — the fastest body (the Moon) moves 0.009
-    // deg/minute, far below a hairline at dial scale.
-    if (st->sys > 0.001) {
+    // deg/minute, far below a hairline at dial scale. Computed at any
+    // heliocentric station, not just the full system: the moon's
+    // orbital direction uses the zodiac frame everywhere (one object,
+    // one frame — no flip between TELLVS and MACHINA).
+    if (st->sys > 0.001 || st->blend > 0.001) {
         double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
                      - t->config.timezone / 24.0;
         if (fabs(jd_ut - st->planets_jd) > 1.0 / 1440.0) {
@@ -827,17 +830,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     {
         double ph = globe_moon_phase(tv->jd_current
                                      + tv->percent_of_day - 0.5);
-        double b_deg = ph * 360.0;
-        if (ss > 0.001f) {
-            // In the system view the true geocentric elongation takes
-            // over, so the moon hangs at its real zodiac longitude — the
-            // sight-line and the aspect web land on the same point
-            double elo = planets_lon_diff(st->planets.geo_lon[BODY_MOON],
-                                          st->planets.geo_lon[BODY_SUN]);
-            b_deg += planets_lon_diff(elo, b_deg)
-                   * tempus_smoothstep(0.2, 0.7, ss);
-        }
-        float b = (float)(b_deg * M_PI / 180.0);
+        float b = (float)(ph * 2.0 * M_PI);
 
         // Geo endpoint: the 6 o'clock aperture, phase-frame light
         float gx2 = 0.0f, gy2 = -dial_y, gr2 = 52.0f;
@@ -850,35 +843,15 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float hex = (m >= 0.999f) ? ex : sphi * base_w * (1.0f - z);
         float hey = (m >= 0.999f) ? ey : -cphi * base_w * (1.0f - z);
         float her = (m >= 0.999f) ? earth_r : 42.0f + z * 198.0f;
-        float plm = sqrtf(helio_light[0] * helio_light[0]
-                        + helio_light[1] * helio_light[1]);
-        float slx = (plm > 1e-4f) ? helio_light[0] / plm : 0.0f;
-        float sly = (plm > 1e-4f) ? helio_light[1] / plm : -1.0f;
-        // Elongation advances CCW on screen — the display frame's
-        // physical rotation sense (the surface clock's hour labels run
-        // CCW; a first-quarter moon must sit over the 18 tick, waning
-        // over the morning side). CW here was the inversion that made
-        // geo and helio phases disagree.
-        float mdx = slx * cosf(b) + sly * sinf(b);
-        float mdy = -slx * sinf(b) + sly * cosf(b);
-        if (ss > 0.001f) {
-            // The system stage is governed by ecliptic longitude. The
-            // spin-sense elongation above lives in the globe's PROPER
-            // frame; the wheel maps orbits MIRRORED (the year runs
-            // clockwise), and the zodiac dial, ring marker and
-            // sight-line live in the wheel's world — so the moon swings
-            // to its true sky direction as the system arrives.
-            float sw = (float)tempus_smoothstep(0.2, 0.7, ss);
-            float tdx, tdy;
-            orr__ecl_dir(st->planets.geo_lon[BODY_MOON], &tdx, &tdy);
-            float a0 = atan2f(mdy, mdx), a1 = atan2f(tdy, tdx);
-            float da = a1 - a0;
-            while (da > (float)M_PI) da -= 2.0f * (float)M_PI;
-            while (da < -(float)M_PI) da += 2.0f * (float)M_PI;
-            float aa = a0 + da * sw;
-            mdx = cosf(aa);
-            mdy = sinf(aa);
-        }
+        // ONE FRAME for the moon's orbital position: the wheel's zodiac
+        // convention, dir(lambda_moon), the same direction MACHINA's
+        // ring marker, sight-line, and CAELVM's mover use — so the moon
+        // never swings or flips between stations. (The earlier
+        // spin-frame elongation lived in the globe's proper frame; the
+        // two are mirrored, and blending them swept the moon across
+        // the dial mid-flight. One object, one frame.)
+        float mdx, mdy;
+        orr__ecl_dir(st->planets.geo_lon[BODY_MOON], &mdx, &mdy);
         float hx2 = hex + mdx * her * 1.55f;
         float hy2 = hey + mdy * her * 1.55f;
         // At system scale the moon shrinks toward a bead beside its planet
