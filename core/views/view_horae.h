@@ -1,19 +1,23 @@
-// view_horae.h — HORAE: the planetary hours.
+// view_horae.h — HORAE: the planetary hours, as gearing.
 //
 // The oldest fusion of planets and timekeeping, and the reason the days
 // of the week are named what they are. Each hour is ruled by a planet
 // in the Chaldean order (Saturn, Jupiter, Mars, Sun, Venus, Mercury,
-// Moon — slowest to fastest); the ruler of a day's FIRST hour names the
-// day, and stepping 24 hours through the order lands three places on —
-// which generates Sun, Moon, Mars, Mercury, Jupiter, Venus, Saturn:
-// the week.
+// Moon — slowest to fastest), one unbroken chain with no daily reset.
+// The chain's true period is not the day but the WEEK: 168 hours, and
+// 168/24 = 7, so the system IS a 7:1 internal gear — a 24-hour pinion
+// rolling inside a 168-cell annulus, turning seven times per lap. The
+// skip-of-three that orders the weekdays is just what that pinion does.
 //
-// The hours are TEMPORAL (horae temporales): daylight divided into
-// twelve, night into twelve, so summer day-hours run long and winter
-// ones short. The dial wears that inequality openly — the day sectors
-// swell and shrink with the seasons. Noon at the bottom, matching the
-// solar dial's convention. Pure time: no ephemeris, just sunrise,
-// sunset, and arithmetic older than the calendar.
+// So the dial is built as that gear. The week annulus streams past a
+// fixed mesh marker at the bottom (the instrument's film-strip rule);
+// the day wheel sits tangent there, counter-rotating like a proper
+// pinion, and the two touching cells always agree: the current hour.
+// Both gears cut their teeth from the real sunrise and sunset — the
+// hours are TEMPORAL, daylight split into twelve and night into twelve,
+// so summer day-teeth run wide, and the lit valley streams around the
+// annulus with the season. Night grounds grade through the twilights;
+// dusk is a place, not a line (Prague's lesson).
 
 #ifndef VIEW_HORAE_H
 #define VIEW_HORAE_H
@@ -33,12 +37,11 @@ struct HoraeViewState {
 #if defined(SCENE_DEFINED) && !defined(VIEW_HORAE_IMPL)
 #define VIEW_HORAE_IMPL
 
-// Dial bands (world units; the calendar wheel rides outside at 450)
-#define HORAE_R0     298.0f   // hour ring inner
-#define HORAE_R1     404.0f   // hour ring outer
-#define HORAE_RPIP   351.0f   // ruler pips
-#define HORAE_WK0    225.0f   // week ring inner
-#define HORAE_WK1    263.0f   // week ring outer
+// Gear geometry (world units; the calendar wheel rides outside at 450)
+#define HORAE_RING0   332.0f   // week annulus inner
+#define HORAE_RING1   414.0f   // week annulus outer
+#define HORAE_WHEEL_R 150.0f   // day pinion radius (tangent at the mesh)
+#define HORAE_WHEEL_W 44.0f    // pinion tooth band depth
 
 // Chaldean order, slowest to fastest; colors borrowed from the orrery
 static const uint8_t horae__chaldean_body[7] = {
@@ -55,24 +58,15 @@ static const char *horae__genitive[7] = {
 // Weekday (0 = Sunday) -> Chaldean index of the day's ruler
 static const uint8_t horae__day_ruler[7] = { 3, 6, 2, 5, 1, 4, 0 };
 
-// Weekday names in dial order Sunday..Saturday
-static const char *horae__dies[7] = {
-    "SOLIS", "LVNAE", "MARTIS", "MERCVRII",
-    "IOVIS", "VENERIS", "SATVRNI",
+// Weekday initials in dial order Sunday..Saturday (dies Solis..Saturni)
+static const char *horae__dies_init[7] = {
+    "S", "L", "M", "M", "I", "V", "S",
 };
 
 static const char *horae__roman[12] = {
     "I", "II", "III", "IV", "V", "VI",
     "VII", "VIII", "IX", "X", "XI", "XII",
 };
-
-// Day-fraction -> wheel percent. Midnight at the top, noon at the
-// bottom — the solar dial's convention (a northern sun culminates low).
-// The wheel mapping (sin, -cos from top, clockwise) gives that with the
-// fraction used directly.
-static inline float horae__pct(float day_frac) {
-    return day_frac - floorf(day_frac);
-}
 
 static void horae_init(void *buf, const Tempus *t, const RenderStyle *s) {
     HoraeViewState *st = (HoraeViewState *)buf;
@@ -94,65 +88,11 @@ static void horae_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->blend = sc->horae_blend;
 }
 
-// One hour sector: [f0, f1] in day fractions, chaldean ruler, hour
-// number within its half (0-11), day or night. sun_alt is the sun's
-// altitude at the sector midpoint: night grounds grade through the
-// twilights, the Orloj's lesson — dusk is a place, not a line.
-static void horae__sector(DrawCtx *d, const Tempus *t, float f0, float f1,
-                          int ruler, int idx, bool is_day, bool current,
-                          float sun_alt) {
-    if (f1 <= f0) return;
-    float a0 = horae__pct(f0) * 2.0f * (float)M_PI - (float)M_PI * 0.5f;
-    float a1 = a0 + (f1 - f0) * 2.0f * (float)M_PI;
-    const uint8_t *c = orr__body_col[horae__chaldean_body[ruler]];
-
-    if (is_day) {
-        draw_set_color(d, dca(0.30f, 0.24f, 0.12f, current ? 0.34f : 0.16f));
-    } else {
-        // AVRORA to astronomical night: ember at the horizon, indigo at
-        // full dark (sun 18 degrees down)
-        float tw = -sun_alt / 18.0f;
-        if (tw < 0) tw = 0;
-        if (tw > 1) tw = 1;
-        float rr = 0.42f + (0.055f - 0.42f) * tw;
-        float gg = 0.24f + (0.060f - 0.24f) * tw;
-        float bb = 0.10f + (0.150f - 0.10f) * tw;
-        draw_set_color(d, dca(rr, gg, bb, current ? 0.42f : 0.22f));
-    }
-    draw_arc_filled(d, 0, 0, HORAE_R0, HORAE_R1, a0, a1, 12);
-
-    // Ruler wash over the ground
-    draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f, c[2] / 255.0f,
-                          current ? 0.20f : 0.07f));
-    draw_arc_filled(d, 0, 0, HORAE_R0, HORAE_R1, a0, a1, 12);
-
-    // Leading boundary
-    {
-        float pct = horae__pct(f0);
-        float sx = sinf(pct * 2.0f * (float)M_PI);
-        float sy = -cosf(pct * 2.0f * (float)M_PI);
-        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.22f));
-        draw_line(d, sx * HORAE_R0, sy * HORAE_R0,
-                  sx * HORAE_R1, sy * HORAE_R1, 1.0f);
-    }
-
-    // Ruler pip at sector center + hour numeral inside
-    {
-        float mid = horae__pct((f0 + f1) * 0.5f) * 2.0f * (float)M_PI;
-        float sx = sinf(mid), sy = -cosf(mid);
-        draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f, c[2] / 255.0f,
-                              current ? 1.0f : 0.55f));
-        draw_circle_filled(d, sx * HORAE_RPIP, sy * HORAE_RPIP,
-                           current ? 6.5f : 4.0f);
-
-        int rw = _font_compat[FONT_seconds].weight;
-        float rsz = 13.0f;
-        float tw = sdf_measure_width(rw, horae__roman[idx]) * rsz;
-        draw_set_color(d, dca(0.62f, 0.60f, 0.55f, current ? 0.9f : 0.35f));
-        draw_text_ex(d, rw, rsz, sx * (HORAE_R0 + 22.0f) - tw * 0.5f,
-                     sy * (HORAE_R0 + 22.0f) - rsz * 0.5f,
-                     horae__roman[idx]);
-    }
+// Wrap into [-half, half)
+static inline float horae__wrap(float v, float period) {
+    v = fmodf(v + period * 0.5f, period);
+    if (v < 0) v += period;
+    return v - period * 0.5f;
 }
 
 static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
@@ -168,206 +108,228 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         rise = 0.25f;
         set = 0.75f;
     }
-    float dl = set - rise;          // daylight length
-    float nl = 1.0f - dl;           // night length
-    float dh = dl / 12.0f;          // one day-hour
-    float nh = nl / 12.0f;          // one night-hour
+    float dl = set - rise;
+    float dh = dl / 12.0f;              // one day-tooth
+    float nh = (1.0f - dl) / 12.0f;     // one night-tooth
 
-    // Weekday and the day's ruler (0 = Sunday; JD + 1.5 floors to it)
+    // Tooth boundaries within one PLANETARY day (sunrise to sunrise),
+    // in day units: u[0]=0 at sunrise .. u[24]=1 at the next sunrise
+    float u[25];
+    for (int h = 0; h <= 24; h++)
+        u[h] = (h <= 12) ? h * dh : 12.0f * dh + (h - 12) * nh;
+
+    // Where we are: civil weekday, week-time, planetary day and hour
     int w = (int)(((long)floor(tv->jd_current + 1.5)) % 7);
-    int dri = horae__day_ruler[w];
-
-    // The current temporal hour (index 0-23 from today's sunrise;
-    // negative pre-dawn indices reach into yesterday's night)
     float now = (float)tv->percent_of_day;
-    int cur;
-    if (now >= rise && now < set)
-        cur = (int)((now - rise) / dh);
-    else if (now >= set)
-        cur = 12 + (int)((now - set) / nh);
-    else
-        cur = -1 - (int)((rise - now) / nh);   // -1 = hour ending at rise
+    float m_now = w + now;                       // week-time, days
+    float u_now = now - rise;                    // planetary-day fraction
+    if (u_now < 0) u_now += 1.0f;
+    int pd = (now >= rise) ? w : (w + 6) % 7;    // planetary day
+    int hcur = 0;
+    while (hcur < 23 && u[hcur + 1] <= u_now) hcur++;
+    int ridx = (horae__day_ruler[pd] + hcur) % 7;
 
-    // Sun altitude at an arbitrary fraction of this date (for the
-    // twilight grading of the night grounds)
-    double jd0 = tv->jd_current - 0.5 - t->config.timezone / 24.0;
-    double slon, slat;
+    // Sun-altitude sampler for twilight grading (civil fraction f of the
+    // planetary day pd may exceed 1 = past midnight; jd handles it)
+    double jd0 = tv->jd_current - 0.5 - t->config.timezone / 24.0
+               + (pd - w);   // start of the planetary day's civil date
 
-    // ---- The 24 temporal hours covering this date ----
-    // Day, then tonight's hours until midnight, then the pre-dawn tail
-    // of YESTERDAY'S night (its rulers three Chaldean steps back).
-    for (int k = 0; k < 12; k++)
-        horae__sector(d, t, rise + k * dh, rise + (k + 1) * dh,
-                      (dri + k) % 7, k, true, cur == k, 10.0f);
-    for (int k = 0; k < 12; k++) {
-        float f0 = set + k * nh;
-        if (f0 >= 1.0f) break;
-        double jm = jd0 + f0 + nh * 0.5;
-        planets__body_lonlat(BODY_SUN, jm, &slon, &slat);
-        float sa = (float)planets_sky_altitude(slon, slat, jm,
-                                               t->config.latitude,
-                                               t->config.longitude);
-        horae__sector(d, t, f0, fminf(f0 + nh, 1.0f),
-                      (dri + 12 + k) % 7, k, false, cur == 12 + k, sa);
-    }
-    for (int k = 0; k < 12; k++) {
-        float f1 = rise - k * nh;
-        if (f1 <= 0.0f) break;
-        double jm = jd0 + f1 - nh * 0.5;
-        planets__body_lonlat(BODY_SUN, jm, &slon, &slat);
-        float sa = (float)planets_sky_altitude(slon, slat, jm,
-                                               t->config.latitude,
-                                               t->config.longitude);
-        horae__sector(d, t, fmaxf(f1 - nh, 0.0f), f1,
-                      (dri + 7 + 20 - k) % 7, 11 - k, false,
-                      cur == -1 - k, sa);
-    }
+    // ---- The week annulus: 168 teeth, one unbroken chain ----
+    // Ring position of week-time m: the strip streams past the mesh at
+    // the bottom (pct 0.5), later hours arriving from the right.
+    for (int dd = 0; dd < 7; dd++) {
+        int dri = horae__day_ruler[dd];
+        for (int h = 0; h < 24; h++) {
+            float m0 = dd + rise + u[h];
+            float m1 = dd + rise + u[h + 1];
+            float p1 = 0.5f - horae__wrap(m0 - m_now, 7.0f) / 7.0f;
+            float p0 = 0.5f - horae__wrap(m1 - m_now, 7.0f) / 7.0f;
+            if (p1 - p0 < 0) continue;   // cell spans the far seam; skip
+            float a0 = p0 * 2.0f * (float)M_PI - (float)M_PI * 0.5f;
+            float a1 = p1 * 2.0f * (float)M_PI - (float)M_PI * 0.5f;
 
-    // Sunrise and sunset: gold thresholds, named as the Orloj names
-    // them — ORTVS rising, OCCASVS setting — with the twilight wedges
-    // AVRORA and CREPVSCVLVM labeled where they burn
-    for (int e = 0; e < 2; e++) {
-        float f = e ? set : rise;
-        float pct = horae__pct(f);
-        float ang = pct * 2.0f * (float)M_PI;
-        float sx = sinf(ang), sy = -cosf(ang);
-        draw_set_color(d, dc_scale(s->sunrise_handle, 0.9f));
-        draw_line(d, sx * (HORAE_R0 - 8.0f), sy * (HORAE_R0 - 8.0f),
-                  sx * (HORAE_R1 + 10.0f), sy * (HORAE_R1 + 10.0f), 1.6f);
-        draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.75f));
-        draw_text_curved(d, FONT_date, 0, 0, HORAE_R1 + 16.0f, ang,
-                         e ? "OCCASVS" : "ORTVS", 0.5f, 0.8f);
-    }
-    {
-        // Twilight labels sit a civil-twilight's width past the lines
-        float tw_arc = nh * 0.8f;
-        float ang_a = horae__pct(rise - tw_arc * 0.6f) * 2.0f * (float)M_PI;
-        float ang_c = horae__pct(set + tw_arc * 0.6f) * 2.0f * (float)M_PI;
-        draw_set_color(d, dca(0.60f, 0.38f, 0.12f, 0.55f));
-        draw_text_curved(d, FONT_date, 0, 0, HORAE_R0 + 46.0f, ang_a,
-                         "AVRORA", 0.6f, 0.75f);
-        draw_text_curved(d, FONT_date, 0, 0, HORAE_R0 + 46.0f, ang_c,
-                         "CREPVSCVLVM", 0.6f, 0.75f);
-    }
-
-    // Ring rims
-    draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
-    draw_circle_stroked(d, 0, 0, HORAE_R0, 1.0f);
-    draw_circle_stroked(d, 0, 0, HORAE_R1, 1.0f);
-
-    // ---- The week ring: a film strip past a fixed pointer ----
-    // The ring turns continuously with the day; a small arrow at noon
-    // (bottom, the dial's convention) reads today — the same grammar as
-    // the calendar wheel's own pointer. The Chaldean skip stays visible:
-    // each day's pip matches its first-hour ruler.
-    {
-        double daypos = w + tv->percent_of_day;   // continuous day-of-week
-        for (int i = 0; i < 7; i++) {
-            // Sector center rides the strip (tomorrow approaches from
-            // the other side now); today's center meets the pointer
-            // exactly at noon
-            float ctr = 0.5f - (float)((i + 0.5 - daypos) / 7.0);
-            float a0 = (ctr - 0.5f / 7.0f) * 2.0f * (float)M_PI
-                     - (float)M_PI * 0.5f;
-            float a1 = a0 + (1.0f / 7.0f) * 2.0f * (float)M_PI;
-            const uint8_t *c =
-                orr__body_col[horae__chaldean_body[horae__day_ruler[i]]];
-            bool today = i == w;
-
+            int rr = (dri + h) % 7;
+            const uint8_t *c = orr__body_col[horae__chaldean_body[rr]];
+            bool is_day = h < 12;
+            bool cur = (dd == pd && h == hcur);
+            // Ruler color carries the chain; day teeth lit, night teeth
+            // sunk — the temporal valley streams around the loop
+            float al = cur ? 0.95f : (is_day ? 0.60f : 0.22f);
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
-                                  c[2] / 255.0f, today ? 0.20f : 0.10f));
-            draw_arc_filled(d, 0, 0, HORAE_WK0, HORAE_WK1, a0, a1, 10);
-
-            float mid = ctr * 2.0f * (float)M_PI;
-            draw_set_color(d, today
-                ? dca(0.78f, 0.75f, 0.68f, 0.95f)
-                : dca(0.55f, 0.53f, 0.49f, 0.45f));
-            draw_text_curved(d, FONT_date, 0, 0, HORAE_WK0 + 24.0f,
-                             mid, horae__dies[i], 0.6f, 0.9f);
+                                  c[2] / 255.0f, al));
+            draw_arc_filled(d, 0, 0, HORAE_RING0, HORAE_RING1,
+                            a0, a1, 6);
         }
-        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.20f));
-        draw_circle_stroked(d, 0, 0, HORAE_WK0, 1.0f);
-        draw_circle_stroked(d, 0, 0, HORAE_WK1, 1.0f);
+    }
+    draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
+    draw_circle_stroked(d, 0, 0, HORAE_RING0, 1.0f);
+    draw_circle_stroked(d, 0, 0, HORAE_RING1, 1.0f);
 
-        // The fixed arrow at noon, aimed outward at the strip
-        {
-            float tipy = HORAE_WK0 - 3.0f;
-            float basey = HORAE_WK0 - 13.0f;
-            draw_set_color(d, s->month_text_color);
-            int vb = d->num_verts;
-            draw__push_vert(d, 0.0f, tipy, d->white_u, d->white_v);
-            draw__push_vert(d, -5.0f, basey, d->white_u, d->white_v);
-            draw__push_vert(d, 5.0f, basey, d->white_u, d->white_v);
-            draw__tri(d, vb, vb + 1, vb + 2);
+    // Civil midnight spokes + day initials riding the strip
+    {
+        int iw = _font_compat[FONT_seconds].weight;
+        for (int i = 0; i < 7; i++) {
+            float pm = 0.5f - horae__wrap((float)i - m_now, 7.0f) / 7.0f;
+            float am = pm * 2.0f * (float)M_PI;
+            float sx = sinf(am), sy = -cosf(am);
+            draw_set_color(d, dca(0.10f, 0.10f, 0.10f, 0.9f));
+            draw_line(d, sx * HORAE_RING0, sy * HORAE_RING0,
+                      sx * (HORAE_RING1 + 6.0f),
+                      sy * (HORAE_RING1 + 6.0f), 2.0f);
+
+            float pc = 0.5f - horae__wrap(i + 0.5f - m_now, 7.0f) / 7.0f;
+            float ac = pc * 2.0f * (float)M_PI;
+            float cx = sinf(ac) * (HORAE_RING1 + 18.0f);
+            float cy = -cosf(ac) * (HORAE_RING1 + 18.0f);
+            float tw2 = sdf_measure_width(iw, horae__dies_init[i]) * 15.0f;
+            draw_set_color(d, i == w
+                ? dca(0.78f, 0.75f, 0.68f, 0.9f)
+                : dca(0.50f, 0.49f, 0.46f, 0.40f));
+            draw_text_ex(d, iw, 15.0f, cx - tw2 * 0.5f, cy - 7.5f,
+                         horae__dies_init[i]);
         }
     }
 
-    // ---- The hands: this IS a clock face ----
-    // The day hand wears the 12-hour face's hour-hand dress (same width,
-    // color, and start radius) but makes one revolution per day; the
-    // seconds hand carries over unchanged, the familiar red pulse that
-    // says "clock" at a glance.
+    // ---- The day pinion, tangent at the mesh ----
+    // Counter-rotates against the stream, one turn per planetary day;
+    // its current tooth touches the ring's current tooth at the mesh.
+    float wcy = HORAE_RING0 - HORAE_WHEEL_R;   // wheel center (0, wcy)
     {
-        float angle = (float)(now * 2.0 * M_PI);
-        float dx = sinf(angle), dy = -cosf(angle);
-        float px2 = -dy, py2 = dx;
-        float hw = s->hours_width * 0.5f;
-        float h0 = s->hours_start;
-        float h1 = HORAE_R0 - 36.0f;
-        draw_set_color(d, s->hours_color);
-        float corners[4][2] = {
-            { dx * h0 - px2 * hw, dy * h0 - py2 * hw },
-            { dx * h0 + px2 * hw, dy * h0 + py2 * hw },
-            { dx * h1 + px2 * hw, dy * h1 + py2 * hw },
-            { dx * h1 - px2 * hw, dy * h1 - py2 * hw },
-        };
-        int vbase = d->num_verts;
-        for (int j = 0; j < 4; j++)
-            draw__push_vert(d, corners[j][0], corners[j][1],
-                            d->white_u, d->white_v);
-        draw__tri(d, vbase, vbase + 1, vbase + 2);
-        draw__tri(d, vbase, vbase + 2, vbase + 3);
-    }
-    {
+        // Tooth grounds + rulers + numerals
+        int nw2 = _font_compat[FONT_seconds].weight;
+        for (int h = 0; h < 24; h++) {
+            // Wheel position: mesh (wheel bottom) = pct 0.5; later teeth
+            // to the right — counter-rotation against the ring
+            float q1 = 0.5f - horae__wrap(u[h] - u_now, 1.0f);
+            float q0 = 0.5f - horae__wrap(u[h + 1] - u_now, 1.0f);
+            if (q1 - q0 < 0) continue;   // spans the wheel's far side
+            float a0 = q0 * 2.0f * (float)M_PI - (float)M_PI * 0.5f;
+            float a1 = q1 * 2.0f * (float)M_PI - (float)M_PI * 0.5f;
+
+            bool is_day = h < 12;
+            bool cur = h == hcur;
+            int rr = (horae__day_ruler[pd] + h) % 7;
+            const uint8_t *c = orr__body_col[horae__chaldean_body[rr]];
+
+            // Ground: warm day / twilight-graded night
+            if (is_day) {
+                draw_set_color(d, dca(0.32f, 0.25f, 0.12f,
+                                      cur ? 0.5f : 0.28f));
+            } else {
+                double jm = jd0 + rise + (u[h] + u[h + 1]) * 0.5;
+                double slon, slat;
+                planets__body_lonlat(BODY_SUN, jm, &slon, &slat);
+                float sa = (float)planets_sky_altitude(
+                    slon, slat, jm, t->config.latitude,
+                    t->config.longitude);
+                float twf = -sa / 18.0f;
+                if (twf < 0) twf = 0;
+                if (twf > 1) twf = 1;
+                draw_set_color(d, dca(0.42f + (0.055f - 0.42f) * twf,
+                                      0.24f + (0.060f - 0.24f) * twf,
+                                      0.10f + (0.150f - 0.10f) * twf,
+                                      cur ? 0.55f : 0.30f));
+            }
+            draw_arc_filled(d, 0, wcy, HORAE_WHEEL_R - HORAE_WHEEL_W,
+                            HORAE_WHEEL_R, a0, a1, 6);
+
+            // Ruler wash on the tooth face
+            draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
+                                  c[2] / 255.0f, cur ? 0.45f : 0.16f));
+            draw_arc_filled(d, 0, wcy, HORAE_WHEEL_R - HORAE_WHEEL_W,
+                            HORAE_WHEEL_R, a0, a1, 6);
+
+            // Tooth boundary
+            {
+                float qb = 0.5f - horae__wrap(u[h] - u_now, 1.0f);
+                float ab = qb * 2.0f * (float)M_PI;
+                float sx = sinf(ab), sy = -cosf(ab);
+                draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.25f));
+                draw_line(d, sx * (HORAE_WHEEL_R - HORAE_WHEEL_W),
+                          wcy + -cosf(ab) * (HORAE_WHEEL_R - HORAE_WHEEL_W),
+                          sx * HORAE_WHEEL_R,
+                          wcy + sy * HORAE_WHEEL_R, 1.0f);
+            }
+
+            // Numeral, upright, riding its tooth
+            {
+                float qm = 0.5f - horae__wrap((u[h] + u[h + 1]) * 0.5f
+                                              - u_now, 1.0f);
+                float am = qm * 2.0f * (float)M_PI;
+                float rx = sinf(am) * (HORAE_WHEEL_R - HORAE_WHEEL_W - 16.0f);
+                float ry = wcy - cosf(am) * (HORAE_WHEEL_R - HORAE_WHEEL_W
+                                             - 16.0f);
+                float tw2 = sdf_measure_width(nw2, horae__roman[h % 12])
+                          * 12.0f;
+                draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
+                                      cur ? 0.95f : 0.35f));
+                draw_text_ex(d, nw2, 12.0f, rx - tw2 * 0.5f, ry - 6.0f,
+                             horae__roman[h % 12]);
+            }
+        }
+
+        // Rim + hub + the gold thresholds (sunrise at u = 0, sunset at
+        // u = 12 teeth in): ORTVS and OCCASVS ride the wheel
+        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.45f));
+        draw_circle_stroked(d, 0, wcy, HORAE_WHEEL_R, 1.0f);
+        draw_circle_stroked(d, 0, wcy, HORAE_WHEEL_R - HORAE_WHEEL_W, 1.0f);
+        for (int e = 0; e < 2; e++) {
+            float ue = e ? u[12] : 0.0f;
+            float qe = 0.5f - horae__wrap(ue - u_now, 1.0f);
+            float ae = qe * 2.0f * (float)M_PI;
+            float sx = sinf(ae), sy = -cosf(ae);
+            draw_set_color(d, dc_scale(s->sunrise_handle, 0.95f));
+            draw_line(d, sx * (HORAE_WHEEL_R - HORAE_WHEEL_W - 8.0f),
+                      wcy + sy * (HORAE_WHEEL_R - HORAE_WHEEL_W - 8.0f),
+                      sx * (HORAE_WHEEL_R + 8.0f),
+                      wcy + sy * (HORAE_WHEEL_R + 8.0f), 1.6f);
+        }
+
+        // The seconds hairline at the hub — the pulse that says clock
         double real_secs = s->sweep_seconds
             ? ((double)tv->secs + tv->frac_secs) / 60.0
             : (double)tv->secs / 60.0;
-        float a = (float)(real_secs * 2.0 * M_PI);
-        float dx = sinf(a), dy = -cosf(a);
+        float sa2 = (float)(real_secs * 2.0 * M_PI);
         draw_set_color(d, s->seconds_color);
-        draw_line(d, dx * s->seconds_start, dy * s->seconds_start,
-                  dx * (HORAE_R0 - 12.0f), dy * (HORAE_R0 - 12.0f), 1.5f);
+        draw_line(d, 0, wcy,
+                  sinf(sa2) * (HORAE_WHEEL_R - HORAE_WHEEL_W - 6.0f),
+                  wcy - cosf(sa2) * (HORAE_WHEEL_R - HORAE_WHEEL_W - 6.0f),
+                  1.5f);
+        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.6f));
+        draw_circle_filled(d, 0, wcy, 2.5f);
     }
 
-    // ---- Center readout: whose hour is this ----
+    // ---- The mesh marker: where the gears agree ----
     {
-        int ridx;
-        int hnum;
-        bool hday;
-        if (cur >= 0 && cur < 12) {
-            ridx = (dri + cur) % 7;  hnum = cur;       hday = true;
-        } else if (cur >= 12) {
-            ridx = (dri + cur) % 7;  hnum = cur - 12;  hday = false;
-        } else {
-            ridx = (dri + 7 + 20 - (-1 - cur)) % 7;
-            hnum = 11 - (-1 - cur);
-            hday = false;
-        }
+        draw_set_color(d, s->month_text_color);
+        int vb = d->num_verts;
+        draw__push_vert(d, 0.0f, HORAE_RING1 + 14.0f,
+                        d->white_u, d->white_v);
+        draw__push_vert(d, -6.0f, HORAE_RING1 + 26.0f,
+                        d->white_u, d->white_v);
+        draw__push_vert(d, 6.0f, HORAE_RING1 + 26.0f,
+                        d->white_u, d->white_v);
+        draw__tri(d, vb, vb + 1, vb + 2);
+    }
+
+    // ---- Readout, in the clear above the pinion ----
+    {
         const uint8_t *c = orr__body_col[horae__chaldean_body[ridx]];
         draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                               c[2] / 255.0f, 0.95f));
-        draw_circle_filled(d, 0, -34.0f, 9.0f);
+        draw_circle_filled(d, 0, -196.0f, 9.0f);
 
         draw_set_color(d, dca(0.50f, 0.49f, 0.46f, 0.55f));
-        draw_text_centered(d, FONT_date, 0, 2.0f, "HORA");
+        draw_text_centered(d, FONT_date, 0, -162.0f, "HORA");
         draw_set_color(d, dca(0.78f, 0.75f, 0.68f, 0.95f));
-        draw_text_centered(d, FONT_month, 0, 30.0f, horae__genitive[ridx]);
+        draw_text_centered(d, FONT_month, 0, -134.0f,
+                          horae__genitive[ridx]);
 
         char hb[24];
-        snprintf(hb, sizeof(hb), "%s %s", horae__roman[hnum],
-                 hday ? "DIEI" : "NOCTIS");
+        snprintf(hb, sizeof(hb), "%s %s", horae__roman[hcur % 12],
+                 hcur < 12 ? "DIEI" : "NOCTIS");
         draw_set_color(d, dca(0.50f, 0.49f, 0.46f, 0.55f));
-        draw_text_centered(d, FONT_date, 0, 58.0f, hb);
+        draw_text_centered(d, FONT_date, 0, -106.0f, hb);
     }
 
     d->alpha = base_alpha;
