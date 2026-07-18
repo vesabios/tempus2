@@ -111,13 +111,15 @@ static void horae_update(void *buf, const Tempus *t, double dt, Scene *sc) {
 static DrawColor horae__sky(float alt) {
     static const float k[9][4] = {
         {  25.0f, 0.30f, 0.55f, 0.95f },   // azure day
-        {   8.0f, 0.55f, 0.64f, 0.90f },   // paling toward the horizon
-        {   3.0f, 0.95f, 0.62f, 0.28f },   // golden hour
-        {   0.0f, 1.00f, 0.45f, 0.15f },   // the crossing: sunset fire
-        {  -3.0f, 0.85f, 0.25f, 0.18f },   // last red
-        {  -7.0f, 0.16f, 0.24f, 0.58f },   // the blue hour
-        { -12.0f, 0.07f, 0.11f, 0.34f },   // nautical blue
-        { -18.0f, 0.03f, 0.05f, 0.17f },   // astronomical
+        {   9.0f, 0.52f, 0.66f, 0.92f },   // pale blue
+        {   4.0f, 0.90f, 0.80f, 0.62f },   // luminous low light — the
+                                           // bright cream the horizon
+                                           // sky really is, never brown
+        {   1.0f, 1.00f, 0.58f, 0.18f },   // vivid gold
+        {  -2.0f, 0.95f, 0.30f, 0.14f },   // the crossing: fire
+        {  -6.0f, 0.22f, 0.24f, 0.60f },   // the blue hour
+        { -11.0f, 0.08f, 0.13f, 0.38f },   // nautical blue
+        { -17.0f, 0.03f, 0.05f, 0.18f },   // astronomical
         { -28.0f, 0.015f, 0.02f, 0.075f }, // night
     };
     if (alt >= k[0][0]) return dc(k[0][1], k[0][2], k[0][3]);
