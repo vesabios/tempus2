@@ -489,16 +489,15 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             }
             int rw = _font_compat[FONT_seconds].weight;
             for (int b = 0; b < BODY_COUNT; b++) {
-                bool vis = st->sky.observable[b];
-                d->alpha = base_alpha * a_zod * (vis ? 1.0f : 0.5f);
+                // Filled vs outlined at full strength — the shape carries
+                // the verdict, no dimming on top
                 draw_set_color(d, dca(orr__body_col[b][0] / 255.0f,
                                       orr__body_col[b][1] / 255.0f,
                                       orr__body_col[b][2] / 255.0f, 0.9f));
-                if (vis)
+                if (st->sky.observable[b])
                     draw_circle_filled(d, mpx[b], mpy[b], 4.0f);
                 else
-                    draw_circle_stroked(d, mpx[b], mpy[b], 4.0f, 1.0f);
-                d->alpha = base_alpha * a_zod;
+                    draw_circle_stroked(d, mpx[b], mpy[b], 4.0f, 1.2f);
                 if (pn->retro[b]) {
                     float dx, dy;
                     orr__ecl_dir(pn->geo_lon[b], &dx, &dy);
