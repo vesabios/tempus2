@@ -251,14 +251,14 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // show where the sky extends at dusk and dawn.
     float dzv[2][3];                       // dusk/dawn zenith vectors
     float dwx[2][SKY_WIN_N + 1], dwy[2][SKY_WIN_N + 1];
+    // Window instants relative to solar midnight, in solar-day turns:
+    // NOT sunset and sunrise themselves (still-lit times) but the
+    // midway points between them and midnight — the lobes cover the
+    // properly dark span of the night
+    float win_e[2] = { ((st->set_hr / 24.0f) - 1.0f) * 0.5f,
+                       (st->rise_hr / 24.0f) * 0.5f };
     {
-        // Window instants relative to solar midnight, in solar-day
-        // turns: NOT sunset and sunrise themselves (still-lit times)
-        // but the midway points between them and midnight — the lobes
-        // cover the properly dark span of the night
-        float e0 = ((st->set_hr / 24.0f) - 1.0f) * 0.5f;
-        float e1 = (st->rise_hr / 24.0f) * 0.5f;
-        float edges[2] = { e0, e1 };
+        float *edges = win_e;
         double phi = t->config.latitude * M_PI / 180.0;
         float px = 0.0f, py = (float)cos(phi), pz = (float)sin(phi);
         for (int w = 0; w < 2; w++) {
@@ -485,6 +485,54 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                                                          st->blend);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.55f));
         draw_circle_stroked(d, 0, 0, rim_r, 1.0f);
+        d->alpha = base_alpha;
+    }
+
+    // ---- Culmination meridians: what stands highest, when ----
+    // Three north-south arcs — the meridian at the dusk-side window,
+    // at midnight, and at the dawn-side window, each drawn only over
+    // its own visible half. A body near an arc culminates at that
+    // hour: the visibility area becomes a "what is best, when" grid.
+    if (fb > 0.001f) {
+        d->alpha = base_alpha * fb;
+        double phi = t->config.latitude * M_PI / 180.0;
+        float px = 0.0f, py = (float)cos(phi), pz = (float)sin(phi);
+        for (int w = 0; w < 3; w++) {
+            float A = (w == 1) ? 0.0f
+                    : win_e[w > 1 ? 1 : 0] * 2.0f * (float)M_PI;
+            const float *zw = (w == 1) ? (const float[3]){ 0, 0, 1 }
+                            : dzv[w > 1 ? 1 : 0];
+            float ca = cosf(A), sa = sinf(A), oc = 1.0f - ca;
+            float M[9] = {
+                ca + px * px * oc,      px * py * oc - pz * sa,
+                px * pz * oc + py * sa,
+                py * px * oc + pz * sa, ca + py * py * oc,
+                py * pz * oc - px * sa,
+                pz * px * oc - py * sa, pz * py * oc + px * sa,
+                ca + pz * pz * oc,
+            };
+            draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
+                                  w == 1 ? 0.16f : 0.10f));
+            float px2 = 0, py2 = 0;
+            bool has = false;
+            for (int i = 0; i <= 96; i++) {
+                float tt = (float)i / 96.0f * 2.0f * (float)M_PI;
+                float v0[3] = { 0.0f, sinf(tt), cosf(tt) };
+                float v[3] = {
+                    M[0] * v0[0] + M[1] * v0[1] + M[2] * v0[2],
+                    M[3] * v0[0] + M[4] * v0[1] + M[5] * v0[2],
+                    M[6] * v0[0] + M[7] * v0[1] + M[8] * v0[2],
+                };
+                bool up = v[0] * zw[0] + v[1] * zw[1] + v[2] * zw[2]
+                        > 0.0f;
+                float x, y;
+                sky__vec_project(v, &x, &y);
+                if (has && up)
+                    draw_line(d, px2, py2, x, y, 1.0f);
+                px2 = x; py2 = y;
+                has = up;
+            }
+        }
         d->alpha = base_alpha;
     }
 
