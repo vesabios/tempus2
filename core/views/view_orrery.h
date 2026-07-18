@@ -1071,18 +1071,32 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // side it dims.
         float moon_dim = 1.0f;
         if (obf > 0.001f) {
-            float omx = ex + mdx * earth_r * 1.22f;
-            float omy = ey + mdy * earth_r * 1.22f;
             if (moon_vz < 0.0f)
                 moon_dim = 1.0f - 0.45f * obf;
+            // POLAR composition about the LIVE globe: bearing and
+            // radius lerp separately (shortest arc), so the moon
+            // RIDES AROUND the planet to its hang instead of cutting
+            // a chord through it — the base form is itself mid-morph
+            // during station flights, and a cartesian blend of two
+            // moving anchors bows across the disc.
+            float bdx = mmx - ex, bdy = mmy - ey;
+            float br = sqrtf(bdx * bdx + bdy * bdy);
+            float a1 = atan2f(mdy, mdx);
+            float a0 = (br > 1.0f) ? atan2f(bdy, bdx) : a1;
+            float da = a1 - a0;
+            while (da > (float)M_PI) da -= 2.0f * (float)M_PI;
+            while (da < -(float)M_PI) da += 2.0f * (float)M_PI;
+            float am = a0 + da * obf;
+            float rr2 = br * (1.0f - obf) + earth_r * 1.22f * obf;
+            mmx = ex + cosf(am) * rr2;
+            mmy = ey + sinf(am) * rr2;
+            mmr = mmr * (1.0f - obf) + 24.0f * obf;
+            // Tether: radial, directly beneath wherever the moon is
             d->alpha = base_alpha * obf * moon_dim;
             draw_set_color(d, dca(0.72f, 0.72f, 0.70f, 0.35f));
-            draw_line(d, ex + mdx * earth_r, ey + mdy * earth_r,
-                      omx, omy, 1.0f);
+            draw_line(d, ex + cosf(am) * earth_r,
+                      ey + sinf(am) * earth_r, mmx, mmy, 1.0f);
             d->alpha = base_alpha;
-            mmx = mmx * (1.0f - obf) + omx * obf;
-            mmy = mmy * (1.0f - obf) + omy * obf;
-            mmr = mmr * (1.0f - obf) + 24.0f * obf;
             // Phase light eases to the shared earth-frame sun
             // (component blend, no shortest-path flip)
             float mn2 = 0;
