@@ -194,8 +194,21 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
                      - t->config.timezone / 24.0;
         if (fabs(jd_ut - st->planets_jd) > 1.0 / 1440.0) {
             planets_compute(&st->planets, jd_ut);
-            planets_sky_compute(&st->sky, &st->planets,
-                                t->config.latitude, t->config.longitude);
+            // The horizon layer (moat shading, ascendant, observability)
+            // is pinned to the coming SOLAR MIDNIGHT of the displayed
+            // date, matching CAELVM: "tonight's sky half", stable per
+            // date and creeping with the season — not the fast daily
+            // sweep, which mostly reports daytime, when none of this is
+            // viewable anyway. Positions and aspects stay live.
+            {
+                double jd_mid = st->tv.jd_current + 0.5
+                              - t->config.longitude / (15.0 * 24.0);
+                PlanetsNow mid;
+                planets_compute(&mid, jd_mid);
+                planets_sky_compute(&st->sky, &mid,
+                                    t->config.latitude,
+                                    t->config.longitude);
+            }
             st->num_aspects = planets_find_aspects(st->planets.geo_lon,
                                                    st->aspects,
                                                    PLANETS_MAX_ASPECTS);
