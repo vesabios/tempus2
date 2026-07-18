@@ -43,16 +43,23 @@ struct SkyViewState {
 #if defined(SCENE_DEFINED) && !defined(VIEW_SKY_IMPL)
 #define VIEW_SKY_IMPL
 
-// Project (az, alt) onto the chart. Equidistant azimuthal: the zenith
-// at center, radius linear in zenith distance. North top; east LEFT —
-// the chart is the view looking up, mirrored relative to a map.
+// Project (az, alt) onto the chart. Equidistant azimuthal pushed to
+// the ANTIPODE (the "Welt um Nauen" projection, inverted for the sky):
+// zenith at center, the horizon a circle at HALF radius, the unseen
+// sky filling the outer annulus out to the nadir stretched into the
+// rim. Nothing is ever off the chart — setting is just crossing the
+// horizon circle. North top; east LEFT (the view looking up).
 static inline void sky__project(float az_deg, float alt_deg,
                                 float *x, float *y) {
-    float rr = (90.0f - alt_deg) / 90.0f * SKY_R;
+    if (alt_deg > 90.0f) alt_deg = 90.0f;
+    if (alt_deg < -90.0f) alt_deg = -90.0f;
+    float rr = (90.0f - alt_deg) / 180.0f * SKY_R;
     float a = az_deg * (float)M_PI / 180.0f;
     *x = -sinf(a) * rr;
     *y = -cosf(a) * rr;
 }
+
+#define SKY_HOR (SKY_R * 0.5f)   // the horizon circle
 
 static const uint8_t sky__body_col[BODY_COUNT][3] = {
     { 224, 160,  40 },   // Sun
@@ -138,11 +145,10 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     }
 }
 
-// Sky position clamped a little past the rim, so below-horizon targets
-// exit through the horizon instead of flying to infinity
+// Alias kept for the morph call sites: the full-sphere projection
+// already accepts any altitude
 static inline void sky__project_clamped(float az, float alt,
                                         float *x, float *y) {
-    if (alt < -13.0f) alt = -13.0f;   // rr <= ~1.14 * SKY_R
     sky__project(az, alt, x, y);
 }
 
@@ -172,10 +178,15 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         float sa = st->body_alt[BODY_SUN];
         float day = (float)tempus_smoothstep(-18.0, 8.0, sa);
         d->alpha = base_alpha * mb;
+        // Under the earth: the outer annulus, a dark warm ground
+        draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
+        draw_circle_filled(d, 0, 0, SKY_R);
+        // The visible sky: the inner disc, breathing with the sun
         draw_set_color(d, dca(0.020f + 0.055f * day,
                               0.022f + 0.075f * day,
                               0.035f + 0.130f * day, 1.0f));
-        draw_circle_filled(d, 0, 0, wheel_R + (SKY_R - wheel_R) * mb);
+        draw_circle_filled(d, 0, 0,
+                           wheel_R + (SKY_HOR - wheel_R) * mb);
         d->alpha = base_alpha;
     }
 
@@ -183,8 +194,14 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     if (fb > 0.001f) {
         d->alpha = base_alpha * fb;
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.10f));
-        draw_circle_stroked(d, 0, 0, SKY_R * (2.0f / 3.0f), 1.0f);
-        draw_circle_stroked(d, 0, 0, SKY_R * (1.0f / 3.0f), 1.0f);
+        draw_circle_stroked(d, 0, 0, SKY_R * (30.0f / 180.0f), 1.0f);
+        draw_circle_stroked(d, 0, 0, SKY_R * (60.0f / 180.0f), 1.0f);
+        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.06f));
+        draw_circle_stroked(d, 0, 0, SKY_R * (120.0f / 180.0f), 1.0f);
+        draw_circle_stroked(d, 0, 0, SKY_R * (150.0f / 180.0f), 1.0f);
+        // The nadir, stretched into the outermost rim
+        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.20f));
+        draw_circle_stroked(d, 0, 0, SKY_R, 1.0f);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
         draw_line(d, -6.0f, 0, 6.0f, 0, 1.0f);
         draw_line(d, 0, -6.0f, 0, 6.0f, 1.0f);
@@ -210,9 +227,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             float y0 = ry0 * ORR_WEB_R * (1 - mb) + sy0 * mb;
             float x1 = rx1 * ORR_WEB_R * (1 - mb) + sx1 * mb;
             float y1 = ry1 * ORR_WEB_R * (1 - mb) + sy1 * mb;
-            bool vis = st->ecl_alt[i] > 0.5f && st->ecl_alt[j] > 0.5f;
-            float a = 0.22f * (1 - mb) + (vis ? 0.30f : 0.0f) * mb;
-            if (a < 0.005f) continue;
+            bool vis = st->ecl_alt[i] > 0.0f && st->ecl_alt[j] > 0.0f;
+            float a = 0.22f * (1 - mb) + (vis ? 0.30f : 0.13f) * mb;
             draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
             draw_line(d, x0, y0, x1, y1, 1.0f);
         }
@@ -223,9 +239,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             sky__project_clamped(st->sign_az[i], st->sign_alt[i], &sx, &sy);
             float x = rx * ORR_WEB_R * (1 - mb) + sx * mb;
             float y = ry * ORR_WEB_R * (1 - mb) + sy * mb;
-            bool vis = st->sign_alt[i] > 1.0f;
-            float a = 0.30f * (1 - mb) + (vis ? 0.45f : 0.0f) * mb;
-            if (a < 0.005f) continue;
+            bool vis = st->sign_alt[i] > 0.0f;
+            float a = 0.30f * (1 - mb) + (vis ? 0.45f : 0.22f) * mb;
             draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
             draw_line(d, x - 4.0f, y - 4.0f, x + 4.0f, y + 4.0f, 1.0f);
             draw_line(d, x - 4.0f, y + 4.0f, x + 4.0f, y - 4.0f, 1.0f);
@@ -282,21 +297,21 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                 *out_x = rx * (1 - mb) + sx * mb;
                 *out_y = ry * (1 - mb) + sy * mb;
             }
-            bool vis = st->path[b][i][1] > 0.3f
-                    && st->path[b][i + 1][1] > 0.3f;
-            float a = ra * (1 - mb) + (vis ? pa : 0.0f) * mb;
-            if (a < 0.005f) continue;
+            bool vis = st->path[b][i][1] > 0.0f
+                    && st->path[b][i + 1][1] > 0.0f;
+            float a = ra * (1 - mb) + (vis ? pa : pa * 0.45f) * mb;
+            if (a < 0.004f) continue;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, a));
             draw_line(d, mx0, my0, mx1, my1, 1.0f);
         }
     }
 
-    // ---- The horizon rim: Earth's orbit becomes Earth's ground ----
-    // The calendar wheel grows outward into the horizon. Compass
-    // furniture engraves itself once the rim is nearly home.
+    // ---- The horizon: Earth's orbit becomes Earth's ground ----
+    // The calendar wheel settles into the horizon circle at half
+    // radius; the unseen sky lies beyond it, out to the nadir rim.
     {
-        float rim_r = wheel_R + (SKY_R - wheel_R) * mb;
+        float rim_r = wheel_R + (SKY_HOR - wheel_R) * mb;
         d->alpha = base_alpha * (float)tempus_smoothstep(0.05, 0.5,
                                                          st->blend);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.55f));
@@ -338,11 +353,9 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
 
         float x = rx * (1 - mb) + sx * mb;
         float y = ry * (1 - mb) + sy * mb;
-        bool below = st->body_alt[b] < -0.5f;
-        float ba = 1.0f - (below ? (float)tempus_smoothstep(0.5, 0.95,
-                                                            st->blend)
-                                 : 0.0f);
-        if (ba < 0.01f) continue;
+        // Below the horizon is a place on this chart, not an exit:
+        // bodies in the earth annulus just read slightly subdued
+        float ba = st->body_alt[b] < 0.0f ? 0.78f : 1.0f;
         float pr = rsz * (1 - mb) + orr__pip_r(st->now.mag[b]) * mb;
 
         if (b == BODY_MOON) {
@@ -410,16 +423,16 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             bool major = (i % 9) == 0;
             draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
                                   major ? 0.6f : 0.25f));
-            draw_line(d, dx * SKY_R, dy * SKY_R,
-                      dx * (SKY_R + (major ? 14.0f : 7.0f)),
-                      dy * (SKY_R + (major ? 14.0f : 7.0f)), 1.0f);
+            draw_line(d, dx * SKY_HOR, dy * SKY_HOR,
+                      dx * (SKY_HOR + (major ? 14.0f : 7.0f)),
+                      dy * (SKY_HOR + (major ? 14.0f : 7.0f)), 1.0f);
             if (major) {
                 float sz = _font_compat[FONT_month].size;
                 float tw2 = sdf_measure_width(cw, card[i / 9]) * sz;
                 draw_set_color(d, dca(0.66f, 0.63f, 0.57f, 0.75f));
                 draw_text_ex(d, cw, sz,
-                             dx * (SKY_R + 34.0f) - tw2 * 0.5f,
-                             dy * (SKY_R + 34.0f) - sz * 0.5f,
+                             dx * (SKY_HOR + 34.0f) - tw2 * 0.5f,
+                             dy * (SKY_HOR + 34.0f) - sz * 0.5f,
                              card[i / 9]);
             }
         }
