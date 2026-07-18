@@ -148,7 +148,7 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
                   - t->config.longitude / (15.0 * 24.0);
         double jt = st->tv.jd_current + st->tv.percent_of_day - 0.5
                   - t->config.timezone / 24.0;
-        float A = (float)(fmod((jt - jm) * 360.985647, 360.0));
+        float A = (float)(fmod((jt - jm) * 360.0, 360.0));
         float dA = fabsf(A - st->win_prev_a);
         if (dA > 180.0f) dA = 360.0f - dA;
         st->win_prev_a = A;
@@ -172,6 +172,15 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
                   - t->config.longitude / (15.0 * 24.0);
     double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
                  - t->config.timezone / 24.0;
+    // CONTINUOUS frame: re-pinning to each date's midnight steps the
+    // orientation by the sidereal surplus (~0.986 deg) at every date
+    // tick — a once-a-day jerk of the whole chart. Instead the frame
+    // time slides so its sidereal angle advances smoothly through the
+    // day, still coinciding exactly with every midnight's canonical
+    // frame. (This also makes the window angle exactly 360 deg per
+    // solar day — see render.)
+    double jd_frame = jd_ut
+                    - (jd_ut - jd_mid) * (360.0 / 360.985647);
     if (fabs(jd_ut - st->cache_jd) <= 1.0 / 1440.0) return;
     st->cache_jd = jd_ut;
 
@@ -182,7 +191,7 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     for (int b = 0; b < BODY_COUNT; b++) {
         double blon, blat, az, alt;
         planets__body_lonlat(b, jd_ut, &blon, &blat);
-        planets_sky_azalt(blon, blat, jd_mid, lat, lon, &az, &alt);
+        planets_sky_azalt(blon, blat, jd_frame, lat, lon, &az, &alt);
         st->body_az[b] = (float)az;
         st->body_alt[b] = (float)alt;
 
@@ -202,14 +211,14 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     // The ecliptic's current lie across the sky + the sign cusps
     for (int i = 0; i < SKY_ECL_N; i++) {
         double az, alt;
-        planets_sky_azalt(i * 360.0 / SKY_ECL_N, 0.0, jd_mid, lat, lon,
+        planets_sky_azalt(i * 360.0 / SKY_ECL_N, 0.0, jd_frame, lat, lon,
                           &az, &alt);
         st->ecl_az[i] = (float)az;
         st->ecl_alt[i] = (float)alt;
     }
     for (int i = 0; i < 12; i++) {
         double az, alt;
-        planets_sky_azalt(i * 30.0, 0.0, jd_mid, lat, lon, &az, &alt);
+        planets_sky_azalt(i * 30.0, 0.0, jd_frame, lat, lon, &az, &alt);
         st->sign_az[i] = (float)az;
         st->sign_alt[i] = (float)alt;
     }
@@ -269,7 +278,9 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                       - t->config.longitude / (15.0 * 24.0);
         double jd_t = st->tv.jd_current + st->tv.percent_of_day - 0.5
                     - t->config.timezone / 24.0;
-        float A = (float)(fmod((jd_t - jd_mid) * 360.985647, 360.0)
+        // Window angle: exactly 360 deg per solar day about the pole
+        // (the continuous frame absorbs the sidereal surplus)
+        float A = (float)(fmod((jd_t - jd_mid) * 360.0, 360.0)
                           * M_PI / 180.0);
         double phi = t->config.latitude * M_PI / 180.0;
         float px = 0.0f, py = (float)cos(phi), pz = (float)sin(phi);
