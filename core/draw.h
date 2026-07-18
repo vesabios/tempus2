@@ -422,9 +422,9 @@ static inline void draw_text_centered(DrawCtx *d, int font_id, float cx, float c
 // wheel glyphs rotate 180 degrees for legibility (classic dial flip).
 static inline void draw_text_radial(DrawCtx *d, int font_id,
                                     float cx, float cy, float anchor_r,
-                                    float theta, const char *s) {
+                                    float theta, const char *s, float scale) {
     int w_id = _font_compat[font_id].weight;
-    float sz = _font_compat[font_id].size;
+    float sz = _font_compat[font_id].size * scale;
 
     float total_w = 0;
     for (const char *p = s; *p; p++) {

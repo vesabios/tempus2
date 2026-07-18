@@ -39,6 +39,7 @@ struct OrreryViewState {
     float glob_x, glob_y;   // globe center, world coords
     float glob_r;           // globe radius (wheel drags exclude the globe)
     bool  dragging;
+    bool  drag_earth;       // system view: dragging Earth around its orbit
 
     // Orientation-morph continuity state (see globe_rot_slerp_cont)
     float earth_pq[4];
@@ -440,18 +441,19 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 float orbr = wheel_R * orr__orbit_frac[p];
                 float th = (float)((0.75 + pn->helio_lon[p] / 360.0)
                                    * 2.0 * M_PI);
+                float lscale = 1.45f;
                 int lw = _font_compat[FONT_date].weight;
-                float lsz = _font_compat[FONT_date].size;
+                float lsz = _font_compat[FONT_date].size * lscale;
                 float tw = sdf_measure_width(lw, orr__planet[p].name) * lsz;
                 // Inner planets label inward, outer outward — clear of the
                 // bead and its orbit ring either way
                 float anchor = (p < PL_EARTH)
                     ? orbr - orr__planet[p].size - 12.0f
                     : orbr + orr__planet[p].size + 12.0f + tw;
-                d->alpha = base_alpha * a_planet * 0.55f;
-                draw_set_color(d, dc_scale(s->medium_grey, 0.8f));
+                d->alpha = base_alpha * a_planet * 0.85f;
+                draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.85f));
                 draw_text_radial(d, FONT_date, 0, 0, anchor, th,
-                                 orr__planet[p].name);
+                                 orr__planet[p].name, lscale);
             }
             d->alpha = base_alpha;
         }

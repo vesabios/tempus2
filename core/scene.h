@@ -312,6 +312,18 @@ static inline void scene__advance_override_days(Tempus *t, double dv) {
     t->solar_dirty = true;
 }
 
+// Set the override date from a wheel angle (pct 0 = yule at screen-top),
+// preserving the time of day — shared by the sun-bead and earth drags
+static inline void scene__set_year_from_wheel_pct(Tempus *t, double pct_yule) {
+    double doy = pct_yule * t->total_days
+               - (t->jd_months[0] - t->jd_newyear);
+    double diy = (double)cal_days_in_year(t->override_year);
+    double pct_cal = doy / diy;
+    pct_cal -= floor(pct_cal);
+    t->override_year_pct = pct_cal;
+    t->solar_dirty = true;
+}
+
 // Engage the manual override at the current moment (shared by drags)
 static inline void scene__begin_override(Tempus *t) {
     if (t->time_override) return;
@@ -330,11 +342,29 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
     OrreryViewState *o = &sc->orrery_state;
     CalendarViewState *c = &sc->calendar_state;
 
+    bool sys = sc->system_blend > 0.5;
+
     if (phase == 0) {
+        // System view: the sun bead is invisible — instead, grab the
+        // planet itself and drag it around its orbit (the wheel).
+        if (sys) {
+            float gdx = wx - o->glob_x, gdy = wy - o->glob_y;
+            float grab = o->glob_r + 24.0f;
+            if (gdx * gdx + gdy * gdy < grab * grab) {
+                o->dragging = true;
+                o->drag_earth = true;
+                c->fling_vel = 0;    // grabbing stops the flywheel
+                c->drag_accum = 0;
+                scene__begin_override(t);
+                return;
+            }
+        }
+
         float dx = wx - o->bead_x, dy = wy - o->bead_y;
-        if (sc->helio_blend > 0.5
+        if (sc->helio_blend > 0.5 && !sys
             && dx * dx + dy * dy < o->bead_hit * o->bead_hit) {
             o->dragging = true;
+            o->drag_earth = false;
             c->fling_vel = 0;    // grabbing stops the flywheel
             c->drag_accum = 0;
             scene__begin_override(t);
@@ -383,35 +413,53 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
             float tx = -py / rp, ty = px / rp;
             float dxf = wx - c->last_wx, dyf = wy - c->last_wy;
             float along = dxf * tx + dyf * ty;
-            float denom = R - sc->style.calendar_base_radius;
-            if (denom < 120.0f) denom = 120.0f;   // low-zoom coarse rate
-            double dv = -(double)along / (2.0 * M_PI * (double)denom)
-                      * t->total_days;
+            double dv;
+            if (sys) {
+                // System view: the wheel is fixed and the EARTH is what
+                // moves — the pointer/planet follows the finger, arc
+                // length mapping 1:1 to angle at the band radius. (The
+                // film-strip rule below would read inverted here.)
+                dv = (double)along / (2.0 * M_PI * (double)rp)
+                   * t->total_days;
+            } else {
+                // Film strip: the band follows the finger, so time moves
+                // against the drag. Pan rate is 2*pi*(R - base) per year.
+                float denom = R - sc->style.calendar_base_radius;
+                if (denom < 120.0f) denom = 120.0f;   // low-zoom coarse rate
+                dv = -(double)along / (2.0 * M_PI * (double)denom)
+                   * t->total_days;
+            }
             scene__advance_override_days(t, dv);
             c->drag_accum += dv;
         }
         c->last_wx = wx;
         c->last_wy = wy;
     } else if (phase == 1 && o->dragging) {
-        float dx = wx - o->glob_x, dy = wy - o->glob_y;
-        if (dx * dx + dy * dy > 100.0f) {
-            // Bead direction -> sun direction -> wheel angle (yule-based)
-            double phi = atan2((double)-dx, (double)dy);
-            double pct_yule = phi / (2.0 * M_PI);
-            pct_yule -= floor(pct_yule);
-            // Convert wheel position to calendar-year fraction
-            double doy = pct_yule * t->total_days
-                       - (t->jd_months[0] - t->jd_newyear);
-            double diy = (double)cal_days_in_year(t->override_year);
-            double pct_cal = doy / diy;
-            pct_cal -= floor(pct_cal);
-            // (No flywheel feed: the sun is a direct positional control —
-            // it goes where you put it and stays there on release.)
-            t->override_year_pct = pct_cal;
-            t->solar_dirty = true;
+        if (o->drag_earth) {
+            // Earth follows the finger around the wheel (whose center is
+            // the origin at system zoom). Direct positional control.
+            if (wx * wx + wy * wy > 100.0f) {
+                double phi = atan2((double)wx, (double)-wy);
+                double pct_yule = phi / (2.0 * M_PI);
+                pct_yule -= floor(pct_yule);
+                scene__set_year_from_wheel_pct(t, pct_yule);
+            }
+        } else {
+            float dx = wx - o->glob_x, dy = wy - o->glob_y;
+            if (dx * dx + dy * dy > 100.0f) {
+                // Bead direction -> sun direction -> wheel angle
+                // (yule-based). No flywheel feed: the sun is a direct
+                // positional control — it goes where you put it and
+                // stays there on release.
+                double phi = atan2((double)-dx, (double)dy);
+                double pct_yule = phi / (2.0 * M_PI);
+                pct_yule -= floor(pct_yule);
+                scene__set_year_from_wheel_pct(t, pct_yule);
+            }
         }
     } else if (phase == 2) {
         o->dragging = false;
+        o->drag_earth = false;
         c->wheel_dragging = false;
     }
 }
