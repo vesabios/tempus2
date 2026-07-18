@@ -449,14 +449,21 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
 
         // The aspect web: chords between zodiac positions whose separation
-        // matches a division of the circle, brightness rising as the
-        // aspect tightens. Conjunctions tie with a bracket outside the
-        // chord radius instead (a zero-length chord says nothing).
+        // matches a division of the circle. Ptolemaic majors only — the
+        // minors are computed but stay off the dial (they were most of
+        // the noise for the least meaning). Brightness is a hard cube of
+        // orb tightness: a loose aspect whispers, an exact one burns —
+        // the web flares when the sky does something geometric instead
+        // of droning as a constant lattice. Conjunctions tie with a
+        // bracket outside the chord radius (a zero-length chord says
+        // nothing).
         if (a_web > 0.001f) {
             for (int i = 0; i < st->num_aspects; i++) {
                 const Aspect *A = &st->aspects[i];
                 const AspectDef *def = &planets_aspect_defs[A->kind];
+                if (!def->major) continue;
                 const uint8_t *c = orr__aspect_col[A->kind];
+                float sharp = A->strength * A->strength * A->strength;
                 if (A->kind == ASPECT_CONJUNCTION) {
                     double la = pn->geo_lon[A->a];
                     double dlt = planets_lon_diff(pn->geo_lon[A->b], la);
@@ -467,17 +474,15 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                     float aa1 = (float)((0.75 + (l1 + 1.5) / 360.0)
                                         * 2.0 * M_PI - M_PI * 0.5);
                     d->alpha = base_alpha * a_web
-                             * (0.35f + 0.55f * A->strength);
+                             * (0.12f + 0.78f * sharp);
                     draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                           c[2] / 255.0f, 0.8f));
                     draw_arc_filled(d, 0, 0, ORR_WEB_R + 10.0f,
                                     ORR_WEB_R + 11.5f, aa0, aa1, 10);
                 } else {
-                    float wdt = def->major ? (0.8f + 1.4f * A->strength)
-                                           : 0.8f;
-                    float al = (def->major ? 0.55f : 0.30f)
-                             * (0.30f + 0.70f * A->strength);
-                    d->alpha = base_alpha * a_web * al;
+                    float wdt = 0.6f + 1.8f * sharp;
+                    d->alpha = base_alpha * a_web
+                             * (0.05f + 0.60f * sharp);
                     draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                           c[2] / 255.0f, 1.0f));
                     draw_line(d, mpx[A->a], mpy[A->a],
