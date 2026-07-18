@@ -333,7 +333,24 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             };
             float lo[3];
             globe_mat_mul_vec(rot, sun_earth, lo);
-            globe_vec_nlerp(light, lo, obf, light);
+            // Blend WITHOUT the shortest-path sign flip (same lesson
+            // the moon's light learned): both vectors are the same
+            // physical sun, but the az/zen side lags a fast drag —
+            // when the stale base swings past 90 deg from the true
+            // light, nlerp's flip NEGATES it and the sun mirrors to
+            // the wrong side of the planet.
+            float bl[3];
+            float bn = 0;
+            for (int i = 0; i < 3; i++) {
+                bl[i] = light[i] + (lo[i] - light[i]) * obf;
+                bn += bl[i] * bl[i];
+            }
+            bn = sqrtf(bn);
+            if (bn > 1.0e-3f) {
+                for (int i = 0; i < 3; i++) light[i] = bl[i] / bn;
+            } else {
+                memcpy(light, lo, sizeof(lo));
+            }
         }
 
         // Slow-release closeup: composed with a station flight, a
