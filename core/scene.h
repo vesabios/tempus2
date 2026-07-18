@@ -517,16 +517,15 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 c->last_wy = wy;
                 c->fling_vel = 0;    // grabbing stops the flywheel
                 c->drag_accum = 0;
-                // In HORAE, ORBIS, ROTAE, and at the main 12-hour
-                // face the band scrubs whole days (those stations'
-                // fast wheels and hands keep their own time);
-                // elsewhere fractional
+                // In HORAE, ORBIS, and at the main 12-hour face the
+                // band scrubs whole days (the clock's own hands and
+                // controls own the hours there); elsewhere fractional
                 c->fling_keep_time = sc->horae_blend > 0.5
                                   || sc->orbis_blend > 0.5
-                                  || sc->rotae_blend > 0.5
                                   || (sc->helio_blend <= 0.5
                                       && sc->system_blend <= 0.5
                                       && sc->sky_blend <= 0.5
+                                      && sc->rotae_blend <= 0.5
                                       && sc->saec_blend <= 0.5);
                 c->fling_week = sc->horae_blend > 0.5;
                 c->week_accum = 0.0;
