@@ -567,7 +567,9 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         ob->last_wy = wy;
     } else if (phase == 1 && ho->ring_dragging) {
         // Incremental angle about the LIVE ring center (it wobbles as
-        // time moves under the drag); clockwise = forward
+        // time moves under the drag); clockwise = forward — the ring
+        // itself turns counterclockwise with time, so the drag reads
+        // as winding the mechanism against its run
         float ha = (float)(t->percent_of_day * 2.0 * M_PI);
         float rcx = -sinf(ha) * HORAE_ECC;
         float rcy = cosf(ha) * HORAE_ECC;

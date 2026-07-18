@@ -370,14 +370,14 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         // Seven day regions + engraved names
         float lsz = _font_compat[FONT_date].size;
         for (int i = 0; i < 7; i++) {
-            float q0 = now + horae__wrap((float)i - m_now, 7.0f) / 7.0f;
+            float q0 = now - horae__wrap((float)i - m_now, 7.0f) / 7.0f;
             const uint8_t *c =
                 orr__body_col[horae__chaldean_body[horae__day_ruler[i]]];
             bool today = i == w;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, today ? 0.16f : 0.06f));
             horae__cell(d, rcx, rcy, HORAE_RING_IN, HORAE_RING_OUT,
-                        q0, q0 + 1.0f / 7.0f);
+                        q0 - 1.0f / 7.0f, q0);
 
             // Midnight boundary spoke
             {
@@ -392,7 +392,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
 
             // Name along the band, waist on the band's center line
             {
-                float qc = q0 + 0.5f / 7.0f;
+                float qc = q0 - 0.5f / 7.0f;
                 float ang = qc * 2.0f * (float)M_PI;
                 float na = fmodf(ang, 2.0f * (float)M_PI);
                 if (na < 0) na += 2.0f * (float)M_PI;
@@ -419,9 +419,9 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             for (int h = 0; h < 24; h++) {
                 float m0 = dd + rise + u[h];
                 float m1 = dd + rise + u[h + 1];
-                float q0 = now + horae__wrap(m0 - m_now, 7.0f) / 7.0f;
-                float q1 = now + horae__wrap(m1 - m_now, 7.0f) / 7.0f;
-                if (q1 < q0) continue;   // the seam cell opposite now
+                float q0 = now - horae__wrap(m0 - m_now, 7.0f) / 7.0f;
+                float q1 = now - horae__wrap(m1 - m_now, 7.0f) / 7.0f;
+                if (q0 < q1) continue;   // the seam cell opposite now
 
                 bool is_day = h < 12;
                 bool cur = (dd == pd && h == hcur);
@@ -430,20 +430,20 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                 if (cur) {
                     draw_set_color(d, dc_scale(s->sunrise_handle, 1.15f));
                     horae__cell(d, rcx, rcy, r0, HORAE_RING_IN + 15.0f,
-                                q0, q1);
+                                q1, q0);
                 } else if (((dd * 24 + h) & 1) == 0) {
                     draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
-                    horae__cell(d, rcx, rcy, r0, r1, q0, q1);
+                    horae__cell(d, rcx, rcy, r0, r1, q1, q0);
                 } else {
                     // Black cells outline in the light so they read
                     // against the black ground: light underlay, dark
                     // fill inset a hairline
                     const float eps = 0.0007f;   // ~1.3 units at r 300
                     draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
-                    horae__cell(d, rcx, rcy, r0, r1, q0, q1);
+                    horae__cell(d, rcx, rcy, r0, r1, q1, q0);
                     draw_set_color(d, dca(0.03f, 0.03f, 0.03f, 0.95f));
                     horae__cell(d, rcx, rcy, r0 + 1.1f, r1 - 1.1f,
-                                q0 + eps, q1 - eps);
+                                q1 + eps, q0 - eps);
                 }
             }
         }
