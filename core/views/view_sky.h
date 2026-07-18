@@ -30,6 +30,12 @@ struct SkyViewState {
     PlanetsSky sky;
     double     cache_jd;
 
+    // Window-motion tracker: while the hour is being scrubbed the
+    // window sweeps fast and its outline reads as a strange writhing
+    // shape — dim it in motion, restore it at rest
+    float win_prev_a;
+    float win_motion;
+
     // The orrery's state: its published live sun/moon positions are the
     // machine-side endpoints of the morph, read at render time — every
     // flight starts from where the bodies actually are, whatever
@@ -66,7 +72,7 @@ static inline void sky__project(float az_deg, float alt_deg,
 }
 
 #define SKY_HOR (SKY_R * 0.5f)   // the horizon circle
-#define SKY_WIN_N 144             // visible-window samples
+#define SKY_WIN_N 360             // visible-window samples
 
 // Frame vector (E, N, U) of an az/alt direction — az from north,
 // eastward, matching planets_sky_azalt
@@ -234,7 +240,19 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                       - t->config.longitude / (15.0 * 24.0);
         double jd_t = st->tv.jd_current + st->tv.percent_of_day - 0.5
                     - t->config.timezone / 24.0;
-        float A = (float)((jd_t - jd_mid) * 360.985647 * M_PI / 180.0);
+        float A = (float)(fmod((jd_t - jd_mid) * 360.985647, 360.0)
+                          * M_PI / 180.0);
+        // Motion measure: how fast the window swept since last frame
+        {
+            SkyViewState *sw2 = (SkyViewState *)(uintptr_t)buf;
+            float dA = fabsf(A - st->win_prev_a);
+            if (dA > (float)M_PI) dA = 2.0f * (float)M_PI - dA;
+            sw2->win_prev_a = A;
+            float m2 = (float)tempus_smoothstep(0.0015, 0.012, dA);
+            sw2->win_motion = m2 > st->win_motion
+                            ? m2
+                            : st->win_motion * 0.90f + m2 * 0.10f;
+        }
         double phi = t->config.latitude * M_PI / 180.0;
         float px = 0.0f, py = (float)cos(phi), pz = (float)sin(phi);
         float ca = cosf(A), sa = sinf(A), oc = 1.0f - ca;
@@ -449,7 +467,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // sky you cannot see now lies beyond it, out to the nadir rim.
     {
         d->alpha = base_alpha * (float)tempus_smoothstep(0.05, 0.5,
-                                                         st->blend);
+                                                         st->blend)
+                 * (1.0f - 0.70f * st->win_motion);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.55f));
         for (int k = 0; k < SKY_WIN_N; k++)
             draw_line(d, lx[k], ly[k], lx[k + 1], ly[k + 1], 1.0f);
@@ -584,7 +603,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
 
     // ---- Compass furniture (riding the moving window rim) ----
     if (fb > 0.001f) {
-        d->alpha = base_alpha * fb;
+        d->alpha = base_alpha * fb * (1.0f - 0.5f * st->win_motion);
         int cw = _font_compat[FONT_month].weight;
         // az 0/90/180/270 = N/E/S/W; ticks sit ON the window curve,
         // pointing away from the current zenith
