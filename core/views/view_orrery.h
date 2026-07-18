@@ -415,19 +415,12 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // not-to-scale layout (the endpoints and the bead are all true).
         if (a_sight > 0.001f) {
             d->alpha = base_alpha * a_sight;
-            for (int b = 0; b < BODY_COUNT; b++) {
-                float bx2, by2;
-                if (b == BODY_SUN) {
-                    bx2 = sun_x; by2 = sun_y;
-                } else if (b == BODY_MOON) {
-                    float dx, dy;
-                    orr__ecl_dir(pn->geo_lon[BODY_MOON], &dx, &dy);
-                    bx2 = ex + dx * earth_r * 1.55f;
-                    by2 = ey + dy * earth_r * 1.55f;
-                } else {
-                    int p = planets_body_pl(b);
-                    bx2 = ppx[p]; by2 = ppy[p];
-                }
+            // Planets only: the sun's line would just trace the orbit
+            // radial, and the moon hangs right next to Earth — both
+            // projections are obvious without ink
+            for (int b = BODY_MERCURY; b < BODY_COUNT; b++) {
+                int p = planets_body_pl(b);
+                float bx2 = ppx[p], by2 = ppy[p];
                 // Control point puts the curve through the bead at t=0.5
                 float p1x = 2.0f * bx2 - 0.5f * (ex + mpx[b]);
                 float p1y = 2.0f * by2 - 0.5f * (ey + mpy[b]);
