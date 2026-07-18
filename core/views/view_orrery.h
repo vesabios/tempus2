@@ -999,15 +999,13 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float hex = (m >= 0.999f) ? ex : sphi * base_w * (1.0f - z);
         float hey = (m >= 0.999f) ? ey : -cphi * base_w * (1.0f - z);
         float her = (m >= 0.999f) ? earth_r : 42.0f + z * 198.0f;
-        // THE MOON'S FRAME LAW (Seren): shown WITH the globe, the moon
-        // is PHYSICALLY placed — its true direction from the earth,
-        // seen in the globe's own view frame. The wheel's mirrored
-        // zodiac frame belongs only to the full system's wheel-world
-        // (where ring markers, sight-lines, and aspect chords live),
-        // and the 12-hour clock's 6-o'clock aperture is dial
-        // furniture. Between TELLVS and MACHINA the direction turns
-        // ALONG the orbit ring (shortest arc) as the system arrives —
-        // an orbital swing, not a sweep across the dial.
+        // THE MOON'S FRAME LAW (Seren): shown WITH the globe — at
+        // EVERY station, MACHINA included — the moon is PHYSICALLY
+        // placed: its true direction from the earth, seen in the
+        // globe's own view frame. The one exception is the 12-hour
+        // clock's 6-o'clock aperture, which is dial furniture. (The
+        // moon has no sight-line to a zodiac marker, so nothing in
+        // the wheel-world needs the mirrored direction.)
         float mdx, mdy;
         orr__ecl_dir(st->planets.geo_lon[BODY_MOON], &mdx, &mdy);
         float moon_vz = 1.0f;   // view-frame z of the physical direction
@@ -1034,15 +1032,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             float mm2 = sqrtf(mv[0] * mv[0] + mv[1] * mv[1]);
             if (mm2 > 1.0e-4f) {
                 moon_vz = mv[2];
-                float a0 = atan2f(mv[1] / mm2, mv[0] / mm2);
-                float a1 = atan2f(mdy, mdx);
-                float da = a1 - a0;
-                while (da > (float)M_PI) da -= 2.0f * (float)M_PI;
-                while (da < -(float)M_PI) da += 2.0f * (float)M_PI;
-                float wz = (float)tempus_smoothstep(0.15, 0.85, ss);
-                float am = a0 + da * wz;
-                mdx = cosf(am);
-                mdy = sinf(am);
+                mdx = mv[0] / mm2;
+                mdy = mv[1] / mm2;
             }
         }
         float hx2 = hex + mdx * her * 1.55f;
