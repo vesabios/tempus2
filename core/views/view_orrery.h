@@ -460,13 +460,14 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 float lth = th + ang_off;   // clockwise of the bead
                 // The dial flip renders glyphs at a different radial
                 // depth relative to the anchor radius — compensate each
-                // branch separately so the letterform band occupies the
-                // SAME arc-space just outside the ring on both halves
+                // branch separately so the letterform band CENTERS on
+                // the orbit ring: text mid-height and planet center
+                // share the same arc on both halves
                 float na = fmodf(lth, 2.0f * (float)M_PI);
                 if (na < 0) na += 2.0f * (float)M_PI;
                 bool lflip = (na > (float)M_PI * 0.5f
                               && na < (float)M_PI * 1.5f);
-                float lr = orbr + 6.0f + lsz * (lflip ? 0.86f : 0.72f);
+                float lr = orbr + lsz * (lflip ? 0.51f : 0.37f);
                 d->alpha = base_alpha * a_planet * 0.85f;
                 draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.85f));
                 draw_text_curved(d, FONT_date, 0, 0, lr, lth,
