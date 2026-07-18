@@ -29,8 +29,6 @@ struct SkyViewState {
     PlanetsNow now;
     PlanetsSky sky;
     double     cache_jd;
-    float      bowl_sun_alt;   // sun altitude at the DATE's solar
-                               // midnight — the bowl's tint anchor
 
     // The orrery's state: its published live sun/moon positions are the
     // machine-side endpoints of the morph, read at render time — every
@@ -68,6 +66,35 @@ static inline void sky__project(float az_deg, float alt_deg,
 }
 
 #define SKY_HOR (SKY_R * 0.5f)   // the horizon circle
+#define SKY_WIN_N 144             // visible-window samples
+
+// Frame vector (E, N, U) of an az/alt direction — az from north,
+// eastward, matching planets_sky_azalt
+static inline void sky__vec(float az_deg, float alt_deg, float v[3]) {
+    float a = az_deg * (float)M_PI / 180.0f;
+    float l = alt_deg * (float)M_PI / 180.0f;
+    v[0] = sinf(a) * cosf(l);
+    v[1] = cosf(a) * cosf(l);
+    v[2] = sinf(l);
+}
+
+// Is this az/alt inside the current visible window (above the hour's
+// horizon)? zv is the current zenith as a frame vector.
+static inline bool sky__in_window(float az_deg, float alt_deg,
+                                  const float zv[3]) {
+    float v[3];
+    sky__vec(az_deg, alt_deg, v);
+    return v[0] * zv[0] + v[1] * zv[1] + v[2] * zv[2] > 0.0f;
+}
+
+static inline void sky__vec_project(const float v[3], float *x, float *y) {
+    float u = v[2];
+    if (u > 1.0f) u = 1.0f;
+    if (u < -1.0f) u = -1.0f;
+    float az = atan2f(v[0], v[1]) * 180.0f / (float)M_PI;
+    float alt = asinf(u) * 180.0f / (float)M_PI;
+    sky__project(az, alt, x, y);
+}
 
 static const uint8_t sky__body_col[BODY_COUNT][3] = {
     { 196, 126,  16 },   // Sun — the instrument's gold, same object
@@ -105,30 +132,20 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->blend = sc->sky_blend;
     if (st->blend < 0.001) return;
 
-    // CAELVM runs on the TRUE display instant — the wheel scrubs hours
-    // and the bodies wheel across the bowl accordingly. The BOWL's
-    // tint, though, is anchored to the date's local mean solar
-    // midnight: the sky stays a readable instrument night, no
-    // day/night strobing under a fast scrub — the sun simply crosses
-    // the horizon ring as a body when its hour comes.
-    double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
-                 - t->config.timezone / 24.0;
+    // CAELVM pins the STAR FIELD to the date's local mean solar
+    // midnight: every celestial object, path, and line holds still in
+    // frame. The running hour lives in the VISIBLE WINDOW instead (see
+    // render) — the horizon of the current instant sliding across the
+    // fixed sky. The wheel scrubs both: the date moves the field
+    // slowly, the hour moves only the window.
+    double jd_ut = st->tv.jd_current + 0.5
+                 - t->config.longitude / (15.0 * 24.0);
     if (fabs(jd_ut - st->cache_jd) <= 1.0 / 1440.0) return;
     st->cache_jd = jd_ut;
 
     double lat = t->config.latitude, lon = t->config.longitude;
     planets_compute(&st->now, jd_ut);
     planets_sky_compute(&st->sky, &st->now, lat, lon);
-
-    // Tint anchor: sun altitude at the date's solar midnight
-    {
-        double jd_mid = st->tv.jd_current + 0.5
-                      - t->config.longitude / (15.0 * 24.0);
-        double blon, blat, az, alt;
-        planets__body_lonlat(BODY_SUN, jd_mid, &blon, &blat);
-        planets_sky_azalt(blon, blat, jd_mid, lat, lon, &az, &alt);
-        st->bowl_sun_alt = (float)alt;
-    }
 
     for (int b = 0; b < BODY_COUNT; b++) {
         double blon, blat, az, alt;
@@ -200,24 +217,108 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     float wheel_R = s->calendar_base_radius
                   * (float)tempus_wheel_scale(1.0);   // MACHINA station
 
+    // ---- The visible window: the hour made geometry ----
+    // The star field is pinned to the date's midnight; the current
+    // hour ROTATES THE HORIZON about the celestial pole instead. At
+    // midnight the window is the perfect half-radius circle; away from
+    // it the projection bends the moving horizon into its true oval,
+    // sweeping across the fixed sky as the day turns. wx/wy are the
+    // pure window; lx/ly blend it from the calendar wheel's circle so
+    // the ground unfurls on the same morph as everything else.
+    float wx[SKY_WIN_N + 1], wy[SKY_WIN_N + 1];
+    float lx[SKY_WIN_N + 1], ly[SKY_WIN_N + 1];
+    float zv[3];        // current zenith, frame vector
+    float zwx, zwy;     // projected current zenith
+    {
+        double jd_mid = st->tv.jd_current + 0.5
+                      - t->config.longitude / (15.0 * 24.0);
+        double jd_t = st->tv.jd_current + st->tv.percent_of_day - 0.5
+                    - t->config.timezone / 24.0;
+        float A = (float)((jd_t - jd_mid) * 360.985647 * M_PI / 180.0);
+        double phi = t->config.latitude * M_PI / 180.0;
+        float px = 0.0f, py = (float)cos(phi), pz = (float)sin(phi);
+        float ca = cosf(A), sa = sinf(A), oc = 1.0f - ca;
+        // Rodrigues: rotation about the celestial pole (E,N,U frame)
+        float M[9] = {
+            ca + px * px * oc,      px * py * oc - pz * sa,
+            px * pz * oc + py * sa,
+            py * px * oc + pz * sa, ca + py * py * oc,
+            py * pz * oc - px * sa,
+            pz * px * oc - py * sa, pz * py * oc + px * sa,
+            ca + pz * pz * oc,
+        };
+        zv[0] = M[2]; zv[1] = M[5]; zv[2] = M[8];
+        sky__vec_project(zv, &zwx, &zwy);
+        for (int k = 0; k <= SKY_WIN_N; k++) {
+            float th = (float)k / SKY_WIN_N * 2.0f * (float)M_PI;
+            float v0[3] = { sinf(th), cosf(th), 0.0f };
+            float v[3] = {
+                M[0] * v0[0] + M[1] * v0[1] + M[2] * v0[2],
+                M[3] * v0[0] + M[4] * v0[1] + M[5] * v0[2],
+                M[6] * v0[0] + M[7] * v0[1] + M[8] * v0[2],
+            };
+            sky__vec_project(v, &wx[k], &wy[k]);
+            // The wheel's circle sample at the same bearing (chart
+            // mirror matches sky__project)
+            float cxk = -sinf(th) * wheel_R;
+            float cyk = -cosf(th) * wheel_R;
+            lx[k] = cxk * (1 - mb) + wx[k] * mb;
+            ly[k] = cyk * (1 - mb) + wy[k] * mb;
+        }
+    }
+
     // ---- The bowl: sky tint riding the sun's altitude ----
     // Day -> civil -> nautical -> astronomical -> night, as one smooth
     // ramp. An instrument's sky, not a photograph's: always dark enough
     // to read engravings against. Arrives as a deepening veil over the
     // dissolving machine.
     {
-        float sa = st->bowl_sun_alt;
+        float sa = st->body_alt[BODY_SUN];
         float day = (float)tempus_smoothstep(-18.0, 8.0, sa);
         d->alpha = base_alpha * mb;
         // Under the earth: the outer annulus, a dark warm ground
         draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
         draw_circle_filled(d, 0, 0, SKY_R);
-        // The visible sky: the inner disc, breathing with the sun
+        // The visible sky: the WINDOW, fan-filled from the current
+        // zenith, breathing with the (midnight) sun
         draw_set_color(d, dca(0.020f + 0.055f * day,
                               0.022f + 0.075f * day,
                               0.035f + 0.130f * day, 1.0f));
-        draw_circle_filled(d, 0, 0,
-                           wheel_R + (SKY_HOR - wheel_R) * mb);
+        if (zv[2] >= 0.0f) {
+            // Simple topology: the window is a blob around the current
+            // zenith — fan-fill from it (morph-lerped toward center)
+            float fcx = zwx * mb, fcy = zwy * mb;
+            int c0 = draw__push_vert(d, fcx, fcy, d->white_u, d->white_v);
+            int prev = draw__push_vert(d, lx[0], ly[0],
+                                       d->white_u, d->white_v);
+            for (int k = 1; k <= SKY_WIN_N; k++) {
+                int vi = draw__push_vert(d, lx[k], ly[k],
+                                         d->white_u, d->white_v);
+                draw__tri(d, c0, prev, vi);
+                prev = vi;
+            }
+        } else {
+            // Deep day: the current zenith has crossed under the
+            // midnight horizon and the window has swallowed the rim —
+            // the VISIBLE sky is everything outside the curve. Paint
+            // the whole chart as sky, then repaint the unseen blob
+            // (around the current nadir) as ground.
+            draw_circle_filled(d, 0, 0, SKY_R);
+            draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
+            float nv[3] = { -zv[0], -zv[1], -zv[2] };
+            float nwx, nwy;
+            sky__vec_project(nv, &nwx, &nwy);
+            int c0 = draw__push_vert(d, nwx * mb, nwy * mb,
+                                     d->white_u, d->white_v);
+            int prev = draw__push_vert(d, lx[0], ly[0],
+                                       d->white_u, d->white_v);
+            for (int k = 1; k <= SKY_WIN_N; k++) {
+                int vi = draw__push_vert(d, lx[k], ly[k],
+                                         d->white_u, d->white_v);
+                draw__tri(d, c0, prev, vi);
+                prev = vi;
+            }
+        }
         d->alpha = base_alpha;
     }
 
@@ -233,9 +334,11 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         // The nadir, stretched into the outermost rim
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.20f));
         draw_circle_stroked(d, 0, 0, SKY_R, 1.0f);
+        // The zenith cross marks what is overhead NOW — it rides the
+        // hour around the fixed star field with the window
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
-        draw_line(d, -6.0f, 0, 6.0f, 0, 1.0f);
-        draw_line(d, 0, -6.0f, 0, 6.0f, 1.0f);
+        draw_line(d, zwx - 6.0f, zwy, zwx + 6.0f, zwy, 1.0f);
+        draw_line(d, zwx, zwy - 6.0f, zwx, zwy + 6.0f, 1.0f);
         d->alpha = base_alpha;
     }
 
@@ -258,7 +361,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             float y0 = ry0 * ORR_WEB_R * mw + sy0 * (1 - mw);
             float x1 = rx1 * ORR_WEB_R * mw + sx1 * (1 - mw);
             float y1 = ry1 * ORR_WEB_R * mw + sy1 * (1 - mw);
-            bool vis = st->ecl_alt[i] > 0.0f && st->ecl_alt[j] > 0.0f;
+            bool vis = sky__in_window(st->ecl_az[i], st->ecl_alt[i], zv)
+                    && sky__in_window(st->ecl_az[j], st->ecl_alt[j], zv);
             float a = 0.22f * mw + (vis ? 0.30f : 0.13f) * sw;
             draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
             draw_line(d, x0, y0, x1, y1, 1.0f);
@@ -270,7 +374,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             sky__project_clamped(st->sign_az[i], st->sign_alt[i], &sx, &sy);
             float x = rx * ORR_WEB_R * mw + sx * (1 - mw);
             float y = ry * ORR_WEB_R * mw + sy * (1 - mw);
-            bool vis = st->sign_alt[i] > 0.0f;
+            bool vis = sky__in_window(st->sign_az[i], st->sign_alt[i], zv);
             float a = 0.30f * mw + (vis ? 0.45f : 0.22f) * sw;
             draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
             draw_line(d, x - 4.0f, y - 4.0f, x + 4.0f, y + 4.0f, 1.0f);
@@ -328,8 +432,10 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                 *out_x = rx * mw + sx * (1 - mw);
                 *out_y = ry * mw + sy * (1 - mw);
             }
-            bool vis = st->path[b][i][1] > 0.0f
-                    && st->path[b][i + 1][1] > 0.0f;
+            bool vis = sky__in_window(st->path[b][i][0],
+                                      st->path[b][i][1], zv)
+                    && sky__in_window(st->path[b][i + 1][0],
+                                      st->path[b][i + 1][1], zv);
             float a = ra * mw + (vis ? pa : pa * 0.45f) * sw;
             if (a < 0.004f) continue;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
@@ -339,14 +445,14 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     }
 
     // ---- The horizon: Earth's orbit becomes Earth's ground ----
-    // The calendar wheel settles into the horizon circle at half
-    // radius; the unseen sky lies beyond it, out to the nadir rim.
+    // The calendar wheel settles into the visible window's rim; the
+    // sky you cannot see now lies beyond it, out to the nadir rim.
     {
-        float rim_r = wheel_R + (SKY_HOR - wheel_R) * mb;
         d->alpha = base_alpha * (float)tempus_smoothstep(0.05, 0.5,
                                                          st->blend);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.55f));
-        draw_circle_stroked(d, 0, 0, rim_r, 1.0f);
+        for (int k = 0; k < SKY_WIN_N; k++)
+            draw_line(d, lx[k], ly[k], lx[k + 1], ly[k + 1], 1.0f);
         d->alpha = base_alpha;
     }
 
@@ -386,9 +492,10 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         float pw = handoff ? (1 - mb) : mw;
         float x = rx * pw + sx * (1 - pw);
         float y = ry * pw + sy * (1 - pw);
-        // Below the horizon is a place on this chart, not an exit:
-        // bodies in the earth annulus just read slightly subdued
-        float ba = st->body_alt[b] < 0.0f ? 0.78f : 1.0f;
+        // Outside the current window is a place on this chart, not an
+        // exit: bodies in the unseen sky just read slightly subdued
+        float ba = sky__in_window(st->body_az[b], st->body_alt[b], zv)
+                 ? 1.0f : 0.78f;
         if (!handoff)
             ba *= ms + (1.0f - ms) * fin;   // born in place, fading in
         float pr = rsz * pw + orr__pip_r(st->now.mag[b]) * (1 - pw);
@@ -475,29 +582,34 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         d->alpha = base_alpha;
     }
 
-    // ---- Compass furniture (the rim itself morphs in above) ----
+    // ---- Compass furniture (riding the moving window rim) ----
     if (fb > 0.001f) {
         d->alpha = base_alpha * fb;
         int cw = _font_compat[FONT_month].weight;
-        // az 0/90/180/270 = N/E/S/W; the chart mirror puts E on the left
+        // az 0/90/180/270 = N/E/S/W; ticks sit ON the window curve,
+        // pointing away from the current zenith
         static const char *card[4] = { "N", "E", "S", "W" };
+        float fcx = zwx * mb, fcy = zwy * mb;
         for (int i = 0; i < 36; i++) {
-            float a = (float)i * 10.0f * (float)M_PI / 180.0f;
-            // Chart mirror: az 90 (east) renders left
-            float dx = -sinf(a), dy = -cosf(a);
+            int k = i * (SKY_WIN_N / 36);
+            float bx = lx[k], by = ly[k];
+            float dx = bx - fcx, dy = by - fcy;
+            float dn = sqrtf(dx * dx + dy * dy);
+            if (dn < 1.0e-3f) { dx = 0; dy = -1; dn = 1; }
+            dx /= dn; dy /= dn;
             bool major = (i % 9) == 0;
             draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
                                   major ? 0.6f : 0.25f));
-            draw_line(d, dx * SKY_HOR, dy * SKY_HOR,
-                      dx * (SKY_HOR + (major ? 14.0f : 7.0f)),
-                      dy * (SKY_HOR + (major ? 14.0f : 7.0f)), 1.0f);
+            draw_line(d, bx, by,
+                      bx + dx * (major ? 14.0f : 7.0f),
+                      by + dy * (major ? 14.0f : 7.0f), 1.0f);
             if (major) {
                 float sz = _font_compat[FONT_month].size;
                 float tw2 = sdf_measure_width(cw, card[i / 9]) * sz;
                 draw_set_color(d, dca(0.66f, 0.63f, 0.57f, 0.75f));
                 draw_text_ex(d, cw, sz,
-                             dx * (SKY_HOR + 34.0f) - tw2 * 0.5f,
-                             dy * (SKY_HOR + 34.0f) - sz * 0.5f,
+                             bx + dx * 34.0f - tw2 * 0.5f,
+                             by + dy * 34.0f - sz * 0.5f,
                              card[i / 9]);
             }
         }
