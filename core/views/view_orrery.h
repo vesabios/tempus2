@@ -748,14 +748,17 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float mx0 = ex + lx * earth_r * lift, my0 = ey + ly * earth_r * lift;
         float mag = sqrtf(lx * lx + ly * ly);
 
-        // The departure: bead position -> the wheel's center, marker
-        // size -> the anchoring disc, marker gold -> the sun's own
-        // gold. The path aims at the ORIGIN (its final home) rather
-        // than the live wheel center, which at TELLVS lies thousands
-        // of units off-screen — the sun stays on stage for the whole
-        // flight.
-        float px = mx0 * (1.0f - ss);
-        float py = my0 * (1.0f - ss);
+        // The departure: bead position -> the wheel's center. A plain
+        // lerp fights the globe's own outbound flight (the anchor
+        // swings out on the same eased clock the lerp pulls in on,
+        // bowing the path and overshooting the center) — so instead
+        // the whole vector retracts along a COSINE matched to the
+        // wheel zoom's curve (z = 1 - ss on station flights), with the
+        // globe-follow term additionally damped so it cannot inject
+        // the sideways swing.
+        float retr = cosf((float)M_PI * 0.5f * ss);
+        float px = (ex * (1.0f - ss) + lx * earth_r * lift) * retr;
+        float py = (ey * (1.0f - ss) + ly * earth_r * lift) * retr;
         float msz = s->sun_size * earth_r / dial_r;
         float sz = msz + (32.0f - msz) * ss;
         sun_c.r = sun_c.r + (196.0f / 255.0f - sun_c.r) * ss;
