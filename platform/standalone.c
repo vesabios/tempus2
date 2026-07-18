@@ -200,9 +200,13 @@ static void set_worldview(Worldview wv) {
         case WV_SAECVLVM:   fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
         case WV_TELLVS:     fly_worldview(1.0, 1.0, 0.0, 3.5, fly_delay); break;
         case WV_MACHINA:    fly_worldview(1.0, 0.0, 1.0, 3.5, 0.0); break;
-        // The machine parks at MACHINA under the fade, so leaving the
-        // sky always resumes from the adjacent station
-        case WV_CAELVM:     fly_worldview(1.0, 0.0, 1.0, 3.5, 0.0); break;
+        // CAELVM parks the machine WHEREVER IT WAS: the sky movers
+        // seam to the live published positions of the station you
+        // left, so no machine flight happens under the rising sky —
+        // from the dial stations that means no ghost of MACHINA
+        // ringing in mid-flight. Leaving the sky, the machine resumes
+        // from the same parked state and flies direct to the target.
+        case WV_CAELVM:     break;
         case WV_ORBIS:      fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
         default: break;
     }
