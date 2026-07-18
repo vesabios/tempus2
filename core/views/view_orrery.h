@@ -252,6 +252,11 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // the planets, the zodiac, the sight-lines, and finally the web — the
     // astrology arrives after the astronomy that explains it.
     float ss = (float)st->sys;
+    // Declutter for the system stage: zoomed out, the emphasis is
+    // celestial geometry — the globe keeps only its lit-ness (terminator).
+    // Everything painted ON it (continents, latitude ring, city marker,
+    // sky-dome, surface clock, axis pin, marker tether) fades with sysf.
+    float sysf = 1.0f - (float)tempus_smoothstep(0.15, 0.60, ss);
     if (ss > 0.001f) {
         const PlanetsNow *pn = &st->planets;
         float a_ring   = (float)tempus_smoothstep(0.05, 0.45, ss);
@@ -462,7 +467,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
         draw_circle_stroked(d, sun_x, sun_y, 28.0f * sgrow, 1.0f);
         draw_set_color(d, dca(0.5f, 0.5f, 0.5f, 0.18f));
+        // Orbit radial fades at system scale (the sun sight-line covers it)
+        d->alpha = base_alpha * helio_a * sysf;
         draw_line_thin(d, sun_x, sun_y, ex, ey);
+        d->alpha = base_alpha * helio_a;
     }
 
     // Dial plate: the engraved panel behind the geocentric globe
@@ -484,7 +492,12 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         g->overlay = (s->globe_overlay == GLOBE_OVERLAY_SUNPATHS)
                    ? GLOBE_OVERLAY_NONE : s->globe_overlay;
         g->declination = (float)(-cos(phi) * GLOBE_OBLIQUITY_DEG);
-        g->obs_lat = (float)t->config.latitude;
+        // The day-length ring slides poleward off the globe as the system
+        // arrives; the continents fade in the shader. Only the terminator
+        // survives the zoom-out.
+        g->obs_lat = (float)(t->config.latitude
+                     + (91.0 - t->config.latitude) * (1.0 - sysf));
+        g->land_mix = sysf;
         // With coastlines carrying the geography, the plain graticule is
         // noise at orrery scale — fade it out as the morph completes
         g->grid_boost = 1.0f - m;
@@ -494,7 +507,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // rotating with the planet's spin. Subtle at dial size, present at
     // orrery scale.
     {
-        float coast_a = 0.16f + 0.34f * m;
+        float coast_a = (0.16f + 0.34f * m) * sysf;
         draw_set_color(d, dca(0.63f, 0.58f, 0.50f, coast_a));
         for (int li = 0; li < COAST_NUM_LINES; li++) {
             int start = coast_lines[li][0], count = coast_lines[li][1];
@@ -542,7 +555,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // planet. Uses the live rotation, so it tracks the morph.
         float axv0 = rot[8], axv1 = rot[9], axv2 = rot[10];
         float an = sqrtf(axv0 * axv0 + axv1 * axv1);
-        if (an > 1e-4f) {
+        d->alpha = base_alpha * helio_a * sysf;   // pin is globe detail
+        if (an > 1e-4f && sysf > 0.001f) {
             float sgn = (axv2 >= 0) ? 1.0f : -1.0f;   // toward visible pole
             float vx = sgn * axv0 / an, vy = sgn * axv1 / an;
             float ext = earth_r * 0.17f + 4.0f;
@@ -557,6 +571,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // hour marks outward past the limb at their true bearings.)
 
         // Moon orbit ring (the moon itself is a shared element below)
+        d->alpha = base_alpha * helio_a;
         draw_set_color(d, dca(0.6f, 0.58f, 0.54f, 0.20f));
         draw_circle_stroked(d, ex, ey, earth_r * 1.55f, 1.0f);
     }
@@ -582,6 +597,9 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float lift = 1.0f + 0.9f * m;
         float px = ex + lx * earth_r * lift, py = ey + ly * earth_r * lift;
         float mag = sqrtf(lx * lx + ly * ly);
+        // Marker and tether are globe furniture — gone at system scale
+        // (the sun itself and its sight-line carry the direction there)
+        d->alpha = base_alpha * sysf;
         if (mag * lift > 1.02f && mag > 1e-4f) {
             float sx0 = ex + (lx / mag) * earth_r;
             float sy0 = ey + (ly / mag) * earth_r;
@@ -590,6 +608,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
         draw_set_color(d, sun_c);
         draw_circle_filled(d, px, py, s->sun_size * earth_r / dial_r);
+        d->alpha = base_alpha;
 
         // Publish for hit-testing (render-side cache; see scene_pointer)
         OrreryViewState *wst = (OrreryViewState *)(uintptr_t)buf;
@@ -729,8 +748,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
 
     // City marker ("you are here") + sky-dome. At m=0 the city projects
     // to the globe center — identical to the old dial ownship ring — and
-    // the dome flattens into the dial's sun-path rendering.
-    {
+    // the dome flattens into the dial's sun-path rendering. Both are
+    // globe detail: gone at system scale.
+    if (sysf > 0.001f) {
+        d->alpha = base_alpha * sysf;
         double latr = t->config.latitude * M_PI / 180.0;
         double lonr = t->config.longitude * M_PI / 180.0;
         float p[3] = {
@@ -796,9 +817,9 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // Tick positions are sun-anchored (noon is always the ring's sunward
     // crossing), so the city marker sweeps past them as the hour hand —
     // a clock face lying on the surface of the planet.
-    // At full-system scale the globe is a bead and the projected hour
-    // numerals are unreadable clutter over the aspect web — fade them out.
-    float clk_a = m * (1.0f - 0.92f * (float)tempus_smoothstep(0.15, 0.55, ss));
+    // At full-system scale the globe is a bead — the surface clock goes
+    // out entirely with the rest of the globe detail.
+    float clk_a = m * sysf;
     if (clk_a > 0.02f) {
         double latr2 = t->config.latitude * M_PI / 180.0;
         float cl = (float)cos(latr2), sl = (float)sin(latr2);

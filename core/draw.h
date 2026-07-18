@@ -71,6 +71,8 @@ typedef struct {
     float grid_boost;           // graticule alpha multiplier
     float alpha;                // whole-sphere fade (defaults to view alpha)
     bool  land;                 // sample the surface texture
+    float land_mix;             // surface-texture strength (1 = full; the
+                                // system view fades the continents out)
     int   tex_id;               // 0 = Earth land mask, 1 = Moon albedo
     float aux_dir[4];           // observer direction (w > 0 = enabled):
                                 // lit surface facing away from it is dimmed
@@ -142,6 +144,7 @@ static inline GlobeCmd *draw_globe_slot(DrawCtx *d, float cx, float cy,
     g->radius = radius * d->sx;
     g->alpha = d->alpha;    // globes inherit the view's opacity
     g->land = true;
+    g->land_mix = 1.0f;
     g->split_index = d->num_indices;
     return g;
 }

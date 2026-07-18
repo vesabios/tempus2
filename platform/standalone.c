@@ -844,7 +844,7 @@ static void frame(void) {
                 memcpy(fsu.night, &st->globe_shadow, sizeof(float) * 4);
             }
             memcpy(fsu.grid,  &st->globe_grid,       sizeof(float) * 4);
-            fsu.params[0] = gc->land ? 1.0f : 0.0f;
+            fsu.params[0] = gc->land ? gc->land_mix : 0.0f;
             fsu.params[1] = gc->alpha;
             fsu.params[2] = (float)gc->tex_id;
             fsu.params[3] = 0;
