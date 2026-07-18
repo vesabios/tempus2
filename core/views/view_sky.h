@@ -30,10 +30,10 @@ struct SkyViewState {
     PlanetsSky sky;
     double     cache_jd;
 
-    // Window-motion tracker: while the hour is being scrubbed the
-    // window sweeps fast and its outline reads as a strange writhing
-    // shape — dim it in motion, restore it at rest
-    float win_prev_a;
+    // Window-motion tracker (update-side, real deg/s): a fast hour
+    // scrub sweeps the window into a writhing shape — hide it and its
+    // shading in motion, restore at rest. Gentle scrubs keep it.
+    float win_prev_a;    // degrees
     float win_motion;
 
     // The orrery's state: its published live sun/moon positions are the
@@ -134,9 +134,32 @@ static void sky_exit(void *buf, const Tempus *t, Scene *sc) {
 static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     SkyViewState *st = (SkyViewState *)buf;
     st->orr = &sc->orrery_state;
-    (void)dt;
     st->blend = sc->sky_blend;
-    if (st->blend < 0.001) return;
+    if (st->blend < 0.001) {
+        st->win_motion = 0.0f;
+        return;
+    }
+
+    // Window sweep rate, in real degrees per second: gentle scrubbing
+    // (under ~2 deg/s) keeps the window and its shading; only a fast
+    // sweep hides them, releasing over ~a second once it settles.
+    {
+        double jm = st->tv.jd_current + 0.5
+                  - t->config.longitude / (15.0 * 24.0);
+        double jt = st->tv.jd_current + st->tv.percent_of_day - 0.5
+                  - t->config.timezone / 24.0;
+        float A = (float)(fmod((jt - jm) * 360.985647, 360.0));
+        float dA = fabsf(A - st->win_prev_a);
+        if (dA > 180.0f) dA = 360.0f - dA;
+        st->win_prev_a = A;
+        if (dt > 1.0e-6) {
+            float rate = dA / (float)dt;   // deg/s
+            float m2 = (float)tempus_smoothstep(2.0, 8.0, rate);
+            st->win_motion = m2 > st->win_motion
+                           ? m2
+                           : st->win_motion * expf(-4.3f * (float)dt);
+        }
+    }
 
     // CAELVM pins the FRAME to the date's local mean solar midnight:
     // the sky's orientation holds still and the running hour lives in
@@ -248,17 +271,6 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                     - t->config.timezone / 24.0;
         float A = (float)(fmod((jd_t - jd_mid) * 360.985647, 360.0)
                           * M_PI / 180.0);
-        // Motion measure: how fast the window swept since last frame
-        {
-            SkyViewState *sw2 = (SkyViewState *)(uintptr_t)buf;
-            float dA = fabsf(A - st->win_prev_a);
-            if (dA > (float)M_PI) dA = 2.0f * (float)M_PI - dA;
-            sw2->win_prev_a = A;
-            float m2 = (float)tempus_smoothstep(0.0015, 0.012, dA);
-            sw2->win_motion = m2 > st->win_motion
-                            ? m2
-                            : st->win_motion * 0.93f + m2 * 0.07f;
-        }
         double phi = t->config.latitude * M_PI / 180.0;
         float px = 0.0f, py = (float)cos(phi), pz = (float)sin(phi);
         float ca = cosf(A), sa = sinf(A), oc = 1.0f - ca;
