@@ -62,7 +62,7 @@ static inline void sky__project(float az_deg, float alt_deg,
 #define SKY_HOR (SKY_R * 0.5f)   // the horizon circle
 
 static const uint8_t sky__body_col[BODY_COUNT][3] = {
-    { 224, 160,  40 },   // Sun
+    { 196, 126,  16 },   // Sun — the instrument's gold, same object
     { 215, 212, 202 },   // Moon
     { 152, 146, 138 }, { 208, 183, 130 }, { 188,  92,  58 },
     { 196, 168, 126 }, { 205, 190, 146 }, { 126, 172, 178 },
@@ -397,6 +397,35 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             draw_circle_filled(d, x, y, pr);
         else
             draw_circle_stroked(d, x, y, pr, 1.2f);
+
+        // The same sun that anchored MACHINA: its corona and rays ride
+        // along, dissolving as it becomes a body in the sky
+        if (b == BODY_SUN && mb < 0.999f) {
+            float ra2 = 1.0f - mb;
+            d->alpha = base_alpha * ra2;
+            draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
+            draw_circle_stroked(d, x, y, pr * 28.0f / 22.0f, 1.0f);
+            draw_set_color(d, dca(0.72f, 0.46f, 0.08f, 0.75f));
+            for (int i = 0; i < 12; i++) {
+                float a = (float)i / 12.0f * 2.0f * (float)M_PI;
+                float ux = sinf(a), uy = -cosf(a);
+                float qx = cosf(a), qy = sinf(a);
+                float rb = pr * 1.32f;
+                float rt = pr * ((i & 1) ? 1.52f : 1.78f);
+                float half = pr * 0.13f;
+                int vb = d->num_verts;
+                draw__push_vert(d, x + ux * rt, y + uy * rt,
+                                d->white_u, d->white_v);
+                draw__push_vert(d, x + ux * rb - qx * half,
+                                y + uy * rb - qy * half,
+                                d->white_u, d->white_v);
+                draw__push_vert(d, x + ux * rb + qx * half,
+                                y + uy * rb + qy * half,
+                                d->white_u, d->white_v);
+                draw__tri(d, vb, vb + 1, vb + 2);
+            }
+            d->alpha = base_alpha;
+        }
 
         if (sky__body_name[b] && fb > 0.01f) {
             int lw = _font_compat[FONT_date].weight;

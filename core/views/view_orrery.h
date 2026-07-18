@@ -28,6 +28,7 @@ struct OrreryViewState {
     double zoom;        // mirrored from the calendar wheel's zoom
     double blend;       // mirrored scene helio_blend (morph parameter)
     double sys;         // mirrored scene system_blend (full-system stage)
+    double skyb;        // mirrored scene sky_blend (CAELVM handoff)
     double geo_azimuth; // live sun az/zen from the solar view, for the
     double geo_zenith;  // geocentric endpoint of the morph
     const SolarViewState *solar;  // solar data + sun-path caches
@@ -182,6 +183,7 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->zoom = sc->calendar_state.zoom;   // ride the wheel's zoom
     st->blend = sc->helio_blend;
     st->sys = sc->system_blend;
+    st->skyb = sc->sky_blend;
     st->geo_azimuth = sc->solar_state.azimuth;
     st->geo_zenith = sc->solar_state.zenith;
     st->solar = &sc->solar_state;
@@ -299,6 +301,13 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // Everything painted ON it (continents, latitude ring, city marker,
     // sky-dome, surface clock, axis pin, marker tether) fades with sysf.
     float sysf = 1.0f - (float)tempus_smoothstep(0.15, 0.60, ss);
+    // ONE OBJECT, ONE OWNER: the moment the CAELVM morph begins, the
+    // sky view owns every morphing body (planets, sun, moon, orbit
+    // rings) as single lerped objects starting from these exact
+    // positions — so this view stops drawing them entirely. No
+    // crossfade: ownership transfers at a seam where the two forms
+    // coincide.
+    bool sky_owns = st->skyb > 0.001;
     if (ss > 0.001f) {
         const PlanetsNow *pn = &st->planets;
         float a_ring   = (float)tempus_smoothstep(0.05, 0.45, ss);
@@ -331,8 +340,9 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             mpy[b] = dy * ORR_WEB_R;
         }
 
-        // Orbit rings (Earth's is the calendar wheel itself)
-        if (a_ring > 0.001f) {
+        // Orbit rings (Earth's is the calendar wheel itself); the sky
+        // view owns them during the CAELVM morph
+        if (a_ring > 0.001f && !sky_owns) {
             d->alpha = base_alpha * a_ring;
             draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.13f));
             for (int p = 0; p < PL_COUNT; p++) {
@@ -545,8 +555,9 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             }
         }
 
-        // Planet beads + engraved radial labels
-        if (a_planet > 0.001f) {
+        // Planet beads + engraved radial labels; the sky view owns
+        // them during the CAELVM morph
+        if (a_planet > 0.001f && !sky_owns) {
             for (int p = 0; p < PL_COUNT; p++) {
                 if (p == PL_EARTH) continue;
                 d->alpha = base_alpha * a_planet;
@@ -759,6 +770,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             draw_set_color(d, dca(0.75f, 0.75f, 0.75f, 0.35f));
             draw_line(d, sx0, sy0, mx0, my0, 1.0f);
         }
+        if (!sky_owns) {
         d->alpha = base_alpha;
         draw_set_color(d, sun_c);
         draw_circle_filled(d, px, py, sz);
@@ -791,6 +803,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             }
             d->alpha = base_alpha;
         }
+        }   // !sky_owns
 
         // Publish for hit-testing (render-side cache; see scene_pointer)
         OrreryViewState *wst = (OrreryViewState *)(uintptr_t)buf;
@@ -890,7 +903,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             memcpy(ml, m > 0.5f ? hl2 : gl2, sizeof(ml));
         }
 
-        GlobeCmd *gm = draw_globe_slot(d, mmx, mmy, mmr);
+        GlobeCmd *gm = sky_owns ? NULL
+                     : draw_globe_slot(d, mmx, mmy, mmr);
         if (gm) {
             // Tidal locking: geo shows the near side (lon 0 centered,
             // north up); helio looks down the lunar pole with the
