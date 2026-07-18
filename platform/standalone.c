@@ -244,8 +244,10 @@ static void set_view_opacities(void) {
     double fade = (1.0 - tempus_smoothstep(0.0, 0.55, sky))
                 * (1.0 - tempus_smoothstep(0.0, 0.55, horae))
                 * (1.0 - tempus_smoothstep(0.0, 0.55, rotae))
-                * (1.0 - tempus_smoothstep(0.0, 0.55, saec))
-                * (1.0 - tempus_smoothstep(0.0, 0.55, orbis));
+                * (1.0 - tempus_smoothstep(0.0, 0.55, saec));
+    // ORBIS keeps the orrery: the globe IS the station (it grows to the
+    // closeup inside the orrery itself). Only the clock chrome bows out.
+    double orbis_fade = 1.0 - tempus_smoothstep(0.0, 0.55, orbis);
     // The calendar wheel survives into the sky as its bezel — the time
     // control rides along to every worldview
     g_scene.views[VIEW_CALENDAR].opacity = 1.0;
@@ -256,7 +258,7 @@ static void set_view_opacities(void) {
     // furniture and have no business lingering over the flight
     double clock_vis = 1.0 - hb * 4.0;
     if (clock_vis < 0) clock_vis = 0.0;
-    g_scene.views[VIEW_CLOCK].opacity = clock_vis * fade;
+    g_scene.views[VIEW_CLOCK].opacity = clock_vis * fade * orbis_fade;
     g_scene.views[VIEW_SKY].opacity = sky > 0.001 ? 1.0 : 0.0;
     g_scene.views[VIEW_HORAE].opacity = horae;
     g_scene.views[VIEW_ROTAE].opacity = rotae;

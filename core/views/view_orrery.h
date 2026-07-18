@@ -29,6 +29,7 @@ struct OrreryViewState {
     double blend;       // mirrored scene helio_blend (morph parameter)
     double sys;         // mirrored scene system_blend (full-system stage)
     double skyb;        // mirrored scene sky_blend (CAELVM handoff)
+    double orbisb;      // mirrored scene orbis_blend (globe closeup)
     double geo_azimuth; // live sun az/zen from the solar view, for the
     double geo_zenith;  // geocentric endpoint of the morph
     const SolarViewState *solar;  // solar data + sun-path caches
@@ -86,6 +87,8 @@ static inline float orr__orbit_r(int p, float wheel_R) {
     if (p == PL_EARTH) return wheel_R;
     return wheel_R + outer_off[p - PL_MARS];
 }
+
+#define ORBIS_GLOBE_R   355.0f   // the location-picker closeup size
 
 #define ORR_WEB_R       930.0f   // aspect chords + geocentric markers
 #define ORR_ZODIAC_IN   946.0f
@@ -184,6 +187,7 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->blend = sc->helio_blend;
     st->sys = sc->system_blend;
     st->skyb = sc->sky_blend;
+    st->orbisb = sc->orbis_blend;
     st->geo_azimuth = sc->solar_state.azimuth;
     st->geo_zenith = sc->solar_state.zenith;
     st->solar = &sc->solar_state;
@@ -290,6 +294,22 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         globe_mat_tmul_vec(helio_rot, helio_light, le_h);
         globe_vec_nlerp(le_g, le_h, m, le);
         globe_mat_mul_vec(rot, le, light);
+    }
+
+    // ---- ORBIS: the location picker is THIS globe, up close ----
+    // The same object flies to center and grows to picking size; the geo
+    // orientation is already observer-face-on, so whatever lands under
+    // the fixed reticle IS the configured location. The dial and helio
+    // furniture around it bow out; the earth remains.
+    float ob = (float)st->orbisb;
+    if (ob < 0) ob = 0;
+    if (ob > 1) ob = 1;
+    if (ob > 0.001f) {
+        ex *= (1.0f - ob);
+        ey *= (1.0f - ob);
+        earth_r += (ORBIS_GLOBE_R - earth_r) * ob;
+        geo_a   *= (1.0f - ob);
+        helio_a *= (1.0f - ob);
     }
 
     // ================= UNDER THE GLOBE =================
@@ -657,6 +677,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // orrery scale.
     {
         float coast_a = (0.16f + 0.34f * m) * sysf;
+        coast_a += (0.55f - coast_a) * ob;
         draw_set_color(d, dca(0.63f, 0.58f, 0.50f, coast_a));
         for (int li = 0; li < COAST_NUM_LINES; li++) {
             int start = coast_lines[li][0], count = coast_lines[li][1];
@@ -676,7 +697,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
 
     // Limb outline: bounds the map at the silhouette so coastline vectors
     // meet a rim instead of floating unconnected against the sky
-    draw_set_color(d, dca(0.63f, 0.58f, 0.50f, 0.10f + 0.35f * m));
+    draw_set_color(d, dca(0.63f, 0.58f, 0.50f,
+                          0.10f + 0.35f * m + (0.35f - 0.35f * m) * ob));
     draw_circle_stroked(d, ex, ey, earth_r, 1.0f);
 
     // ================= OVER THE GLOBE =================
@@ -763,6 +785,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float px = (ex * (1.0f - ss) + lx * earth_r * lift) * retr;
         float py = (ey * (1.0f - ss) + ly * earth_r * lift) * retr;
         float msz = s->sun_size * earth_r / dial_r;
+        msz *= 1.0f - 0.55f * ob;   // the closeup reads it as the
+                                    // subsolar point, not a body
         float sz = msz + (32.0f - msz) * ss;
         sun_c.r = sun_c.r + (196.0f / 255.0f - sun_c.r) * ss;
         sun_c.g = sun_c.g + (126.0f / 255.0f - sun_c.g) * ss;
@@ -879,9 +903,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             memcpy(ml, m > 0.5f ? hl2 : gl2, sizeof(ml));
         }
 
-        GlobeCmd *gm = sky_owns ? NULL
+        GlobeCmd *gm = (sky_owns || ob > 0.999f) ? NULL
                      : draw_globe_slot(d, mmx, mmy, mmr);
         if (gm) {
+            gm->alpha = d->alpha * (1.0f - ob);
             // Tidal locking: geo shows the near side (lon 0 centered,
             // north up); helio looks down the lunar pole with the
             // near-side meridian aimed at Earth, turning as it orbits.

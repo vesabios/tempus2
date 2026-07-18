@@ -407,11 +407,13 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
     bool in_sky = sc->sky_blend > 0.5;
 
     if (phase == 0) {
-        // ORBIS: drag anywhere on the chart to turn the world under the
-        // reticle — this is the location picker, live and deliberate
+        // ORBIS: grab the planet and turn it under the reticle — this
+        // is the location picker, live and deliberate. Hit-tests the
+        // orrery's LIVE published globe (position and size mid-flight
+        // included), so the grab is honest even during the closeup tween.
         if (sc->orbis_blend > 0.5) {
-            float rp2 = wx * wx + wy * wy;
-            if (rp2 < ORBIS_R * ORBIS_R) {
+            float gdx = wx - o->glob_x, gdy = wy - o->glob_y;
+            if (gdx * gdx + gdy * gdy < o->glob_r * o->glob_r) {
                 ob->dragging = true;
                 ob->last_wx = wx;
                 ob->last_wy = wy;
@@ -540,12 +542,13 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         c->last_wx = wx;
         c->last_wy = wy;
     } else if (phase == 1 && ob->dragging) {
-        // Pan: the world follows the finger. Equidistant scale is
-        // uniform (180 deg over the disc radius); dragging down brings
+        // Trackball: the surface follows the finger (near the reticle,
+        // one world unit = 1/R radians of arc). Dragging down brings
         // northern land to the reticle, dragging right brings the west
         // around, arc widened to longitude by the shrinking parallels.
+        float R = o->glob_r > 1.0f ? o->glob_r : 355.0f;
         float ddx = wx - ob->last_wx, ddy = wy - ob->last_wy;
-        double k = 180.0 / ORBIS_R;
+        double k = (180.0 / M_PI) / R;
         double lat = t->config.latitude + (double)ddy * k;
         if (lat > 85.0) lat = 85.0;
         if (lat < -85.0) lat = -85.0;
