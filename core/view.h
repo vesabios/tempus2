@@ -136,6 +136,14 @@ static inline RenderStyle style_default(void) {
     return s;
 }
 
+// The calendar wheel gives up 20% of its radius at the full-system
+// stage — Mercury and Venus are its only tenants there, and the space
+// buys a tighter planetary band and a wider moat. Keyed off
+// system_blend, so the geo and helio stages are untouched.
+static inline double tempus_wheel_scale(double system_blend) {
+    return 1.0 - 0.20 * system_blend;
+}
+
 // ---- View lifecycle ----
 
 typedef enum {

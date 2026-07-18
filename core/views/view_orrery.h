@@ -70,13 +70,21 @@ struct OrreryViewState {
 // calendar wheel (1.0); Mercury and Venus sit inside it, Mars through
 // Pluto outside, and the zodiac dial is the outermost ring.
 
-// Outer rings pack tight just past the wheel's month text; the gap from
+// Inner planets scale with the wheel; outer rings sit at ABSOLUTE
+// offsets beyond it — the month text needs ~130 units of clearance no
+// matter how far the wheel shrinks at system stage. The gap from
 // Pluto's ring to the zodiac dial is deliberate negative space — the
-// moat between the heliocentric machine and the geocentric dial, crossed
-// only by the sight-lines.
-static const float orr__orbit_frac[PL_COUNT] = {
-    0.36f, 0.64f, 1.0f, 1.31f, 1.377f, 1.443f, 1.51f, 1.577f, 1.643f
-};
+// moat between the heliocentric machine and the geocentric dial,
+// crossed only by the sight-lines.
+static const float orr__inner_frac[2] = { 0.36f, 0.64f };
+
+static inline float orr__orbit_r(int p, float wheel_R) {
+    static const float outer_off[6] = {
+        150.0f, 180.0f, 210.0f, 240.0f, 270.0f, 300.0f };
+    if (p < PL_EARTH) return wheel_R * orr__inner_frac[p];
+    if (p == PL_EARTH) return wheel_R;
+    return wheel_R + outer_off[p - PL_MARS];
+}
 
 #define ORR_WEB_R       930.0f   // aspect chords + geocentric markers
 #define ORR_ZODIAC_IN   946.0f
@@ -214,12 +222,15 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     float dial_y = s->sunrise_dial_offset;
     float dial_r = s->sunrise_dial_radius;
 
-    // Wheel geometry (zoom rides the same tween as the morph)
+    // Wheel geometry (zoom rides the same tween as the morph; the wheel
+    // cedes radius to the system stage)
     float z = (float)st->zoom;
-    float wheel_r = s->calendar_base_radius + z * s->zoom_in_radius;
+    float base_w = s->calendar_base_radius
+                 * (float)tempus_wheel_scale(st->sys);
+    float wheel_r = base_w + z * s->zoom_in_radius;
     double phi = tempus_year_pct(t) * 2.0 * M_PI;
     float sphi = sinf((float)phi), cphi = cosf((float)phi);
-    float off_r = wheel_r - s->calendar_base_radius;
+    float off_r = wheel_r - base_w;
     float sun_x = -sphi * off_r, sun_y = cphi * off_r;
 
     // ---- Morph state: position/size lerp to the FINAL helio arrangement
@@ -235,8 +246,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     if (m >= 0.999f) {
         memcpy(rot, helio_rot, sizeof(rot));
         memcpy(light, helio_light, sizeof(light));
-        ex = sphi * s->calendar_base_radius * (1.0f - z);
-        ey = -cphi * s->calendar_base_radius * (1.0f - z);
+        ex = sphi * base_w * (1.0f - z);
+        ey = -cphi * base_w * (1.0f - z);
         earth_r = 42.0f + z * 198.0f;   // full-zoom helio size: 240
     } else {
         float geo_rot[16], geo_light[3];
@@ -247,8 +258,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // (centered planet at z = 1, bead on the wheel at z = 0), so the
         // flight lands wherever the zoom currently is — geo -> system
         // flies directly onto the wheel without a detour through center.
-        float hx = sphi * s->calendar_base_radius * (1.0f - z);
-        float hy = -cphi * s->calendar_base_radius * (1.0f - z);
+        float hx = sphi * base_w * (1.0f - z);
+        float hy = -cphi * base_w * (1.0f - z);
         float hr = 42.0f + z * 198.0f;
         ex = hx * m;
         ey = dial_y * (1 - m) + hy * m;
@@ -282,7 +293,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float a_zod    = (float)tempus_smoothstep(0.40, 0.80, ss);
         float a_sight  = (float)tempus_smoothstep(0.60, 0.95, ss);
         float a_web    = (float)tempus_smoothstep(0.70, 1.00, ss);
-        float wheel_R  = s->calendar_base_radius;   // Earth's orbit
+        float wheel_R  = base_w;   // Earth's orbit, system-stage size
 
         // Bead positions: true heliocentric longitudes on stylized rings.
         // Earth rides the live morph position (glued to the wheel).
@@ -290,8 +301,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         for (int p = 0; p < PL_COUNT; p++) {
             float dx, dy;
             orr__ecl_dir(pn->helio_lon[p], &dx, &dy);
-            ppx[p] = dx * wheel_R * orr__orbit_frac[p];
-            ppy[p] = dy * wheel_R * orr__orbit_frac[p];
+            ppx[p] = dx * orr__orbit_r(p, wheel_R);
+            ppy[p] = dy * orr__orbit_r(p, wheel_R);
         }
         ppx[PL_EARTH] = ex;
         ppy[PL_EARTH] = ey;
@@ -313,7 +324,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.13f));
             for (int p = 0; p < PL_COUNT; p++) {
                 if (p == PL_EARTH) continue;
-                draw_circle_stroked(d, 0, 0, wheel_R * orr__orbit_frac[p], 1.0f);
+                draw_circle_stroked(d, 0, 0, orr__orbit_r(p, wheel_R), 1.0f);
             }
         }
 
@@ -538,7 +549,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                     draw_circle_stroked(d, ppx[p], ppy[p],
                                         orr__planet[p].size * 1.75f, 1.0f);
                 }
-                float orbr = wheel_R * orr__orbit_frac[p];
+                float orbr = orr__orbit_r(p, wheel_R);
                 float th = (float)((0.75 + pn->helio_lon[p] / 360.0)
                                    * 2.0 * M_PI);
                 // Name engraved along the ring like the month text —
@@ -765,10 +776,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // the morph) and the helio earth arrangement AT THE CURRENT ZOOM
         // (center/240 when z rides with m; a bead on the wheel when the
         // system flight leaves z at 0) — matching the earth's own target
-        float hex = (m >= 0.999f) ? ex
-                  : sphi * s->calendar_base_radius * (1.0f - z);
-        float hey = (m >= 0.999f) ? ey
-                  : -cphi * s->calendar_base_radius * (1.0f - z);
+        float hex = (m >= 0.999f) ? ex : sphi * base_w * (1.0f - z);
+        float hey = (m >= 0.999f) ? ey : -cphi * base_w * (1.0f - z);
         float her = (m >= 0.999f) ? earth_r : 42.0f + z * 198.0f;
         float plm = sqrtf(helio_light[0] * helio_light[0]
                         + helio_light[1] * helio_light[1]);

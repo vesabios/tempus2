@@ -102,7 +102,7 @@ static bool g_heliocentric = false;
 // orbits and the zodiac ring fit the 1280-unit frame.
 static bool g_system = false;
 
-#define SYS_CAMERA_ZOOM 0.60f
+#define SYS_CAMERA_ZOOM 0.62f
 static float sys_camera_scale(void) {
     return 1.0f - (1.0f - SYS_CAMERA_ZOOM) * (float)g_scene.system_blend;
 }

@@ -375,13 +375,12 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         // through month text), excluding the globe's interior. Helio only
         // — in geo the wheel doesn't pan, so dragging feels broken.
         if (sc->helio_blend > 0.5) {
-            float R = sc->style.calendar_base_radius
-                    + (float)c->zoom * sc->style.zoom_in_radius;
+            float base_w = sc->style.calendar_base_radius
+                         * (float)tempus_wheel_scale(sc->system_blend);
+            float R = base_w + (float)c->zoom * sc->style.zoom_in_radius;
             double ypct = tempus_year_pct(t);
-            float ox = sinf((float)(ypct * 2.0 * M_PI))
-                     * (R - sc->style.calendar_base_radius);
-            float oy = -cosf((float)(ypct * 2.0 * M_PI))
-                     * (R - sc->style.calendar_base_radius);
+            float ox = sinf((float)(ypct * 2.0 * M_PI)) * (R - base_w);
+            float oy = -cosf((float)(ypct * 2.0 * M_PI)) * (R - base_w);
             float px = wx + ox, py = wy + oy;   // undo the wheel pan
             float rp = sqrtf(px * px + py * py);
             float gdx = wx - o->glob_x, gdy = wy - o->glob_y;
@@ -400,12 +399,13 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         // Incremental: project the finger delta onto the band tangent and
         // move time so the strip follows the finger. The pan rate is
         // 2*pi*(R - base) per year, which is what the finger fights.
-        float R = sc->style.calendar_base_radius
-                + (float)c->zoom * sc->style.zoom_in_radius;
+        float base_w = sc->style.calendar_base_radius
+                     * (float)tempus_wheel_scale(sc->system_blend);
+        float R = base_w + (float)c->zoom * sc->style.zoom_in_radius;
         double ypct = tempus_year_pct(t);
         float th = (float)(ypct * 2.0 * M_PI);
-        float ox = sinf(th) * (R - sc->style.calendar_base_radius);
-        float oy = -cosf(th) * (R - sc->style.calendar_base_radius);
+        float ox = sinf(th) * (R - base_w);
+        float oy = -cosf(th) * (R - base_w);
         float px = wx + ox, py = wy + oy;
         float rp = sqrtf(px * px + py * py);
         if (rp > 1.0f) {
@@ -424,7 +424,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
             } else {
                 // Film strip: the band follows the finger, so time moves
                 // against the drag. Pan rate is 2*pi*(R - base) per year.
-                float denom = R - sc->style.calendar_base_radius;
+                float denom = R - base_w;
                 if (denom < 120.0f) denom = 120.0f;   // low-zoom coarse rate
                 dv = -(double)along / (2.0 * M_PI * (double)denom)
                    * t->total_days;
