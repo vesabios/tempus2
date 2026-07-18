@@ -618,7 +618,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                                           c[2] / 255.0f, 1.0f));
                     orr__dashed_line(d, mpx[A->a], mpy[A->a],
                                      mpx[A->b], mpy[A->b], wdt,
-                                     9.0f, 7.0f);
+                                     7.0f, 9.0f);
                 }
             }
             d->alpha = base_alpha;
