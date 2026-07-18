@@ -566,11 +566,12 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         ob->last_wx = wx;
         ob->last_wy = wy;
     } else if (phase == 1 && ho->ring_dragging) {
-        // Incremental angle about the LIVE ring center (it wobbles as
-        // time moves under the drag); clockwise = forward — the ring
-        // itself turns counterclockwise with time, so the drag reads
-        // as winding the mechanism against its run
-        float ha = (float)(t->percent_of_day * 2.0 * M_PI);
+        // Incremental angle about the LIVE ring center (it orbits once
+        // a week, tracking the WEEK hand); clockwise = forward. One
+        // full turn of the contact is the whole week.
+        int wd = (int)(((long)floor(ho->tv.jd_current + 1.5)) % 7);
+        float ha = ((float)wd + (float)t->percent_of_day) / 7.0f
+                 * 2.0f * (float)M_PI;
         float rcx = -sinf(ha) * HORAE_ECC;
         float rcy = cosf(ha) * HORAE_ECC;
         float a0 = atan2f(ho->last_wx - rcx, -(ho->last_wy - rcy));
@@ -578,7 +579,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         float da = a1 - a0;
         while (da > (float)M_PI) da -= 2.0f * (float)M_PI;
         while (da < -(float)M_PI) da += 2.0f * (float)M_PI;
-        double dv = (double)da / (2.0 * M_PI) * (7.0 / 6.0);
+        double dv = (double)da / (2.0 * M_PI) * 7.0;
         scene__advance_override_days(t, dv, false);
         c->drag_accum += dv;
         ho->last_wx = wx;

@@ -258,6 +258,9 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     // no timezone anywhere, so it agrees with the gold thresholds by
     // construction: altitude zero exactly where ORTVS and OCCASVS draw.
     float fnoon = (rise + set) * 0.5f;
+    // The temporal dial's rotation: its NOW cell rides the weekly
+    // hand's direction while the face turns through its day
+    float rot = m_now / 7.0f - now;
     float d2r = (float)M_PI / 180.0f;
     float sphi = sinf((float)t->config.latitude * d2r);
     float cphi = cosf((float)t->config.latitude * d2r);
@@ -287,7 +290,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                 cc.a = 0.92f;
                 draw_set_color(d, cc);
 
-                float a = fp * 2.0f * (float)M_PI;
+                float a = (fp + rot) * 2.0f * (float)M_PI;
                 float sx = sinf(a), sy = -cosf(a);
                 int vi = draw__push_vert(d,
                     sx * (HORAE_CLOCK_R - HORAE_CLOCK_W),
@@ -307,7 +310,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
 
         // Temporal hour boundaries: light segmentations over the flow
         for (int h = 0; h < 24; h++) {
-            float f0 = rise + u[h];
+            float f0 = rise + u[h] + rot;
             float ab = (f0 - floorf(f0)) * 2.0f * (float)M_PI;
             float sx = sinf(ab), sy = -cosf(ab);
             draw_set_color(d, dca(0.95f, 0.94f, 0.90f, 0.45f));
@@ -318,7 +321,8 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
 
         // The current cell wears bright rims
         {
-            float p0 = rise + u[hcur], p1 = rise + u[hcur + 1];
+            float p0 = rise + u[hcur] + rot + 1.0f;
+            float p1 = rise + u[hcur + 1] + rot + 1.0f;
             draw_set_color(d, dca(0.92f, 0.89f, 0.80f, 0.9f));
             horae__cell(d, 0, 0, HORAE_CLOCK_R - 2.0f, HORAE_CLOCK_R,
                         p0, p1);
@@ -326,31 +330,22 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                         HORAE_CLOCK_R - HORAE_CLOCK_W + 2.0f, p0, p1);
         }
 
-        // Civil hour ticks in the clock's own voice, inside the band
-        for (int h = 0; h < 24; h++) {
-            float a = (float)h / 24.0f * 2.0f * (float)M_PI;
-            float sx = sinf(a), sy = -cosf(a);
-            bool major = (h % 3) == 0;
-            float outer = HORAE_CLOCK_R - HORAE_CLOCK_W - 4.0f;
-            float inner = outer - (major ? 22.0f : 12.0f);
-            draw_set_color(d, major ? s->clock_lines_strong
-                                    : s->clock_lines);
-            draw_line_thin(d, sx * outer, sy * outer,
-                           sx * inner, sy * inner);
-        }
-
-        // Numerals at the even hours, the clock face's numeral voice
+        // Full archaic: no civil ticks, no arabic — the TEMPORAL cells
+        // themselves carry roman numerals, I through XII twice, riding
+        // the turning face. Day hours speak up; night hours murmur.
         {
             int cw2 = _font_compat[FONT_clock].weight;
-            for (int h = 0; h < 24; h += 2) {
-                float a = (float)h / 24.0f * 2.0f * (float)M_PI;
-                float rn = HORAE_CLOCK_R - HORAE_CLOCK_W - 48.0f;
+            for (int h = 0; h < 24; h++) {
+                float pm = rise + (u[h] + u[h + 1]) * 0.5f + rot;
+                float a = pm * 2.0f * (float)M_PI;
+                float rn = HORAE_CLOCK_R - HORAE_CLOCK_W - 20.0f;
                 float rx = sinf(a) * rn, ry = -cosf(a) * rn;
-                char nb[3];
-                snprintf(nb, sizeof(nb), "%d", h);
-                float nsz2 = 20.0f;
+                const char *nb = horae__roman[h % 12];
+                float nsz2 = h < 12 ? 13.0f : 11.0f;
                 float tw2 = sdf_measure_width(cw2, nb) * nsz2;
-                draw_set_color(d, s->clock_lines_strong);
+                draw_set_color(d, h < 12
+                    ? dca(0.72f, 0.70f, 0.64f, 0.80f)
+                    : dca(0.55f, 0.53f, 0.49f, 0.55f));
                 draw_text_ex(d, cw2, nsz2, rx - tw2 * 0.5f,
                              ry - nsz2 * 0.5f, nb);
             }
@@ -362,7 +357,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_circle_stroked(d, 0, 0, HORAE_CLOCK_R - HORAE_CLOCK_W, 1.0f);
         for (int e = 0; e < 2; e++) {
             float fe = e ? set : rise;
-            float ae = fe * 2.0f * (float)M_PI;
+            float ae = (fe + rot) * 2.0f * (float)M_PI;
             float sx = sinf(ae), sy = -cosf(ae);
             draw_set_color(d, dc_scale(s->sunrise_handle, 0.95f));
             draw_line(d, sx * (HORAE_CLOCK_R - HORAE_CLOCK_W - 6.0f),
@@ -379,7 +374,13 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     // regions washed in their rulers' colors; the 168-hour chain drawn
     // as fine ruler-colored ticks on the meshing edge — accents on the
     // structure, not the structure itself.
-    float ah = now * 2.0f * (float)M_PI;         // the hand = the contact
+    // THE PLANETARY TRAIN, final form: the hand makes ONE revolution
+    // per WEEK. The week ring is a FIXED dial (the 168 hours laid out
+    // once around it) whose center ORBITS the clock — once a week,
+    // tracking the hand, tangent always at the contact. The inner
+    // temporal dial still spins, counterclockwise through its day, so
+    // the current cell meets the current tooth at the moving touch.
+    float ah = (m_now / 7.0f) * 2.0f * (float)M_PI;   // the WEEK hand
     float hdx = sinf(ah), hdy = -cosf(ah);
     float rcx = -hdx * HORAE_ECC;                // ring center
     float rcy = -hdy * HORAE_ECC;
@@ -387,13 +388,13 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         // Seven day regions + engraved names
         float lsz = _font_compat[FONT_date].size;
         for (int i = 0; i < 7; i++) {
-            float q0 = now - horae__wrap((float)i - m_now, 7.0f) / 7.0f;
+            float q0 = (float)i / 7.0f;
             const uint8_t *c = horae__metal_col[horae__day_ruler[i]];
             bool today = i == w;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, today ? 0.16f : 0.06f));
             horae__cell(d, rcx, rcy, HORAE_RING_IN, HORAE_RING_OUT,
-                        q0 - 1.0f / 7.0f, q0);
+                        q0, q0 + 1.0f / 7.0f);
 
             // Midnight boundary spoke
             {
@@ -408,7 +409,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
 
             // Name along the band, waist on the band's center line
             {
-                float qc = q0 - 0.5f / 7.0f;
+                float qc = q0 + 0.5f / 7.0f;
                 float ang = qc * 2.0f * (float)M_PI;
                 float na = fmodf(ang, 2.0f * (float)M_PI);
                 if (na < 0) na += 2.0f * (float)M_PI;
@@ -435,9 +436,8 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             for (int h = 0; h < 24; h++) {
                 float m0 = dd + rise + u[h];
                 float m1 = dd + rise + u[h + 1];
-                float q0 = now - horae__wrap(m0 - m_now, 7.0f) / 7.0f;
-                float q1 = now - horae__wrap(m1 - m_now, 7.0f) / 7.0f;
-                if (q0 < q1) continue;   // the seam cell opposite now
+                float q0 = m0 / 7.0f;
+                float q1 = m1 / 7.0f;
 
                 bool is_day = h < 12;
                 bool cur = (dd == pd && h == hcur);
@@ -446,20 +446,20 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                 if (cur) {
                     draw_set_color(d, dc_scale(s->sunrise_handle, 1.15f));
                     horae__cell(d, rcx, rcy, r0, HORAE_RING_IN + 15.0f,
-                                q1, q0);
+                                q0, q1);
                 } else if (((dd * 24 + h) & 1) == 0) {
                     draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
-                    horae__cell(d, rcx, rcy, r0, r1, q1, q0);
+                    horae__cell(d, rcx, rcy, r0, r1, q0, q1);
                 } else {
                     // Black cells outline in the light so they read
                     // against the black ground: light underlay, dark
                     // fill inset a hairline
                     const float eps = 0.0007f;   // ~1.3 units at r 300
                     draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
-                    horae__cell(d, rcx, rcy, r0, r1, q1, q0);
+                    horae__cell(d, rcx, rcy, r0, r1, q0, q1);
                     draw_set_color(d, dca(0.03f, 0.03f, 0.03f, 0.95f));
                     horae__cell(d, rcx, rcy, r0 + 1.1f, r1 - 1.1f,
-                                q1 + eps, q0 - eps);
+                                q0 + eps, q1 - eps);
                 }
             }
         }
