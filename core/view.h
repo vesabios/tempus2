@@ -154,7 +154,7 @@ static inline double tempus_wheel_scale(double system_blend) {
 // ring and the zodiac dial — becoming the machine's outer time bezel.
 // Earth's ORBIT stays at its own radius (the orrery keys its geometry
 // to base * tempus_wheel_scale, not to this bezel).
-#define TEMPUS_SYS_WHEEL_R 795.0
+#define TEMPUS_SYS_WHEEL_R 762.0
 static inline double tempus_wheel_radius(double base, double system_blend,
                                          double sky_blend) {
     double r = base * tempus_wheel_scale(system_blend);
