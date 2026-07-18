@@ -213,42 +213,52 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     draw_circle_stroked(d, 0, 0, HORAE_R0, 1.0f);
     draw_circle_stroked(d, 0, 0, HORAE_R1, 1.0f);
 
-    // ---- The week ring: seven days, today at the top ----
-    // The ring shifts one place per day — the week as a film strip, and
-    // the Chaldean skip is visible: today's first-hour pip matches the
-    // day name it engraves.
+    // ---- The week ring: a film strip past a fixed pointer ----
+    // The ring turns continuously with the day; a small arrow at noon
+    // (bottom, the dial's convention) reads today — the same grammar as
+    // the calendar wheel's own pointer. The Chaldean skip stays visible:
+    // each day's pip matches its first-hour ruler.
     {
+        double daypos = w + tv->percent_of_day;   // continuous day-of-week
         for (int i = 0; i < 7; i++) {
-            // Position relative to today, today centered at top
-            float rel = (float)(((i - w) % 7 + 7) % 7);
-            if (rel > 3.5f) rel -= 7.0f;
-            float ctr = rel / 7.0f;
+            // Sector center rides the strip; today's center meets the
+            // pointer exactly at noon
+            float ctr = 0.5f + (float)((i + 0.5 - daypos) / 7.0);
             float a0 = (ctr - 0.5f / 7.0f) * 2.0f * (float)M_PI
                      - (float)M_PI * 0.5f;
             float a1 = a0 + (1.0f / 7.0f) * 2.0f * (float)M_PI;
-            bool today = i == w;
             const uint8_t *c =
                 orr__body_col[horae__chaldean_body[horae__day_ruler[i]]];
 
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
-                                  c[2] / 255.0f, today ? 0.22f : 0.06f));
+                                  c[2] / 255.0f, 0.10f));
             draw_arc_filled(d, 0, 0, HORAE_WK0, HORAE_WK1, a0, a1, 10);
 
             float mid = ctr * 2.0f * (float)M_PI;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
-                                  c[2] / 255.0f, today ? 0.95f : 0.40f));
+                                  c[2] / 255.0f, 0.55f));
             draw_circle_filled(d, sinf(mid) * (HORAE_WK0 + 11.0f),
                                -cosf(mid) * (HORAE_WK0 + 11.0f), 3.5f);
 
-            draw_set_color(d, today
-                ? dca(0.72f, 0.69f, 0.62f, 0.95f)
-                : dca(0.50f, 0.49f, 0.46f, 0.35f));
+            draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.45f));
             draw_text_curved(d, FONT_date, 0, 0, HORAE_WK0 + 24.0f,
                              mid, horae__dies[i], 0.6f, 0.9f);
         }
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.20f));
         draw_circle_stroked(d, 0, 0, HORAE_WK0, 1.0f);
         draw_circle_stroked(d, 0, 0, HORAE_WK1, 1.0f);
+
+        // The fixed arrow at noon, aimed outward at the strip
+        {
+            float tipy = HORAE_WK0 - 3.0f;
+            float basey = HORAE_WK0 - 13.0f;
+            draw_set_color(d, s->month_text_color);
+            int vb = d->num_verts;
+            draw__push_vert(d, 0.0f, tipy, d->white_u, d->white_v);
+            draw__push_vert(d, -5.0f, basey, d->white_u, d->white_v);
+            draw__push_vert(d, 5.0f, basey, d->white_u, d->white_v);
+            draw__tri(d, vb, vb + 1, vb + 2);
+        }
     }
 
     // ---- The hands: this IS a clock face ----
