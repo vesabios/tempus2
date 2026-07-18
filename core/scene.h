@@ -407,28 +407,15 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
     bool in_sky = sc->sky_blend > 0.5;
 
     if (phase == 0) {
-        // ORBIS: two grabs. The RETICLE is the location picker — hold
-        // it and the surface slides beneath to reposition home. The
-        // PLANET is the hour control — grab anywhere else on the globe
-        // and spin the earth through the day. Hit-tests the orrery's
+        // ORBIS: grab the planet and turn it under the reticle — the
+        // location picker, plain and direct. Hit-tests the orrery's
         // LIVE published globe, honest mid-flight too.
         if (sc->orbis_blend > 0.5) {
             float gdx = wx - o->glob_x, gdy = wy - o->glob_y;
-            float d2 = gdx * gdx + gdy * gdy;
-            if (d2 < 34.0f * 34.0f) {
-                ob->reticle_drag = true;
-                ob->last_wx = wx;
-                ob->last_wy = wy;
-                return;
-            }
-            if (d2 < o->glob_r * o->glob_r) {
+            if (gdx * gdx + gdy * gdy < o->glob_r * o->glob_r) {
                 ob->dragging = true;
                 ob->last_wx = wx;
                 ob->last_wy = wy;
-                c->fling_vel = 0;    // grabbing the planet stops the flywheel
-                c->drag_accum = 0;
-                c->fling_keep_time = false;
-                scene__begin_override(t);
                 return;
             }
         }
@@ -555,10 +542,10 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         }
         c->last_wx = wx;
         c->last_wy = wy;
-    } else if (phase == 1 && ob->reticle_drag) {
-        // The reticle holds the pick: trackball — the surface slides
-        // beneath the crosshairs, home follows. Near center one world
-        // unit = 1/R radians; longitude widened by the parallels.
+    } else if (phase == 1 && ob->dragging) {
+        // Trackball: the surface follows the finger, home follows the
+        // reticle. Near center one world unit = 1/R radians; longitude
+        // widened by the shrinking parallels.
         float R = o->glob_r > 1.0f ? o->glob_r : 355.0f;
         float ddx = wx - ob->last_wx, ddy = wy - ob->last_wy;
         double k = (180.0 / M_PI) / R;
@@ -571,18 +558,6 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         while (lon > 180.0) lon -= 360.0;
         while (lon < -180.0) lon += 360.0;
         tempus_set_location(t, lat, lon);
-        ob->last_wx = wx;
-        ob->last_wy = wy;
-    } else if (phase == 1 && ob->dragging) {
-        // Dragging the planet scrubs the hour: the globe holds still
-        // and the SUN follows the finger — 15 degrees of surface to
-        // the hour, the terminator sweeping with it. Drag the sun
-        // west and the day advances.
-        float R = o->glob_r > 1.0f ? o->glob_r : 355.0f;
-        float ddx = wx - ob->last_wx;
-        double k = (180.0 / M_PI) / R;
-        scene__advance_override_days(
-            t, -(double)ddx * k / 15.0 / 24.0, false);
         ob->last_wx = wx;
         ob->last_wy = wy;
     } else if (phase == 1 && ho->ring_dragging) {
@@ -630,7 +605,6 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         c->wheel_dragging = false;
         ho->ring_dragging = false;
         ob->dragging = false;
-        ob->reticle_drag = false;
     }
 }
 
