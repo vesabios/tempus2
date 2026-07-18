@@ -856,15 +856,68 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     }
 
     // Moon orbit ring: helio furniture that also rides the ORBIS
-    // closeup — the moon keeps its relative seat there, so its ring
-    // comes along, easing from the slot reach to the hang reach.
+    // closeup — and there it goes THREE-DIMENSIONAL: the moon's true
+    // orbital path (one sidereal month of geocentric track, inclined
+    // ~5 deg to the ecliptic) in the current earth frame, rotated by
+    // the live view. It projects as a correctly-oriented ellipse
+    // through the moon itself; the far side dims, and the stretch
+    // that passes BEHIND the planet is hidden by it. At the flat
+    // stations each sample collapses to its screen bearing on the
+    // classic circle, so the ring tilts into 3D as the closeup rises.
     {
         float ring_a = helio_a + (1.0f - helio_a) * obf;
         if (ring_a > 0.001f) {
-            d->alpha = base_alpha * ring_a * (1.0f - skw);
+            float ring_fac2 = 1.55f + (1.22f - 1.55f) * obf;
+            enum { ORB_N = 96 };
+            float ox[ORB_N + 1], oy[ORB_N + 1], oz[ORB_N + 1];
+            double gmst_now = planets__gmst(orbis_jd);
+            for (int k = 0; k <= ORB_N; k++) {
+                double jdk = orbis_jd
+                           + (double)(k % ORB_N) / ORB_N * 27.321662;
+                double lo2, la2;
+                planets__body_lonlat(BODY_MOON, jdk, &lo2, &la2);
+                double Tk = (jdk - 2451545.0) / 36525.0;
+                double ek = (23.439291 - 0.0130042 * Tk) * M_PI / 180.0;
+                double lamk = lo2 * M_PI / 180.0;
+                double betk = la2 * M_PI / 180.0;
+                double sdk = sin(betk) * cos(ek)
+                           + cos(betk) * sin(ek) * sin(lamk);
+                double deck = asin(sdk);
+                double rak = atan2(sin(lamk) * cos(ek)
+                                   - tan(betk) * sin(ek), cos(lamk));
+                double lek = (rak * 180.0 / M_PI - gmst_now)
+                           * M_PI / 180.0;
+                float v[3] = { (float)(cos(deck) * cos(lek)),
+                               (float)(cos(deck) * sin(lek)),
+                               (float)(sin(deck)) };
+                float pv[3];
+                globe_mat_mul_vec(rot, v, pv);
+                // Flat-station form: the same sample squashed onto its
+                // screen bearing on the classic circle
+                float fl = sqrtf(pv[0] * pv[0] + pv[1] * pv[1]);
+                float fx = fl > 1.0e-4f ? pv[0] / fl : 1.0f;
+                float fy = fl > 1.0e-4f ? pv[1] / fl : 0.0f;
+                ox[k] = ex + (fx * (1.0f - obf) + pv[0] * obf)
+                             * earth_r * ring_fac2;
+                oy[k] = ey + (fy * (1.0f - obf) + pv[1] * obf)
+                             * earth_r * ring_fac2;
+                oz[k] = pv[2];
+            }
             draw_set_color(d, dca(0.6f, 0.58f, 0.54f, 0.20f));
-            draw_circle_stroked(d, ex, ey,
-                earth_r * (1.55f + (1.22f - 1.55f) * obf), 1.0f);
+            for (int k = 0; k < ORB_N; k++) {
+                float mzk = (oz[k] + oz[k + 1]) * 0.5f;
+                float fseg = 1.0f;
+                if (mzk < 0.0f) {
+                    float cxk = (ox[k] + ox[k + 1]) * 0.5f - ex;
+                    float cyk = (oy[k] + oy[k + 1]) * 0.5f - ey;
+                    bool occl = cxk * cxk + cyk * cyk
+                              < earth_r * earth_r;
+                    fseg = occl ? (1.0f - obf) : (1.0f - 0.5f * obf);
+                }
+                if (fseg < 0.01f) continue;
+                d->alpha = base_alpha * ring_a * (1.0f - skw) * fseg;
+                draw_line(d, ox[k], oy[k], ox[k + 1], oy[k + 1], 1.0f);
+            }
             d->alpha = base_alpha;
         }
     }
@@ -995,6 +1048,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float mdx, mdy;
         orr__ecl_dir(st->planets.geo_lon[BODY_MOON], &mdx, &mdy);
         float moon_vz = 1.0f;   // view-frame z of the physical direction
+        float mpx, mpy;         // un-normalized 3D projection: the
+                                // moon's true place on its tilted path
         {
             double mlon2, mlat2;
             planets__body_lonlat(BODY_MOON, orbis_jd, &mlon2, &mlat2);
@@ -1020,6 +1075,11 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 moon_vz = mv[2];
                 mdx = mv[0] / mm2;
                 mdy = mv[1] / mm2;
+                mpx = mv[0];
+                mpy = mv[1];
+            } else {
+                mpx = mdx;
+                mpy = mdy;
             }
         }
         // At system scale the moon shrinks toward a bead beside its planet
@@ -1044,8 +1104,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float w_ap = (1.0f - m4) * (1.0f - obf);
         float morb = 1.0f - w_ap;    // the orbital form's claim
         float tgt_ang = atan2f(mdy, mdx);
-        float seat_x = ex + mdx * earth_r * ring_fac;
-        float seat_y = ey + mdy * earth_r * ring_fac;
+        float sdx = mdx * (1.0f - obf) + mpx * obf;
+        float sdy = mdy * (1.0f - obf) + mpy * obf;
+        float seat_x = ex + sdx * earth_r * ring_fac;
+        float seat_y = ey + sdy * earth_r * ring_fac;
         float mmx = seat_x * morb + gx2 * w_ap;
         float mmy = seat_y * morb + gy2 * w_ap;
         float mmr = gr2 * w_ap
@@ -1067,16 +1129,20 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             memcpy(ml, morb > 0.5f ? hl2 : gl2, sizeof(ml));
         }
         float moon_dim = 1.0f;
+        if (moon_vz < 0.0f) {
+            moon_dim = 1.0f - 0.45f * obf * (1.0f - skw);
+            float odx = mmx - ex, ody = mmy - ey;
+            if (odx * odx + ody * ody < earth_r * earth_r)
+                moon_dim *= 1.0f - 0.85f * obf * (1.0f - skw);
+        }
         if (obf > 0.001f) {
-            if (moon_vz < 0.0f)
-                moon_dim = 1.0f - 0.45f * obf;
-            // Tether: radial, directly beneath the moon, fading with
-            // the rising sky
+            // Tether: from the surface point directly beneath the
+            // moon's 3D place, fading with the rising sky
             if (skw < 0.999f) {
                 d->alpha = base_alpha * obf * moon_dim * (1.0f - skw);
                 draw_set_color(d, dca(0.72f, 0.72f, 0.70f, 0.35f));
-                draw_line(d, ex + cosf(tgt_ang) * earth_r,
-                          ey + sinf(tgt_ang) * earth_r, mmx, mmy, 1.0f);
+                draw_line(d, ex + mpx * earth_r,
+                          ey + mpy * earth_r, mmx, mmy, 1.0f);
                 d->alpha = base_alpha;
             }
             float mn2 = 0;
@@ -1106,9 +1172,6 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             if (mn3 > 1.0e-3f)
                 for (int i = 0; i < 3; i++) ml[i] /= mn3;
         }
-        if (moon_vz < 0.0f)
-            moon_dim = 1.0f - 0.45f * obf * (1.0f - skw);
-
         // Publish for VIEW_LVMEN (and the pointer code's exclusions)
         stw->moon_x = mmx;
         stw->moon_y = mmy;
