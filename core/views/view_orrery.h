@@ -922,8 +922,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             draw_line(d, sx0, sy0, mx0, my0, 1.0f);
         }
         // ORBIS tether: from the subsolar point on the surface up to
-        // the floating sun — the line says "the sun stands over HERE"
-        if (obf > 0.01f) {
+        // the floating sun — the line says "the sun stands over HERE".
+        // Only when this view owns the sun: a tether without its body
+        // under the dissolving sky reads as a second object.
+        if (obf > 0.01f && !sky_owns) {
             d->alpha = base_alpha * obf;
             draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.45f));
             draw_line(d, ex + lx * earth_r, ey + ly * earth_r,
@@ -1091,12 +1093,15 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             mmx = ex + cosf(am) * rr2;
             mmy = ey + sinf(am) * rr2;
             mmr = mmr * (1.0f - obf) + 24.0f * obf;
-            // Tether: radial, directly beneath wherever the moon is
-            d->alpha = base_alpha * obf * moon_dim;
-            draw_set_color(d, dca(0.72f, 0.72f, 0.70f, 0.35f));
-            draw_line(d, ex + cosf(am) * earth_r,
-                      ey + sinf(am) * earth_r, mmx, mmy, 1.0f);
-            d->alpha = base_alpha;
+            // Tether: radial, directly beneath wherever the moon is —
+            // drawn only when this view owns the moon
+            if (!sky_owns) {
+                d->alpha = base_alpha * obf * moon_dim;
+                draw_set_color(d, dca(0.72f, 0.72f, 0.70f, 0.35f));
+                draw_line(d, ex + cosf(am) * earth_r,
+                          ey + sinf(am) * earth_r, mmx, mmy, 1.0f);
+                d->alpha = base_alpha;
+            }
             // Phase light eases to the shared earth-frame sun
             // (component blend, no shortest-path flip)
             float mn2 = 0;

@@ -578,6 +578,10 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         float ba = sky__in_night(st->body_az[b], st->body_alt[b],
                                  dzv[0], dzv[1])
                  ? 1.0f : 0.78f;
+        if (b == BODY_SUN || b == BODY_MOON)
+            ba = 1.0f + (ba - 1.0f) * mb;   // full strength at the
+                                            // machine seam — the owner
+                                            // hands off at full alpha
         if (!handoff)
             ba *= ms + (1.0f - ms) * fin;   // born in place, fading in
         float pr = rsz * pw + orr__pip_r(st->now.mag[b]) * (1 - pw);
@@ -624,9 +628,13 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             draw_circle_stroked(d, x, y, pr, 1.2f);
 
         // The same sun that anchored MACHINA: its corona and rays ride
-        // along, dissolving as it becomes a body in the sky
-        if (b == BODY_SUN && mb < 0.999f) {
-            float ra2 = 1.0f - mb;
+        // along, dissolving as it becomes a body in the sky. Their
+        // strength tracks the LIVE machine (system stage): flying to a
+        // station whose sun wears no regalia, the rays dissolve with
+        // the flight and the handoff matches exactly.
+        float sun_ray_w = st->orr ? (float)st->orr->sys : 1.0f;
+        if (b == BODY_SUN && mb < 0.999f && sun_ray_w > 0.001f) {
+            float ra2 = (1.0f - mb) * sun_ray_w;
             d->alpha = base_alpha * ra2;
             draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
             draw_circle_stroked(d, x, y, pr * 28.0f / 22.0f, 1.0f);
