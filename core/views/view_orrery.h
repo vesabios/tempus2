@@ -19,6 +19,7 @@
 #define VIEW_ORRERY_H
 
 #include "../view.h"
+#include "../planets.h"
 #include "../../assets/coastlines.h"
 
 struct OrreryViewState {
@@ -26,6 +27,7 @@ struct OrreryViewState {
     double opacity;
     double zoom;        // mirrored from the calendar wheel's zoom
     double blend;       // mirrored scene helio_blend (morph parameter)
+    double sys;         // mirrored scene system_blend (full-system stage)
     double geo_azimuth; // live sun az/zen from the solar view, for the
     double geo_zenith;  // geocentric endpoint of the morph
     const SolarViewState *solar;  // solar data + sun-path caches
@@ -44,6 +46,12 @@ struct OrreryViewState {
     float moon_pq[4];
     bool  moon_pq_valid;
 
+    // Full-system ephemeris (recomputed when the clock minute moves)
+    PlanetsNow planets;
+    Aspect     aspects[PLANETS_MAX_ASPECTS];
+    int        num_aspects;
+    double     planets_jd;
+
     // Coastline unit vectors (earth frame), precomputed at init
     float coast_vec[COAST_NUM_PTS][3];
 };
@@ -54,9 +62,78 @@ struct OrreryViewState {
 #if defined(SCENE_DEFINED) && !defined(VIEW_ORRERY_IMPL)
 #define VIEW_ORRERY_IMPL
 
+// ---- Full-system layout ----
+// Not to scale: orbit radii in calendar-wheel units, spaced like the
+// concentric rings of an astronomical clock face. Earth's orbit IS the
+// calendar wheel (1.0); Mercury and Venus sit inside it, Mars through
+// Pluto outside, and the zodiac dial is the outermost ring.
+
+static const float orr__orbit_frac[PL_COUNT] = {
+    0.36f, 0.64f, 1.0f, 1.32f, 1.50f, 1.665f, 1.81f, 1.925f, 2.03f
+};
+
+#define ORR_WEB_R       930.0f   // aspect chords + geocentric markers
+#define ORR_ZODIAC_IN   946.0f
+#define ORR_ZODIAC_OUT  980.0f
+#define ORR_ZODIAC_TEXT 999.0f
+
+// Beads: ordered by real size but nowhere near to scale
+static const struct { const char *name; float size; uint8_t r, g, b; }
+orr__planet[PL_COUNT] = {
+    { "MERCURY",  5.0f, 152, 146, 138 },
+    { "VENUS",    8.0f, 208, 183, 130 },
+    { 0,          0.0f,   0,   0,   0 },   // Earth is the globe itself
+    { "MARS",     6.5f, 188,  92,  58 },
+    { "JUPITER", 15.0f, 196, 168, 126 },
+    { "SATURN",  12.5f, 205, 190, 146 },
+    { "URANUS",   9.5f, 126, 172, 178 },
+    { "NEPTUNE",  9.0f,  98, 128, 188 },
+    { "PLUTO",    3.5f, 138, 128, 132 },
+};
+
+// Geocentric marker colors, BODY_* order (luminaries + the planets)
+static const uint8_t orr__body_col[BODY_COUNT][3] = {
+    { 196, 126,  16 },   // Sun — the instrument's gold
+    { 205, 202, 192 },   // Moon
+    { 152, 146, 138 }, { 208, 183, 130 }, { 188,  92,  58 },
+    { 196, 168, 126 }, { 205, 190, 146 }, { 126, 172, 178 },
+    {  98, 128, 188 }, { 138, 128, 132 },
+};
+
+// Aspect chord colors: hard aspects in oxidized red, soft in the
+// instrument's teal, the quincunx off on its own uneasy violet
+static const uint8_t orr__aspect_col[ASPECT_TYPE_COUNT][3] = {
+    [ASPECT_CONJUNCTION]    = { 220, 205, 175 },
+    [ASPECT_OPPOSITION]     = { 190,  70,  55 },
+    [ASPECT_TRINE]          = {   0, 150, 130 },
+    [ASPECT_SQUARE]         = { 190,  70,  55 },
+    [ASPECT_SEXTILE]        = {  45, 150, 122 },
+    [ASPECT_SEMISEXTILE]    = {  70, 122, 108 },
+    [ASPECT_SEMISQUARE]     = { 148,  84,  72 },
+    [ASPECT_SESQUIQUADRATE] = { 148,  84,  72 },
+    [ASPECT_QUINCUNX]       = { 138, 112, 160 },
+};
+
+static const char *orr__sign_names[12] = {
+    "ARIES", "TAURUS", "GEMINI", "CANCER", "LEO", "VIRGO",
+    "LIBRA", "SCORPIO", "SAGITTARIUS", "CAPRICORNUS", "AQUARIUS", "PISCES",
+};
+
+// Screen direction of an ecliptic-of-date longitude. The wheel anchors
+// yule (December solstice) at screen-top, where the sun's geocentric
+// longitude is exactly 270 and the sun (at wheel center) is seen from
+// Earth looking screen-down — so lambda 270 maps to down, and longitude
+// increases clockwise with the year. Wheel angle = (0.75 + lam/360) * 2pi.
+static inline void orr__ecl_dir(double lon_deg, float *dx, float *dy) {
+    double a = (0.75 + lon_deg / 360.0) * 2.0 * M_PI;
+    *dx = (float)sin(a);
+    *dy = (float)-cos(a);
+}
+
 static void orrery_init(void *buf, const Tempus *t, const RenderStyle *s) {
     OrreryViewState *st = (OrreryViewState *)buf;
     st->opacity = 1.0;
+    st->planets_jd = -1.0e9;
     for (int i = 0; i < COAST_NUM_PTS; i++) {
         double lat = coast_pts[i][0] * 0.01 * M_PI / 180.0;
         double lon = coast_pts[i][1] * 0.01 * M_PI / 180.0;
@@ -80,9 +157,25 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     (void)t; (void)dt;
     st->zoom = sc->calendar_state.zoom;   // ride the wheel's zoom
     st->blend = sc->helio_blend;
+    st->sys = sc->system_blend;
     st->geo_azimuth = sc->solar_state.azimuth;
     st->geo_zenith = sc->solar_state.zenith;
     st->solar = &sc->solar_state;
+
+    // Full-system ephemeris: clock time is local, the sky runs on UT.
+    // Minute granularity — the fastest body (the Moon) moves 0.009
+    // deg/minute, far below a hairline at dial scale.
+    if (st->sys > 0.001) {
+        double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
+                     - t->config.timezone / 24.0;
+        if (fabs(jd_ut - st->planets_jd) > 1.0 / 1440.0) {
+            planets_compute(&st->planets, jd_ut);
+            st->num_aspects = planets_find_aspects(st->planets.geo_lon,
+                                                   st->aspects,
+                                                   PLANETS_MAX_ASPECTS);
+            st->planets_jd = jd_ut;
+        }
+    }
 }
 
 static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
@@ -132,9 +225,16 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         globe_rotation(t->config.latitude, t->config.longitude, geo_rot);
         globe_sun_dir(st->geo_azimuth, st->geo_zenith, geo_light);
 
-        ex = 0.0f;
-        ey = dial_y * (1 - m);
-        earth_r = dial_r * (1 - m) + 240.0f * m;
+        // Mid-morph target: the helio arrangement AT THE CURRENT ZOOM
+        // (centered planet at z = 1, bead on the wheel at z = 0), so the
+        // flight lands wherever the zoom currently is — geo -> system
+        // flies directly onto the wheel without a detour through center.
+        float hx = sphi * s->calendar_base_radius * (1.0f - z);
+        float hy = -cphi * s->calendar_base_radius * (1.0f - z);
+        float hr = 42.0f + z * 198.0f;
+        ex = hx * m;
+        ey = dial_y * (1 - m) + hy * m;
+        earth_r = dial_r * (1 - m) + hr * m;
 
         globe_rot_slerp_cont(geo_rot, helio_rot, m,
                              stw->earth_pq, &stw->earth_pq_valid, rot);
@@ -147,13 +247,220 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
 
     // ================= UNDER THE GLOBE =================
 
+    // ---- The system: every planet, the zodiac dial, the aspect web ----
+    // Staggered arrival as the camera pulls back: orbit rings first, then
+    // the planets, the zodiac, the sight-lines, and finally the web — the
+    // astrology arrives after the astronomy that explains it.
+    float ss = (float)st->sys;
+    if (ss > 0.001f) {
+        const PlanetsNow *pn = &st->planets;
+        float a_ring   = (float)tempus_smoothstep(0.05, 0.45, ss);
+        float a_planet = (float)tempus_smoothstep(0.20, 0.60, ss);
+        float a_zod    = (float)tempus_smoothstep(0.40, 0.80, ss);
+        float a_sight  = (float)tempus_smoothstep(0.60, 0.95, ss);
+        float a_web    = (float)tempus_smoothstep(0.70, 1.00, ss);
+        float wheel_R  = s->calendar_base_radius;   // Earth's orbit
+
+        // Bead positions: true heliocentric longitudes on stylized rings.
+        // Earth rides the live morph position (glued to the wheel).
+        float ppx[PL_COUNT], ppy[PL_COUNT];
+        for (int p = 0; p < PL_COUNT; p++) {
+            float dx, dy;
+            orr__ecl_dir(pn->helio_lon[p], &dx, &dy);
+            ppx[p] = dx * wheel_R * orr__orbit_frac[p];
+            ppy[p] = dy * wheel_R * orr__orbit_frac[p];
+        }
+        ppx[PL_EARTH] = ex;
+        ppy[PL_EARTH] = ey;
+
+        // Geocentric markers: where each body APPEARS in the zodiac. The
+        // dial is a true longitude scale around the sun, so aspect chords
+        // keep their sacred shapes (a grand trine is equilateral).
+        float mpx[BODY_COUNT], mpy[BODY_COUNT];
+        for (int b = 0; b < BODY_COUNT; b++) {
+            float dx, dy;
+            orr__ecl_dir(pn->geo_lon[b], &dx, &dy);
+            mpx[b] = dx * ORR_WEB_R;
+            mpy[b] = dy * ORR_WEB_R;
+        }
+
+        // Orbit rings (Earth's is the calendar wheel itself)
+        if (a_ring > 0.001f) {
+            d->alpha = base_alpha * a_ring;
+            draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.13f));
+            for (int p = 0; p < PL_COUNT; p++) {
+                if (p == PL_EARTH) continue;
+                draw_circle_stroked(d, 0, 0, wheel_R * orr__orbit_frac[p], 1.0f);
+            }
+        }
+
+        // Zodiac dial: 30-degree signs, 10-degree ticks, engraved names
+        if (a_zod > 0.001f) {
+            d->alpha = base_alpha * a_zod;
+            draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.22f));
+            draw_circle_stroked(d, 0, 0, ORR_ZODIAC_IN, 1.0f);
+            draw_circle_stroked(d, 0, 0, ORR_ZODIAC_OUT, 1.0f);
+            for (int i = 0; i < 36; i++) {
+                float dx, dy;
+                orr__ecl_dir(i * 10.0, &dx, &dy);
+                bool cusp = (i % 3) == 0;
+                float r1 = cusp ? ORR_ZODIAC_OUT : ORR_ZODIAC_IN + 12.0f;
+                draw_set_color(d, cusp ? dca(0.55f, 0.53f, 0.49f, 0.50f)
+                                       : dca(0.55f, 0.53f, 0.49f, 0.25f));
+                draw_line(d, dx * ORR_ZODIAC_IN, dy * ORR_ZODIAC_IN,
+                          dx * r1, dy * r1, 1.0f);
+            }
+            draw_set_color(d, dc_scale(s->medium_grey, 0.60f));
+            for (int i = 0; i < 12; i++) {
+                float ang = (float)((0.75 + (i * 30.0 + 15.0) / 360.0)
+                                    * 2.0 * M_PI);
+                draw_text_curved(d, FONT_month, 0, 0, ORR_ZODIAC_TEXT,
+                                 ang, orr__sign_names[i], 1.6f, 0.85f);
+            }
+        }
+
+        // Sight-lines: from Earth, through the body, to where it lands in
+        // the zodiac. Quadratic curves — the bend is the honest cost of a
+        // not-to-scale layout (the endpoints and the bead are all true).
+        if (a_sight > 0.001f) {
+            d->alpha = base_alpha * a_sight;
+            for (int b = 0; b < BODY_COUNT; b++) {
+                float bx2, by2;
+                if (b == BODY_SUN) {
+                    bx2 = sun_x; by2 = sun_y;
+                } else if (b == BODY_MOON) {
+                    float dx, dy;
+                    orr__ecl_dir(pn->geo_lon[BODY_MOON], &dx, &dy);
+                    bx2 = ex + dx * earth_r * 1.55f;
+                    by2 = ey + dy * earth_r * 1.55f;
+                } else {
+                    int p = planets_body_pl(b);
+                    bx2 = ppx[p]; by2 = ppy[p];
+                }
+                // Control point puts the curve through the bead at t=0.5
+                float p1x = 2.0f * bx2 - 0.5f * (ex + mpx[b]);
+                float p1y = 2.0f * by2 - 0.5f * (ey + mpy[b]);
+                draw_set_color(d, dca(orr__body_col[b][0] / 255.0f,
+                                      orr__body_col[b][1] / 255.0f,
+                                      orr__body_col[b][2] / 255.0f, 0.28f));
+                float lx0 = ex, ly0 = ey;
+                const int SEG = 20;
+                for (int k = 1; k <= SEG; k++) {
+                    float tt = (float)k / SEG, omt = 1.0f - tt;
+                    float qx = omt * omt * ex + 2.0f * omt * tt * p1x
+                             + tt * tt * mpx[b];
+                    float qy = omt * omt * ey + 2.0f * omt * tt * p1y
+                             + tt * tt * mpy[b];
+                    draw_line(d, lx0, ly0, qx, qy, 1.0f);
+                    lx0 = qx; ly0 = qy;
+                }
+            }
+        }
+
+        // The aspect web: chords between zodiac positions whose separation
+        // matches a division of the circle, brightness rising as the
+        // aspect tightens. Conjunctions tie with a bracket outside the
+        // chord radius instead (a zero-length chord says nothing).
+        if (a_web > 0.001f) {
+            for (int i = 0; i < st->num_aspects; i++) {
+                const Aspect *A = &st->aspects[i];
+                const AspectDef *def = &planets_aspect_defs[A->kind];
+                const uint8_t *c = orr__aspect_col[A->kind];
+                if (A->kind == ASPECT_CONJUNCTION) {
+                    double la = pn->geo_lon[A->a];
+                    double dlt = planets_lon_diff(pn->geo_lon[A->b], la);
+                    double l0 = (dlt < 0) ? la + dlt : la;
+                    double l1 = (dlt < 0) ? la : la + dlt;
+                    float aa0 = (float)((0.75 + (l0 - 1.5) / 360.0)
+                                        * 2.0 * M_PI - M_PI * 0.5);
+                    float aa1 = (float)((0.75 + (l1 + 1.5) / 360.0)
+                                        * 2.0 * M_PI - M_PI * 0.5);
+                    d->alpha = base_alpha * a_web
+                             * (0.35f + 0.55f * A->strength);
+                    draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
+                                          c[2] / 255.0f, 0.8f));
+                    draw_arc_filled(d, 0, 0, ORR_WEB_R + 10.0f,
+                                    ORR_WEB_R + 11.5f, aa0, aa1, 10);
+                } else {
+                    float wdt = def->major ? (0.8f + 1.4f * A->strength)
+                                           : 0.8f;
+                    float al = (def->major ? 0.55f : 0.30f)
+                             * (0.30f + 0.70f * A->strength);
+                    d->alpha = base_alpha * a_web * al;
+                    draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
+                                          c[2] / 255.0f, 1.0f));
+                    draw_line(d, mpx[A->a], mpy[A->a],
+                              mpx[A->b], mpy[A->b], wdt);
+                }
+            }
+            d->alpha = base_alpha;
+        }
+
+        // Geocentric markers on the dial + the classic retrograde R
+        if (a_zod > 0.001f) {
+            d->alpha = base_alpha * a_zod;
+            int rw = _font_compat[FONT_seconds].weight;
+            for (int b = 0; b < BODY_COUNT; b++) {
+                draw_set_color(d, dca(orr__body_col[b][0] / 255.0f,
+                                      orr__body_col[b][1] / 255.0f,
+                                      orr__body_col[b][2] / 255.0f, 0.9f));
+                draw_circle_filled(d, mpx[b], mpy[b], 4.0f);
+                if (pn->retro[b]) {
+                    float dx, dy;
+                    orr__ecl_dir(pn->geo_lon[b], &dx, &dy);
+                    float rx2 = dx * (ORR_WEB_R - 22.0f);
+                    float ry2 = dy * (ORR_WEB_R - 22.0f);
+                    float tw = sdf_measure_width(rw, "R") * 15.0f;
+                    draw_text_ex(d, rw, 15.0f, rx2 - tw * 0.5f,
+                                 ry2 - 7.5f, "R");
+                }
+            }
+        }
+
+        // Planet beads + engraved radial labels
+        if (a_planet > 0.001f) {
+            for (int p = 0; p < PL_COUNT; p++) {
+                if (p == PL_EARTH) continue;
+                d->alpha = base_alpha * a_planet;
+                draw_set_color(d, dc_u8(orr__planet[p].r, orr__planet[p].g,
+                                        orr__planet[p].b));
+                draw_circle_filled(d, ppx[p], ppy[p], orr__planet[p].size);
+                if (p == PL_SATURN) {
+                    draw_set_color(d, dca(orr__planet[p].r / 255.0f,
+                                          orr__planet[p].g / 255.0f,
+                                          orr__planet[p].b / 255.0f, 0.45f));
+                    draw_circle_stroked(d, ppx[p], ppy[p],
+                                        orr__planet[p].size * 1.75f, 1.0f);
+                }
+                float orbr = wheel_R * orr__orbit_frac[p];
+                float th = (float)((0.75 + pn->helio_lon[p] / 360.0)
+                                   * 2.0 * M_PI);
+                int lw = _font_compat[FONT_date].weight;
+                float lsz = _font_compat[FONT_date].size;
+                float tw = sdf_measure_width(lw, orr__planet[p].name) * lsz;
+                // Inner planets label inward, outer outward — clear of the
+                // bead and its orbit ring either way
+                float anchor = (p < PL_EARTH)
+                    ? orbr - orr__planet[p].size - 12.0f
+                    : orbr + orr__planet[p].size + 12.0f + tw;
+                d->alpha = base_alpha * a_planet * 0.55f;
+                draw_set_color(d, dc_scale(s->medium_grey, 0.8f));
+                draw_text_radial(d, FONT_date, 0, 0, anchor, th,
+                                 orr__planet[p].name);
+            }
+            d->alpha = base_alpha;
+        }
+    }
+
     // Helio underlay: sun at wheel center + orbit radial to the globe
     if (helio_a > 0.001f) {
+        // The sun gains a little presence once it anchors the whole system
+        float sgrow = 1.0f + 0.45f * (float)tempus_smoothstep(0.2, 0.7, ss);
         d->alpha = base_alpha * helio_a;
         draw_set_color(d, dc_u8(196, 126, 16));
-        draw_circle_filled(d, sun_x, sun_y, 22.0f);
+        draw_circle_filled(d, sun_x, sun_y, 22.0f * sgrow);
         draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
-        draw_circle_stroked(d, sun_x, sun_y, 28.0f, 1.0f);
+        draw_circle_stroked(d, sun_x, sun_y, 28.0f * sgrow, 1.0f);
         draw_set_color(d, dca(0.5f, 0.5f, 0.5f, 0.18f));
         draw_line_thin(d, sun_x, sun_y, ex, ey);
     }
@@ -303,18 +610,31 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     {
         double ph = globe_moon_phase(tv->jd_current
                                      + tv->percent_of_day - 0.5);
-        float b = (float)(ph * 2.0 * M_PI);
+        double b_deg = ph * 360.0;
+        if (ss > 0.001f) {
+            // In the system view the true geocentric elongation takes
+            // over, so the moon hangs at its real zodiac longitude — the
+            // sight-line and the aspect web land on the same point
+            double elo = planets_lon_diff(st->planets.geo_lon[BODY_MOON],
+                                          st->planets.geo_lon[BODY_SUN]);
+            b_deg += planets_lon_diff(elo, b_deg)
+                   * tempus_smoothstep(0.2, 0.7, ss);
+        }
+        float b = (float)(b_deg * M_PI / 180.0);
 
         // Geo endpoint: the 6 o'clock aperture, phase-frame light
         float gx2 = 0.0f, gy2 = -dial_y, gr2 = 52.0f;
         float gl2[3] = { sinf(b), 0.0f, -cosf(b) };
 
         // Helio endpoint: pure ecliptic sun (helio_light, untouched by
-        // the morph) and the FINAL helio earth arrangement — center,
-        // r 240 — where the zoom tween lands together with m
-        float hex = (m >= 0.999f) ? ex : 0.0f;
-        float hey = (m >= 0.999f) ? ey : 0.0f;
-        float her = (m >= 0.999f) ? earth_r : 240.0f;
+        // the morph) and the helio earth arrangement AT THE CURRENT ZOOM
+        // (center/240 when z rides with m; a bead on the wheel when the
+        // system flight leaves z at 0) — matching the earth's own target
+        float hex = (m >= 0.999f) ? ex
+                  : sphi * s->calendar_base_radius * (1.0f - z);
+        float hey = (m >= 0.999f) ? ey
+                  : -cphi * s->calendar_base_radius * (1.0f - z);
+        float her = (m >= 0.999f) ? earth_r : 42.0f + z * 198.0f;
         float plm = sqrtf(helio_light[0] * helio_light[0]
                         + helio_light[1] * helio_light[1]);
         float slx = (plm > 1e-4f) ? helio_light[0] / plm : 0.0f;
@@ -326,9 +646,29 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // geo and helio phases disagree.
         float mdx = slx * cosf(b) + sly * sinf(b);
         float mdy = -slx * sinf(b) + sly * cosf(b);
+        if (ss > 0.001f) {
+            // The system stage is governed by ecliptic longitude. The
+            // spin-sense elongation above lives in the globe's PROPER
+            // frame; the wheel maps orbits MIRRORED (the year runs
+            // clockwise), and the zodiac dial, ring marker and
+            // sight-line live in the wheel's world — so the moon swings
+            // to its true sky direction as the system arrives.
+            float sw = (float)tempus_smoothstep(0.2, 0.7, ss);
+            float tdx, tdy;
+            orr__ecl_dir(st->planets.geo_lon[BODY_MOON], &tdx, &tdy);
+            float a0 = atan2f(mdy, mdx), a1 = atan2f(tdy, tdx);
+            float da = a1 - a0;
+            while (da > (float)M_PI) da -= 2.0f * (float)M_PI;
+            while (da < -(float)M_PI) da += 2.0f * (float)M_PI;
+            float aa = a0 + da * sw;
+            mdx = cosf(aa);
+            mdy = sinf(aa);
+        }
         float hx2 = hex + mdx * her * 1.55f;
         float hy2 = hey + mdy * her * 1.55f;
-        float hr2 = 22.0f;
+        // At system scale the moon shrinks toward a bead beside its planet
+        float hr2 = 22.0f * (1.0f - 0.55f
+                             * (float)tempus_smoothstep(0.2, 0.7, ss));
         float hl2[3] = { helio_light[0], helio_light[1], helio_light[2] };
         float edx = -mdx, edy = -mdy;   // direction moon -> earth, screen
 
@@ -380,8 +720,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             gm->obs_lat = 999.0f;
             gm->day_col[0] = 0.58f; gm->day_col[1] = 0.55f;
             gm->day_col[2] = 0.49f; gm->day_col[3] = 1.0f;
-            gm->night_col[0] = 0.075f; gm->night_col[1] = 0.07f;
-            gm->night_col[2] = 0.09f;  gm->night_col[3] = 1.0f;
+            // Dark indigo night side — the full disc stays legible, and
+            // the albedo ghosting through reads as earthshine
+            gm->night_col[0] = 0.10f; gm->night_col[1] = 0.105f;
+            gm->night_col[2] = 0.23f; gm->night_col[3] = 1.0f;
         }
     }
 
@@ -454,7 +796,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // Tick positions are sun-anchored (noon is always the ring's sunward
     // crossing), so the city marker sweeps past them as the hour hand —
     // a clock face lying on the surface of the planet.
-    if (m > 0.02f) {
+    // At full-system scale the globe is a bead and the projected hour
+    // numerals are unreadable clutter over the aspect web — fade them out.
+    float clk_a = m * (1.0f - 0.92f * (float)tempus_smoothstep(0.15, 0.55, ss));
+    if (clk_a > 0.02f) {
         double latr2 = t->config.latitude * M_PI / 180.0;
         float cl = (float)cos(latr2), sl = (float)sin(latr2);
         float le[3];
@@ -500,7 +845,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             float by = ey + (cvy + s0 * uy) * earth_r;
 
             draw_set_color(d, major ? s->clock_lines_strong : s->clock_lines);
-            d->alpha = base_alpha * m;
+            d->alpha = base_alpha * clk_a;
             draw_line(d, bx, by, bx + ux * (t1 - t0), by + uy * (t1 - t0), 1.0f);
 
             if (major) {

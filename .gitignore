@@ -15,6 +15,7 @@ assets/font_atlas.h
 test_*.png
 shot.png
 tools/test_glyphs
+tools/test_planets
 
 # OS junk
 .DS_Store

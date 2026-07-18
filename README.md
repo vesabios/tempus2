@@ -32,6 +32,20 @@ Three composable views, layered into one instrument:
   - at night you see the far side's daylight peeking around the limb —
     "night is currently over Asia," live
 
+Beyond the geocentric dial and the heliocentric earth, a third worldview
+station: the **full system**. The camera pulls back until the calendar
+wheel reads as what it always was — Earth's orbit — and the rest of the
+family appears: all eight planets and Pluto on horologically spaced rings
+(true ecliptic-of-date longitudes, JPL Keplerian elements in
+`core/planets.h`), a **zodiac dial** outside them all, **sight-lines**
+that run from Earth through each body to where it lands in the zodiac
+(the bend of each curve is the honest cost of a not-to-scale layout; the
+endpoints are true, and retrogrades read right off the markers), and the
+**aspect web** — chords between bodies whose geocentric separations hit
+the sacred divisions (conjunction, sextile, square, trine, opposition,
+plus the minors), brightening as the aspect tightens. A grand trine is an
+equilateral triangle drawn across the whole instrument, live.
+
 Solar math is NREL's SPA (`core/spa.c`); sunrise/sunset via `core/sunset.h`.
 The instrument is astronomically honest: the clock shows machine wall time,
 the globe shows the truth for the configured coordinates at this absolute

@@ -97,6 +97,32 @@ static int             g_shot_countdown = 0;
 // morphs between them; layer opacities derive from it every frame.
 static bool g_heliocentric = false;
 
+// Third worldview station: the full solar system with zodiac dial. Rides
+// scene.system_blend; the shell also pulls the camera back so the outer
+// orbits and the zodiac ring fit the 1280-unit frame.
+static bool g_system = false;
+
+#define SYS_CAMERA_ZOOM 0.60f
+static float sys_camera_scale(void) {
+    return 1.0f - (1.0f - SYS_CAMERA_ZOOM) * (float)g_scene.system_blend;
+}
+
+// Fly the instrument to a worldview station: geo (0,0,0), heliocentric
+// earth (1,1,0), full system (1,0,1). All three parameters tween together
+// so any station reaches any other in one continuous camera move.
+static void fly_worldview(double m, double z, double s, double dur) {
+    tween_cancel_target(&g_scene.tweens, &g_scene.helio_blend);
+    tween_start(&g_scene.tweens, &g_scene.helio_blend,
+                g_scene.helio_blend, m, dur, EASE_IN_OUT_CUBIC);
+    tween_cancel_target(&g_scene.tweens, &g_scene.calendar_state.zoom);
+    g_scene.calendar_state.target_zoom = z;
+    tween_start(&g_scene.tweens, &g_scene.calendar_state.zoom,
+                g_scene.calendar_state.zoom, z, dur, EASE_IN_OUT_CUBIC);
+    tween_cancel_target(&g_scene.tweens, &g_scene.system_blend);
+    tween_start(&g_scene.tweens, &g_scene.system_blend,
+                g_scene.system_blend, s, dur, EASE_IN_OUT_CUBIC);
+}
+
 static void apply_view_mode(void) {
     g_scene.num_layers = 0;
     scene_add_layer(&g_scene, VIEW_CALENDAR);
@@ -337,17 +363,23 @@ static void debug_gui(void) {
             nk_checkbox_label(ctx, "Heliocentric (orrery)", &helio);
             if ((bool)helio != g_heliocentric) {
                 g_heliocentric = helio;
-                tween_cancel_target(&g_scene.tweens, &g_scene.helio_blend);
-                tween_start(&g_scene.tweens, &g_scene.helio_blend,
-                            g_scene.helio_blend, helio ? 1.0 : 0.0,
-                            3.0, EASE_IN_OUT_CUBIC);
+                g_system = false;
                 // Zoom rides the same flight: heliocentric arrives at the
                 // big centered planet, geocentric returns to the dial
-                tween_cancel_target(&g_scene.tweens, &g_scene.calendar_state.zoom);
-                g_scene.calendar_state.target_zoom = helio ? 1.0 : 0.0;
-                tween_start(&g_scene.tweens, &g_scene.calendar_state.zoom,
-                            g_scene.calendar_state.zoom, helio ? 1.0 : 0.0,
-                            3.0, EASE_IN_OUT_CUBIC);
+                fly_worldview(helio ? 1.0 : 0.0, helio ? 1.0 : 0.0, 0.0, 3.0);
+            }
+
+            // Full system: every planet, zodiac dial, aspect web
+            nk_layout_row_dynamic(ctx, 25, 1);
+            int sys = g_system;
+            nk_checkbox_label(ctx, "Full system (zodiac)", &sys);
+            if ((bool)sys != g_system) {
+                g_system = sys;
+                if (sys)
+                    fly_worldview(1.0, 0.0, 1.0, 4.0);
+                else
+                    fly_worldview(g_heliocentric ? 1.0 : 0.0,
+                                  g_heliocentric ? 1.0 : 0.0, 0.0, 4.0);
             }
 
             // Globe overlay: static encodings of solar motion
@@ -461,8 +493,21 @@ static void init(void) {
         g_scene.calendar_state.zoom = 1.0;
         g_scene.calendar_state.target_zoom = 1.0;
     }
+    g_system = getenv("TEMPUS_SYSTEM") != NULL;
+    if (g_system) {   // full system: heliocentric, wheel at base radius
+        g_heliocentric = false;
+        g_scene.helio_blend = 1.0;
+        g_scene.system_blend = 1.0;
+        g_scene.calendar_state.zoom = 0.0;
+        g_scene.calendar_state.target_zoom = 0.0;
+    }
     const char *blend = getenv("TEMPUS_BLEND");   // dev: pin mid-morph
     if (blend) g_scene.helio_blend = atof(blend);
+    const char *sblend = getenv("TEMPUS_SYSBLEND");  // dev: pin system stage
+    if (sblend) {
+        g_scene.helio_blend = 1.0;
+        g_scene.system_blend = atof(sblend);
+    }
     apply_view_mode();
     set_view_opacities();
 
@@ -724,8 +769,8 @@ static void frame(void) {
         scene_update(&g_scene, &g_tempus, upd_dt);
         set_view_opacities();
 
-        // Build tempus draw commands
-        float scale = h / 1280.0f;
+        // Build tempus draw commands (system stage pulls the camera back)
+        float scale = h / 1280.0f * sys_camera_scale();
         draw_begin(&g_draw, w, h);
         g_draw.sx = scale;
         g_draw.sy = scale;
@@ -876,7 +921,7 @@ static void event(const sapp_event *e) {
     if (e->type == SAPP_EVENTTYPE_MOUSE_DOWN
         || e->type == SAPP_EVENTTYPE_MOUSE_MOVE
         || e->type == SAPP_EVENTTYPE_MOUSE_UP) {
-        float scale = sapp_heightf() / 1280.0f;
+        float scale = sapp_heightf() / 1280.0f * sys_camera_scale();
         float wx = (e->mouse_x - sapp_widthf() * 0.5f) / scale;
         float wy = (e->mouse_y - sapp_heightf() * 0.5f) / scale;
         int phase = (e->type == SAPP_EVENTTYPE_MOUSE_DOWN) ? 0

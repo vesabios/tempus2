@@ -84,6 +84,12 @@ struct Scene {
     // Geocentric <-> heliocentric morph (0 = clock/dial, 1 = orrery).
     // Tweened; the orrery view morphs the globe, other views crossfade.
     double      helio_blend;
+
+    // Heliocentric earth <-> full solar system (0 = earth instrument,
+    // 1 = every planet on its ring + zodiac dial + aspect web). The next
+    // zoom-out on the same axis; the shell also rides a global camera
+    // scale on this so the outer orbits fit the frame.
+    double      system_blend;
 };
 
 // Now Scene is defined — include view function implementations

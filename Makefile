@@ -51,6 +51,14 @@ $(WEB_DIR)/index.html: platform/standalone.c platform/shell.html core/spa.c $(HE
 serve: web
 	cd $(WEB_DIR) && python3 -m http.server 8123
 
+# Ephemeris validation harness
+tools/test_planets: tools/test_planets.c core/planets.h core/spa.c core/spa.h
+	$(CC) -std=c11 -O2 -Wall -I core tools/test_planets.c core/spa.c -o $@ -lm
+
+.PHONY: test_planets
+test_planets: tools/test_planets
+	./tools/test_planets
+
 # Font atlas generation
 tools/bake_font: tools/bake_font.c
 	$(CC) -std=c11 -O2 -I lib tools/bake_font.c -o $@ -lm
