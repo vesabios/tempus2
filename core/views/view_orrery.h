@@ -595,15 +595,12 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
     }
 
-    // Helio underlay: sun at wheel center + orbit radial to the globe
+    // Helio underlay: orbit radial to the globe. (The sun itself is
+    // ONE object across all worldviews, drawn with the shared marker
+    // below — at TELLVS it rides near the globe, and on the flight to
+    // MACHINA it extends out along its own line to land at the wheel's
+    // center.)
     if (helio_a > 0.001f) {
-        // The sun gains a little presence once it anchors the whole system
-        float sgrow = 1.0f + 0.45f * (float)tempus_smoothstep(0.2, 0.7, ss);
-        d->alpha = base_alpha * helio_a;
-        draw_set_color(d, dc_u8(196, 126, 16));
-        draw_circle_filled(d, sun_x, sun_y, 22.0f * sgrow);
-        draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
-        draw_circle_stroked(d, sun_x, sun_y, 28.0f * sgrow, 1.0f);
         draw_set_color(d, dca(0.5f, 0.5f, 0.5f, 0.18f));
         // Orbit radial fades at system scale (the sun sight-line covers it)
         d->alpha = base_alpha * helio_a * sysf;
@@ -717,36 +714,57 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // ---- Shared elements: continuous across the morph, never fade ----
     d->alpha = base_alpha;
 
-    // Sun marker + hand line: at m=0 the light-based position equals the
-    // dial marker exactly (both are the subsolar orthographic projection).
-    // When the subsolar point is behind the planet, clamp to the sunward
-    // limb, dimmed — "the sun is beyond this horizon".
+    // THE SUN: one object across every worldview. At m=0 its position
+    // equals the dial marker exactly (the subsolar orthographic
+    // projection); at TELLVS it is the bead lifted off the globe along
+    // the sun line; and as the system arrives it EXTENDS OUT along
+    // that same line to land at the wheel's center, growing into the
+    // disc that anchors MACHINA MVNDI. When the subsolar point is
+    // behind the planet (geo only), clamp to the sunward limb, dimmed
+    // — "the sun is beyond this horizon".
     {
         float lx = light[0], ly = light[1], lz = light[2];
         DrawColor sun_c = s->sunrise_handle;
         if (lz < 0) {
             float n = sqrtf(lx * lx + ly * ly);
             if (n > 1e-4f) { lx /= n; ly /= n; }
-            sun_c = dc_scale(sun_c, 0.5f);
+            sun_c = dc_scale(sun_c, 1.0f - 0.5f * sysf);
         }
         // In helio the real sun sits at the wheel center, so the marker
         // lifts well off the globe toward it — a bead on the sun line.
         // Its tether starts at the PERIMETER, not the globe center.
         float lift = 1.0f + 0.9f * m;
-        float px = ex + lx * earth_r * lift, py = ey + ly * earth_r * lift;
+        float mx0 = ex + lx * earth_r * lift, my0 = ey + ly * earth_r * lift;
         float mag = sqrtf(lx * lx + ly * ly);
-        // Marker and tether are globe furniture — gone at system scale
-        // (the sun itself and its sight-line carry the direction there)
+
+        // The departure: bead position -> wheel center, marker size ->
+        // the anchoring disc, marker gold -> the sun's own gold
+        float px = mx0 + (sun_x - mx0) * ss;
+        float py = my0 + (sun_y - my0) * ss;
+        float msz = s->sun_size * earth_r / dial_r;
+        float sz = msz + (32.0f - msz) * ss;
+        sun_c.r = sun_c.r + (196.0f / 255.0f - sun_c.r) * ss;
+        sun_c.g = sun_c.g + (126.0f / 255.0f - sun_c.g) * ss;
+        sun_c.b = sun_c.b + (16.0f / 255.0f - sun_c.b) * ss;
+
+        // Tether is globe furniture — gone as the sun departs
         d->alpha = base_alpha * sysf;
         if (mag * lift > 1.02f && mag > 1e-4f) {
             float sx0 = ex + (lx / mag) * earth_r;
             float sy0 = ey + (ly / mag) * earth_r;
             draw_set_color(d, dca(0.75f, 0.75f, 0.75f, 0.35f));
-            draw_line(d, sx0, sy0, px, py, 1.0f);
+            draw_line(d, sx0, sy0, mx0, my0, 1.0f);
         }
-        draw_set_color(d, sun_c);
-        draw_circle_filled(d, px, py, s->sun_size * earth_r / dial_r);
         d->alpha = base_alpha;
+        draw_set_color(d, sun_c);
+        draw_circle_filled(d, px, py, sz);
+        // The corona ring engraves itself as the sun takes the throne
+        if (ss > 0.001f) {
+            d->alpha = base_alpha * ss;
+            draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
+            draw_circle_stroked(d, px, py, sz * 28.0f / 22.0f, 1.0f);
+            d->alpha = base_alpha;
+        }
 
         // Publish for hit-testing (render-side cache; see scene_pointer)
         OrreryViewState *wst = (OrreryViewState *)(uintptr_t)buf;
