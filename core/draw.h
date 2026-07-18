@@ -59,7 +59,7 @@ typedef struct {
 // the GPU pipeline. Up to DRAW_MAX_GLOBES per frame (geocentric dial +
 // heliocentric orrery can coexist during transitions).
 
-#define DRAW_MAX_GLOBES 2
+#define DRAW_MAX_GLOBES 3
 
 typedef struct {
     float cx, cy, radius;       // world coords (transform already applied)
@@ -68,7 +68,12 @@ typedef struct {
     int   overlay;              // GlobeOverlay mode
     float declination;          // current solar declination, degrees
     float obs_lat;              // observer latitude, degrees (latitude ring)
-    float grid_boost;           // graticule alpha multiplier (0 = default 1)
+    float grid_boost;           // graticule alpha multiplier
+    float alpha;                // whole-sphere fade (defaults to view alpha)
+    bool  land;                 // sample the surface texture
+    int   tex_id;               // 0 = Earth land mask, 1 = Moon albedo
+    float day_col[4];           // per-body palette; w > 0 = use these
+    float night_col[4];         // (otherwise the style's Earth colors)
     int   split_index;
 } GlobeCmd;
 
@@ -133,6 +138,8 @@ static inline GlobeCmd *draw_globe_slot(DrawCtx *d, float cx, float cy,
     g->cx = d->tx + cx * d->sx;
     g->cy = d->ty + cy * d->sy;
     g->radius = radius * d->sx;
+    g->alpha = d->alpha;    // globes inherit the view's opacity
+    g->land = true;
     g->split_index = d->num_indices;
     return g;
 }

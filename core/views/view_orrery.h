@@ -209,6 +209,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         d->alpha = base_alpha * geo_a;
         draw_set_color(d, dc_scale(s->sunrise_lit, 0.8f));
         draw_circle_stroked(d, 0, dial_y, dial_r + 12.0f, 1.0f);
+
+        // Moon aperture rim at 6 o'clock
+        draw_set_color(d, dca(0.45f, 0.44f, 0.42f, 0.5f));
+        draw_circle_stroked(d, 0, -dial_y, 62.0f, 1.0f);
     }
 
     // Helio furniture: axis pin + 24h bezel, riding the globe
@@ -234,6 +238,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
 
         // (The uniform 24h bezel is gone — the surface clock projects its
         // hour marks outward past the limb at their true bearings.)
+
+        // Moon orbit ring (the moon itself is a shared element below)
+        draw_set_color(d, dca(0.6f, 0.58f, 0.54f, 0.20f));
+        draw_circle_stroked(d, ex, ey, earth_r * 1.55f, 1.0f);
     }
 
     // ---- Shared elements: continuous across the morph, never fade ----
@@ -274,6 +282,81 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         wst->glob_x = ex;
         wst->glob_y = ey;
         wst->glob_r = earth_r;
+    }
+
+    // ---- The moon: ONE object across both worldviews ----
+    // Geo endpoint: the 6 o'clock aperture, lit in the phase frame (what
+    // you see from here). Helio endpoint: on its orbit at the true
+    // elongation, lit by the same sun as Earth (why you see it). The
+    // morph tweens position, size, and the light vector itself.
+    {
+        double ph = globe_moon_phase(tv->jd_current
+                                     + tv->percent_of_day - 0.5);
+        float b = (float)(ph * 2.0 * M_PI);
+
+        // Geo endpoint
+        float gx2 = 0.0f, gy2 = -dial_y, gr2 = 52.0f;
+        float gl2[3] = { sinf(b), 0.0f, -cosf(b) };
+
+        // Helio endpoint: elongation from the sun direction
+        float hx2 = ex, hy2 = ey, hr2 = 22.0f;
+        float hl2[3] = { light[0], light[1], light[2] };
+        float edx = 0, edy = -1;   // direction moon -> earth, screen
+        float lm = sqrtf(light[0] * light[0] + light[1] * light[1]);
+        if (lm > 1e-4f) {
+            float lx2 = light[0] / lm, ly2 = light[1] / lm;
+            float mdx = lx2 * cosf(b) - ly2 * sinf(b);
+            float mdy = lx2 * sinf(b) + ly2 * cosf(b);
+            float morb = earth_r * 1.55f;
+            hx2 = ex + mdx * morb;
+            hy2 = ey + mdy * morb;
+            edx = -mdx;
+            edy = -mdy;
+        }
+
+        float mmx = gx2 * (1 - m) + hx2 * m;
+        float mmy = gy2 * (1 - m) + hy2 * m;
+        float mmr = gr2 * (1 - m) + hr2 * m;
+        // Light blend WITHOUT the shortest-path sign flip: the two frames
+        // (phase-view vs orbital sun) can be arbitrarily far apart, and
+        // the flip hands the moon a negated sun for half of every orbit.
+        float ml[3];
+        float mn = 0;
+        for (int i = 0; i < 3; i++) {
+            ml[i] = gl2[i] * (1 - m) + hl2[i] * m;
+            mn += ml[i] * ml[i];
+        }
+        mn = sqrtf(mn);
+        if (mn > 1e-3f) {
+            for (int i = 0; i < 3; i++) ml[i] /= mn;
+        } else {
+            memcpy(ml, m > 0.5f ? hl2 : gl2, sizeof(ml));
+        }
+
+        GlobeCmd *gm = draw_globe_slot(d, mmx, mmy, mmr);
+        if (gm) {
+            // Tidal locking: geo shows the near side (lon 0 centered,
+            // north up); helio looks down the lunar pole with the
+            // near-side meridian aimed at Earth, turning as it orbits.
+            float rot_geo[16], rot_helio[16];
+            globe_rotation(0, 0, rot_geo);
+            memset(rot_helio, 0, sizeof(rot_helio));
+            // rows: (edx,edy,0), (edy,-edx,0), (0,0,1) — det -1 display
+            rot_helio[0] = edx;  rot_helio[4] = edy;
+            rot_helio[1] = edy;  rot_helio[5] = -edx;
+            rot_helio[10] = 1.0f;
+            rot_helio[15] = 1.0f;
+            globe_rot_slerp(rot_geo, rot_helio, m, gm->rot);
+            memcpy(gm->light, ml, sizeof(ml));
+            gm->land = true;      // sample the lunar albedo
+            gm->tex_id = 1;
+            gm->grid_boost = 0.0f;
+            gm->obs_lat = 999.0f;
+            gm->day_col[0] = 0.58f; gm->day_col[1] = 0.55f;
+            gm->day_col[2] = 0.49f; gm->day_col[3] = 1.0f;
+            gm->night_col[0] = 0.075f; gm->night_col[1] = 0.07f;
+            gm->night_col[2] = 0.09f;  gm->night_col[3] = 1.0f;
+        }
     }
 
     // City marker ("you are here") + sky-dome. At m=0 the city projects

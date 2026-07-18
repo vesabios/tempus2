@@ -66,6 +66,8 @@ static sg_buffer       g_globe_vbuf;
 static sg_buffer       g_globe_ibuf;
 static sg_image        g_land_img;
 static sg_view         g_land_view;
+static sg_image        g_moon_img;
+static sg_view         g_moon_view;
 static sg_sampler      g_land_sampler;
 
 typedef struct {
@@ -83,6 +85,7 @@ typedef struct {
     float axis[4];      // earth rotation axis, view frame
     float sunj[4];      // sun re-declined to june solstice
     float sund[4];      // sun re-declined to december solstice
+    float params[4];    // x = land mask on, y = whole-sphere alpha
 } GlobeFsUniforms;
 
 // Dev harness: TEMPUS_SHOT=<path> renders N frames, dumps a PNG, exits.
@@ -560,6 +563,24 @@ static void init(void) {
                 .texture.image = g_land_img,
             });
         }
+        // Moon albedo (LROC WAC mosaic, NASA public domain)
+        int mw, mh, mn;
+        unsigned char *mdata = stbi_load("assets/moon_mask.png", &mw, &mh, &mn, 1);
+        if (!mdata)
+            mdata = stbi_load("../assets/moon_mask.png", &mw, &mh, &mn, 1);
+        if (mdata) {
+            g_moon_img = sg_make_image(&(sg_image_desc){
+                .width = mw,
+                .height = mh,
+                .pixel_format = SG_PIXELFORMAT_R8,
+                .data.mip_levels[0] = { .ptr = mdata, .size = (size_t)(mw * mh) },
+            });
+            stbi_image_free(mdata);
+            g_moon_view = sg_make_view(&(sg_view_desc){
+                .texture.image = g_moon_img,
+            });
+        }
+
         g_land_sampler = sg_make_sampler(&(sg_sampler_desc){
             .min_filter = SG_FILTER_LINEAR,
             .mag_filter = SG_FILTER_LINEAR,
@@ -624,6 +645,7 @@ static void init(void) {
                         [5] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_axis" },
                         [6] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_sunj" },
                         [7] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_sund" },
+                        [8] = { .type = SG_UNIFORMTYPE_FLOAT4, .glsl_name = "u_params" },
                     },
                 },
             },
@@ -768,9 +790,18 @@ static void frame(void) {
             memcpy(fsu.light, gc->light, sizeof(float) * 3);
             fsu.light[3] = 0;
             const RenderStyle *st = &g_scene.style;
-            memcpy(fsu.day,   &st->globe_light,      sizeof(float) * 4);
-            memcpy(fsu.night, &st->globe_shadow,     sizeof(float) * 4);
+            if (gc->day_col[3] > 0) {   // per-body palette (e.g. the moon)
+                memcpy(fsu.day,   gc->day_col,   sizeof(float) * 4);
+                memcpy(fsu.night, gc->night_col, sizeof(float) * 4);
+            } else {
+                memcpy(fsu.day,   &st->globe_light,  sizeof(float) * 4);
+                memcpy(fsu.night, &st->globe_shadow, sizeof(float) * 4);
+            }
             memcpy(fsu.grid,  &st->globe_grid,       sizeof(float) * 4);
+            fsu.params[0] = gc->land ? 1.0f : 0.0f;
+            fsu.params[1] = gc->alpha;
+            fsu.params[2] = (float)gc->tex_id;
+            fsu.params[3] = 0;
             fsu.mode[0] = (float)gc->overlay;
             fsu.mode[1] = gc->declination * (float)M_PI / 180.0f;
             fsu.mode[2] = gc->obs_lat;   // degrees
@@ -788,7 +819,8 @@ static void frame(void) {
             sg_apply_bindings(&(sg_bindings){
                 .vertex_buffers[0] = g_globe_vbuf,
                 .index_buffer = g_globe_ibuf,
-                .views[0] = g_land_view,
+                .views[0] = (gc->tex_id == 1 && g_moon_view.id)
+                          ? g_moon_view : g_land_view,
                 .samplers[0] = g_land_sampler,
             });
             sg_apply_uniforms(0, &SG_RANGE(vsu));

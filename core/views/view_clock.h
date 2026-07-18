@@ -57,9 +57,15 @@ static void clock_render(const void *buf, DrawCtx *d, const Tempus *t, const Ren
     float mcy = s->sunrise_dial_offset;
     float mrad = s->sunrise_dial_radius + 16.0f;
 
-    // Hour numbers (12 skipped — the planet is the 12)
+    // Moonphase aperture at 6 — diametrically opposite the earth
+    float moon_y = -s->sunrise_dial_offset;
+    float moon_r = 52.0f;
+
+    // Hour numbers (12 and 6 skipped — the planet is the 12, the moon
+    // is the 6)
     draw_set_color(d, s->clock_lines_strong);
     for (int i = 1; i < 12; i++) {
+        if (i == 6) continue;
         float a = (float)i / 12.0f;
         float px, py;
         clock__fc(a, 225.0f, &px, &py);
@@ -68,24 +74,35 @@ static void clock_render(const void *buf, DrawCtx *d, const Tempus *t, const Ren
         draw_text_centered(d, FONT_clock, px, py, num);
     }
 
-    // Tick marks, clipped at the globe margin
+    // Tick marks, clipped at both bodies' margins
+    float mask_cy[2] = { mcy, moon_y };
+    float mask_r[2]  = { mrad, moon_r + 14.0f };
     for (int i = 0; i < 60; i++) {
         float a = (float)i / 60.0f;
         float outer = 300.0f;
         float inner = (i % 5 == 0) ? 250.0f : 270.0f;
         float ux = sinf(a * 2.0f * (float)M_PI);
         float uy = -cosf(a * 2.0f * (float)M_PI);
-        // Ray s*u vs disc centered (0, mcy): clip the inner end outward
-        float uc = uy * mcy;
-        float disc = uc * uc - (mcy * mcy - mrad * mrad);
-        if (disc > 0) {
-            float sb = uc + sqrtf(disc);
-            if (sb > inner) inner = sb;
-            if (inner >= outer) continue;   // tick fully under the globe
+        bool covered = false;
+        for (int k = 0; k < 2 && !covered; k++) {
+            // Ray s*u vs disc centered (0, cy): clip the inner end outward
+            float uc = uy * mask_cy[k];
+            float disc = uc * uc - (mask_cy[k] * mask_cy[k] - mask_r[k] * mask_r[k]);
+            if (disc > 0) {
+                float sb = uc + sqrtf(disc);
+                if (sb > inner) inner = sb;
+                if (inner >= outer) covered = true;
+            }
         }
+        if (covered) continue;
         draw_set_color(d, (i % 5 == 0) ? s->clock_lines_strong : s->clock_lines);
         draw_line_thin(d, ux * outer, uy * outer, ux * inner, uy * inner);
     }
+
+    // (The moon itself is rendered by the orrery view — one object that
+    // morphs between the 6 o'clock aperture and its heliocentric orbit.
+    // This view only reserves the aperture space: numeral 6 skipped and
+    // ticks clipped above.)
 
     // Hour hand
     {

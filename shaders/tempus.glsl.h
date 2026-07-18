@@ -60,6 +60,7 @@ static const char *globe_fs_src =
     "uniform vec4 u_axis;\n"      // earth rotation axis, view frame
     "uniform vec4 u_sunj;\n"      // sun if it were june solstice
     "uniform vec4 u_sund;\n"      // sun if it were december solstice
+    "uniform vec4 u_params;\n"    // x = land mask on, y = whole-sphere alpha
     "uniform sampler2D u_land;\n" // equirectangular landmass mask
     "out vec4 frag_color;\n"
     "float hairline(float d, float scale) {\n"
@@ -103,8 +104,14 @@ static const char *globe_fs_src =
     "    // of the surface albedo so day/night shading applies naturally\n"
     "    float lon_r = atan(ne.y, ne.x);\n"
     "    vec2 luv = vec2(lon_r / 6.2831853 + 0.5, 0.5 - lat_r / 3.14159265);\n"
-    "    float land = texture(u_land, luv).r;\n"
-    "    col *= vec3(1.0) + land * vec3(0.40, 0.14, 0.12);\n"
+    "    float land = texture(u_land, luv).r * u_params.x;\n"
+    "    if (u_params.z > 0.5) {\n"
+    "        // Albedo body (the moon): continuous brightness modulation\n"
+    "        col *= 0.45 + 0.85 * land;\n"
+    "    } else {\n"
+    "        // Earth: landmass lift over the ocean tone\n"
+    "        col *= vec3(1.0) + land * vec3(0.40, 0.14, 0.12);\n"
+    "    }\n"
     "    // Limb shading for sphericity\n"
     "    col *= 0.68 + 0.32 * max(nv.z, 0.0);\n"
     "    float limbfade = smoothstep(0.02, 0.3, nv.z);\n"
@@ -154,7 +161,7 @@ static const char *globe_fs_src =
     "              oring * limbfade * mix(0.25, 0.55, dayness));\n"
     "    // Silhouette antialias via view-normal z\n"
     "    float alpha = smoothstep(0.0, fwidth(nv.z) * 1.5, nv.z);\n"
-    "    frag_color = vec4(col, alpha);\n"
+    "    frag_color = vec4(col, alpha * u_params.y);\n"
     "}\n";
 
 static const char *fs_src =

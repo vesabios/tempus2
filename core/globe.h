@@ -253,6 +253,15 @@ static inline void globe_orrery(double orbit_angle, double clock_hours,
                                    : (col == 3 && row == 3) ? 1.0f : 0.0f;
 }
 
+// Lunar phase from the synodic month: 0 = new, 0.5 = full, waxing
+// between. Accurate to well under a day across decades.
+static inline double globe_moon_phase(double jd) {
+    const double synodic = 29.530588853;
+    double age = fmod(jd - 2451550.26, synodic);   // epoch: 2000-01-06 new moon
+    if (age < 0) age += synodic;
+    return age / synodic;
+}
+
 // Sun direction in the view frame from SPA azimuth/zenith (degrees).
 // From-space frame: east lights the globe from screen-right, north from
 // screen-top. Solar noon (az 180, sun due south) lights it from
