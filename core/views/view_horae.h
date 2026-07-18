@@ -331,23 +331,28 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
 
         // Full archaic: no civil ticks, no arabic — the TEMPORAL cells
-        // themselves carry roman numerals, I through XII twice, riding
-        // the turning face. Day hours speak up; night hours murmur.
+        // carry roman numerals, I through XII twice, ENGRAVED ALONG
+        // the turning face like dial lettering (waist-centered, flip-
+        // compensated). Day hours speak up; night hours murmur.
         {
-            int cw2 = _font_compat[FONT_clock].weight;
+            float fsz = _font_compat[FONT_clock].size;
             for (int h = 0; h < 24; h++) {
                 float pm = rise + (u[h] + u[h + 1]) * 0.5f + rot;
-                float a = pm * 2.0f * (float)M_PI;
-                float rn = HORAE_CLOCK_R - HORAE_CLOCK_W - 20.0f;
-                float rx = sinf(a) * rn, ry = -cosf(a) * rn;
-                const char *nb = horae__roman[h % 12];
-                float nsz2 = h < 12 ? 13.0f : 11.0f;
-                float tw2 = sdf_measure_width(cw2, nb) * nsz2;
+                float ang = pm * 2.0f * (float)M_PI;
+                float na2 = fmodf(ang, 2.0f * (float)M_PI);
+                if (na2 < 0) na2 += 2.0f * (float)M_PI;
+                bool lflip = (na2 > (float)M_PI * 0.5f
+                              && na2 < (float)M_PI * 1.5f);
+                float nsz2 = h < 12 ? 15.0f : 12.5f;
+                float mid = HORAE_CLOCK_R - HORAE_CLOCK_W - 16.0f;
+                float lr = mid - nsz2 * 0.5f
+                         + nsz2 * (lflip ? 0.51f : 0.37f);
                 draw_set_color(d, h < 12
-                    ? dca(0.72f, 0.70f, 0.64f, 0.80f)
+                    ? dca(0.72f, 0.70f, 0.64f, 0.85f)
                     : dca(0.55f, 0.53f, 0.49f, 0.55f));
-                draw_text_ex(d, cw2, nsz2, rx - tw2 * 0.5f,
-                             ry - nsz2 * 0.5f, nb);
+                draw_text_curved(d, FONT_clock, 0, 0, lr, ang,
+                                 horae__roman[h % 12], 0.25f,
+                                 nsz2 / fsz);
             }
         }
 
@@ -491,15 +496,6 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw__tri(d, vb, vb + 1, vb + 2);
         draw__tri(d, vb, vb + 2, vb + 3);
 
-        double real_secs = s->sweep_seconds
-            ? ((double)tv->secs + tv->frac_secs) / 60.0
-            : (double)tv->secs / 60.0;
-        float sa2 = (float)(real_secs * 2.0 * M_PI);
-        draw_set_color(d, s->seconds_color);
-        draw_line(d, sinf(sa2) * 46.0f, -cosf(sa2) * 46.0f,
-                  sinf(sa2) * (HORAE_CLOCK_R - HORAE_CLOCK_W - 10.0f),
-                  -cosf(sa2) * (HORAE_CLOCK_R - HORAE_CLOCK_W - 10.0f),
-                  1.5f);
     }
 
     // ---- The reading, written outside the ring at the contact ----
