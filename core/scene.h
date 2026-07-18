@@ -242,6 +242,8 @@ static inline void scene_init_views(Scene *sc, const Tempus *t) {
 
 static inline void scene__advance_override_days(Tempus *t, double dv,
                                                 bool keep_time);
+static inline void scene__advance_override_weeks(CalendarViewState *c,
+                                                 Tempus *t, double dv);
 
 static inline void scene_update(Scene *sc, Tempus *t, double dt) {
     tween_update_all(&sc->tweens, dt);
@@ -260,8 +262,11 @@ static inline void scene_update(Scene *sc, Tempus *t, double dt) {
             if (c->fling_vel > 60.0) c->fling_vel = 60.0;
             if (c->fling_vel < -60.0) c->fling_vel = -60.0;
         } else if (c->fling_vel != 0.0 && t->time_override) {
-            scene__advance_override_days(t, c->fling_vel * dt,
-                                         c->fling_keep_time);
+            if (c->fling_week)
+                scene__advance_override_weeks(c, t, c->fling_vel * dt);
+            else
+                scene__advance_override_days(t, c->fling_vel * dt,
+                                             c->fling_keep_time);
             c->fling_vel *= exp2(-dt / 0.7);   // half-life ~0.7s
             if (fabs(c->fling_vel) < 0.05) c->fling_vel = 0.0;
         } else {
@@ -369,6 +374,22 @@ static inline void scene__advance_override_days(Tempus *t, double dv,
         t->override_day_pct = v - floor(v);
     }
     t->solar_dirty = true;
+}
+
+// Week-quantized advance — HORAE's band: days accumulate silently and
+// the date steps in whole-week clicks, time-of-day preserved. The
+// station is week-centric; its wheel speaks in weeks.
+static inline void scene__advance_override_weeks(CalendarViewState *c,
+                                                 Tempus *t, double dv) {
+    c->week_accum += dv;
+    while (c->week_accum >= 7.0) {
+        scene__advance_override_days(t, 7.0, true);
+        c->week_accum -= 7.0;
+    }
+    while (c->week_accum <= -7.0) {
+        scene__advance_override_days(t, -7.0, true);
+        c->week_accum += 7.0;
+    }
 }
 
 // Set the override date from a wheel angle (pct 0 = yule at screen-top),
@@ -502,6 +523,8 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 // scrubs fractionally
                 c->fling_keep_time = sc->horae_blend > 0.5
                                   || sc->orbis_blend > 0.5;
+                c->fling_week = sc->horae_blend > 0.5;
+                c->week_accum = 0.0;
                 scene__begin_override(t);
             }
         }
@@ -542,7 +565,10 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 dv = -(double)along / (2.0 * M_PI * (double)denom)
                    * t->total_days;
             }
-            scene__advance_override_days(t, dv, c->fling_keep_time);
+            if (c->fling_week)
+                scene__advance_override_weeks(c, t, dv);
+            else
+                scene__advance_override_days(t, dv, c->fling_keep_time);
             c->drag_accum += dv;
         }
         c->last_wx = wx;
