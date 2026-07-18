@@ -149,9 +149,16 @@ static inline double tempus_wheel_scale(double system_blend) {
 // the time control survives every worldview. Radius shared by the
 // calendar renderer and the pointer hit-tests.
 #define TEMPUS_SKY_WHEEL_R 610.0
+// At the full system the wheel leaves the planet rings entirely and
+// glides out to the MOAT — the band of negative space between Pluto's
+// ring and the zodiac dial — becoming the machine's outer time bezel.
+// Earth's ORBIT stays at its own radius (the orrery keys its geometry
+// to base * tempus_wheel_scale, not to this bezel).
+#define TEMPUS_SYS_WHEEL_R 795.0
 static inline double tempus_wheel_radius(double base, double system_blend,
                                          double sky_blend) {
     double r = base * tempus_wheel_scale(system_blend);
+    r += (TEMPUS_SYS_WHEEL_R - r) * system_blend;
     return r + (TEMPUS_SKY_WHEEL_R - r) * sky_blend;
 }
 

@@ -271,7 +271,14 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     float mw = ms * (1.0f - mb);
     float sw = ms * mb + (1.0f - ms) * fin;
     float wheel_R = s->calendar_base_radius
-                  * (float)tempus_wheel_scale(1.0);   // MACHINA station
+                  * (float)tempus_wheel_scale(1.0);   // Earth-orbit const
+                                                      // (machine endpoints)
+    // The BEZEL is the visible calendar wheel — it lives in the moat at
+    // the full system and glides to 610 as the sky's rim; the window
+    // unfurls from wherever it actually is
+    float bez_R = (float)tempus_wheel_radius(
+        s->calendar_base_radius, st->orr ? st->orr->sys : 1.0,
+        st->blend);
 
     // ---- The night's windows: dusk, midnight, dawn ----
     // No animation: three FIXED views answer the night's questions.
@@ -512,7 +519,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // The calendar wheel settles into the midnight horizon circle at
     // half radius; the dusk and dawn lobes carry no hairline.
     {
-        float rim_r = wheel_R + (SKY_HOR - wheel_R) * mb;
+        float rim_r = bez_R + (SKY_HOR - bez_R) * mb;
         d->alpha = base_alpha * (float)tempus_smoothstep(0.05, 0.5,
                                                          st->blend);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.55f));
