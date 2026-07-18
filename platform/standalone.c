@@ -107,12 +107,13 @@ typedef enum {
     WV_TELLVS,           // heliocentric earth
     WV_MACHINA,          // full system + zodiac + aspect web
     WV_CAELVM,           // the local sky, first person
+    WV_ORBIS,            // the world chart: choose your place on earth
     WV_COUNT
 } Worldview;
 
 static const char *g_worldview_names[WV_COUNT] = {
     "HOROLOGIVM", "HORAE", "ROTAE", "SAECVLVM",
-    "TELLVS", "MACHINA MVNDI", "CAELVM",
+    "TELLVS", "MACHINA MVNDI", "CAELVM", "ORBIS",
 };
 
 static Worldview g_worldview = WV_HOROLOGIVM;
@@ -135,44 +136,79 @@ static float sys_camera_scale(void) {
 // Fly the instrument to a worldview station: geo (0,0,0), heliocentric
 // earth (1,1,0), full system (1,0,1). All three parameters tween together
 // so any station reaches any other in one continuous camera move.
-static void fly_worldview(double m, double z, double s, double dur) {
+static void fly_worldview(double m, double z, double s, double dur,
+                          double delay) {
     tween_cancel_target(&g_scene.tweens, &g_scene.helio_blend);
-    tween_start(&g_scene.tweens, &g_scene.helio_blend,
-                g_scene.helio_blend, m, dur, EASE_IN_OUT_CUBIC);
+    tween_start_delayed(&g_scene.tweens, &g_scene.helio_blend,
+                        g_scene.helio_blend, m, delay, dur,
+                        EASE_IN_OUT_CUBIC);
     tween_cancel_target(&g_scene.tweens, &g_scene.calendar_state.zoom);
     g_scene.calendar_state.target_zoom = z;
-    tween_start(&g_scene.tweens, &g_scene.calendar_state.zoom,
-                g_scene.calendar_state.zoom, z, dur, EASE_IN_OUT_CUBIC);
+    tween_start_delayed(&g_scene.tweens, &g_scene.calendar_state.zoom,
+                        g_scene.calendar_state.zoom, z, delay, dur,
+                        EASE_IN_OUT_CUBIC);
     tween_cancel_target(&g_scene.tweens, &g_scene.system_blend);
-    tween_start(&g_scene.tweens, &g_scene.system_blend,
-                g_scene.system_blend, s, dur, EASE_IN_OUT_CUBIC);
+    tween_start_delayed(&g_scene.tweens, &g_scene.system_blend,
+                        g_scene.system_blend, s, delay, dur,
+                        EASE_IN_OUT_CUBIC);
 }
+
+static void config_save(const TempusConfig *cfg);
 
 static void set_worldview(Worldview wv) {
     if (wv == g_worldview) return;
+    // Leaving the world chart commits the chosen location to disk
+    if (g_worldview == WV_ORBIS)
+        config_save(&g_tempus.config);
     g_worldview = wv;
+
+    // CAELVM lies beyond MACHINA on the line of stations, and the sky
+    // morph's machine-side endpoints only exist at machina geometry —
+    // so any flight between the sky and a distant station must pass
+    // THROUGH MACHINA. Departing: the sky folds back into the orrery
+    // first, then the machine flies on (delayed). Arriving from afar:
+    // the machine reaches MACHINA first, then the sky rises. Between
+    // CAELVM and MACHINA themselves nothing needs sequencing.
+    bool at_machina = g_scene.system_blend > 0.99
+                   && g_scene.helio_blend > 0.99
+                   && g_scene.calendar_state.zoom < 0.01;
+    bool depart_sky = g_scene.sky_blend > 0.01
+                   && wv != WV_CAELVM && wv != WV_MACHINA;
+    bool arrive_sky = wv == WV_CAELVM && !at_machina;
+    double fly_delay = depart_sky ? 2.2 : 0.0;
+    double sky_delay = arrive_sky ? 2.8 : 0.0;
+
     tween_cancel_target(&g_scene.tweens, &g_scene.sky_blend);
-    tween_start(&g_scene.tweens, &g_scene.sky_blend, g_scene.sky_blend,
-                wv == WV_CAELVM ? 1.0 : 0.0, 3.0, EASE_IN_OUT_CUBIC);
+    tween_start_delayed(&g_scene.tweens, &g_scene.sky_blend,
+                        g_scene.sky_blend, wv == WV_CAELVM ? 1.0 : 0.0,
+                        sky_delay, 3.0, EASE_IN_OUT_CUBIC);
     tween_cancel_target(&g_scene.tweens, &g_scene.horae_blend);
-    tween_start(&g_scene.tweens, &g_scene.horae_blend, g_scene.horae_blend,
-                wv == WV_HORAE ? 1.0 : 0.0, 3.0, EASE_IN_OUT_CUBIC);
+    tween_start_delayed(&g_scene.tweens, &g_scene.horae_blend,
+                        g_scene.horae_blend, wv == WV_HORAE ? 1.0 : 0.0,
+                        fly_delay, 3.0, EASE_IN_OUT_CUBIC);
     tween_cancel_target(&g_scene.tweens, &g_scene.rotae_blend);
-    tween_start(&g_scene.tweens, &g_scene.rotae_blend, g_scene.rotae_blend,
-                wv == WV_ROTAE ? 1.0 : 0.0, 3.0, EASE_IN_OUT_CUBIC);
+    tween_start_delayed(&g_scene.tweens, &g_scene.rotae_blend,
+                        g_scene.rotae_blend, wv == WV_ROTAE ? 1.0 : 0.0,
+                        fly_delay, 3.0, EASE_IN_OUT_CUBIC);
     tween_cancel_target(&g_scene.tweens, &g_scene.saec_blend);
-    tween_start(&g_scene.tweens, &g_scene.saec_blend, g_scene.saec_blend,
-                wv == WV_SAECVLVM ? 1.0 : 0.0, 3.0, EASE_IN_OUT_CUBIC);
+    tween_start_delayed(&g_scene.tweens, &g_scene.saec_blend,
+                        g_scene.saec_blend, wv == WV_SAECVLVM ? 1.0 : 0.0,
+                        fly_delay, 3.0, EASE_IN_OUT_CUBIC);
+    tween_cancel_target(&g_scene.tweens, &g_scene.orbis_blend);
+    tween_start_delayed(&g_scene.tweens, &g_scene.orbis_blend,
+                        g_scene.orbis_blend, wv == WV_ORBIS ? 1.0 : 0.0,
+                        fly_delay, 3.0, EASE_IN_OUT_CUBIC);
     switch (wv) {
-        case WV_HOROLOGIVM: fly_worldview(0.0, 0.0, 0.0, 3.5); break;
-        case WV_HORAE:      fly_worldview(0.0, 0.0, 0.0, 3.5); break;
-        case WV_ROTAE:      fly_worldview(0.0, 0.0, 0.0, 3.5); break;
-        case WV_SAECVLVM:   fly_worldview(0.0, 0.0, 0.0, 3.5); break;
-        case WV_TELLVS:     fly_worldview(1.0, 1.0, 0.0, 3.5); break;
-        case WV_MACHINA:    fly_worldview(1.0, 0.0, 1.0, 3.5); break;
+        case WV_HOROLOGIVM: fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
+        case WV_HORAE:      fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
+        case WV_ROTAE:      fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
+        case WV_SAECVLVM:   fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
+        case WV_TELLVS:     fly_worldview(1.0, 1.0, 0.0, 3.5, fly_delay); break;
+        case WV_MACHINA:    fly_worldview(1.0, 0.0, 1.0, 3.5, 0.0); break;
         // The machine parks at MACHINA under the fade, so leaving the
         // sky always resumes from the adjacent station
-        case WV_CAELVM:     fly_worldview(1.0, 0.0, 1.0, 3.5); break;
+        case WV_CAELVM:     fly_worldview(1.0, 0.0, 1.0, 3.5, 0.0); break;
+        case WV_ORBIS:      fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
         default: break;
     }
 }
@@ -191,6 +227,7 @@ static void apply_view_mode(void) {
     scene_add_layer(&g_scene, VIEW_HORAE);
     scene_add_layer(&g_scene, VIEW_ROTAE);
     scene_add_layer(&g_scene, VIEW_SAEC);
+    scene_add_layer(&g_scene, VIEW_ORBIS);
 }
 
 static void set_view_opacities(void) {
@@ -203,10 +240,12 @@ static void set_view_opacities(void) {
     double horae = g_scene.horae_blend;
     double rotae = g_scene.rotae_blend;
     double saec = g_scene.saec_blend;
+    double orbis = g_scene.orbis_blend;
     double fade = (1.0 - tempus_smoothstep(0.0, 0.55, sky))
                 * (1.0 - tempus_smoothstep(0.0, 0.55, horae))
                 * (1.0 - tempus_smoothstep(0.0, 0.55, rotae))
-                * (1.0 - tempus_smoothstep(0.0, 0.55, saec));
+                * (1.0 - tempus_smoothstep(0.0, 0.55, saec))
+                * (1.0 - tempus_smoothstep(0.0, 0.55, orbis));
     // The calendar wheel survives into the sky as its bezel — the time
     // control rides along to every worldview
     g_scene.views[VIEW_CALENDAR].opacity = 1.0;
@@ -222,6 +261,7 @@ static void set_view_opacities(void) {
     g_scene.views[VIEW_HORAE].opacity = horae;
     g_scene.views[VIEW_ROTAE].opacity = rotae;
     g_scene.views[VIEW_SAEC].opacity = saec;
+    g_scene.views[VIEW_ORBIS].opacity = orbis;
 }
 
 // Pacing: vsync drives the frame callback, but update/rebuild work only
@@ -551,6 +591,7 @@ static void init(void) {
     scene_register_view(&g_scene, VIEW_HORAE,     &horae_vtable);
     scene_register_view(&g_scene, VIEW_ROTAE,     &rotae_vtable);
     scene_register_view(&g_scene, VIEW_SAEC,      &saec_vtable);
+    scene_register_view(&g_scene, VIEW_ORBIS,     &orbis_vtable);
     scene_init_views(&g_scene, &g_tempus);
 
     if (g_cfg_sweep_override >= 0)
@@ -582,6 +623,10 @@ static void init(void) {
     if (getenv("TEMPUS_HORAE")) {
         g_worldview = WV_HORAE;
         g_scene.horae_blend = 1.0;
+    }
+    if (getenv("TEMPUS_ORBIS")) {
+        g_worldview = WV_ORBIS;
+        g_scene.orbis_blend = 1.0;
     }
     if (getenv("TEMPUS_SKY")) {
         g_worldview = WV_CAELVM;
