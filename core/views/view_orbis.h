@@ -20,6 +20,7 @@
 
 #include <stdio.h>
 #include "../view.h"
+#include "../../assets/cities.h"
 
 struct OrbisViewState {
     TimeView tv;  // must be first field
@@ -28,6 +29,18 @@ struct OrbisViewState {
 
     bool  dragging;   // turning the globe under the reticle
     float last_wx, last_wy;
+
+    // The orrery's state — its published globe (position, radius, live
+    // rotation) is read at render time so the pips ride the same object
+    // with zero lag, immune to update pacing
+    const OrreryViewState *orr;
+
+    // Nearest city to the configured location (update-side scan)
+    int    near_city;
+    double near_km;
+
+    // City unit vectors (earth frame), precomputed at init
+    float city_vec[CITY_NUM][3];
 };
 
 #endif // VIEW_ORBIS_H
@@ -39,6 +52,14 @@ struct OrbisViewState {
 static void orbis_init(void *buf, const Tempus *t, const RenderStyle *s) {
     OrbisViewState *st = (OrbisViewState *)buf;
     st->opacity = 1.0;
+    st->near_city = -1;
+    for (int i = 0; i < CITY_NUM; i++) {
+        double la = city_pts[i].lat * 0.01 * M_PI / 180.0;
+        double lo = city_pts[i].lon * 0.01 * M_PI / 180.0;
+        st->city_vec[i][0] = (float)(cos(la) * cos(lo));
+        st->city_vec[i][1] = (float)(cos(la) * sin(lo));
+        st->city_vec[i][2] = (float)(sin(la));
+    }
     (void)t; (void)s;
 }
 
@@ -52,15 +73,63 @@ static void orbis_exit(void *buf, const Tempus *t, Scene *sc) {
 
 static void orbis_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     OrbisViewState *st = (OrbisViewState *)buf;
-    (void)t; (void)dt;
+    (void)dt;
     st->blend = sc->orbis_blend;
+    st->orr = &sc->orrery_state;
+
+    // Nearest city: max dot product against the observer's unit vector.
+    // Ties in identical spots resolve to the larger city (the table is
+    // population-descending).
+    if (st->blend > 0.001) {
+        double la = t->config.latitude * M_PI / 180.0;
+        double lo = t->config.longitude * M_PI / 180.0;
+        float o0 = (float)(cos(la) * cos(lo));
+        float o1 = (float)(cos(la) * sin(lo));
+        float o2 = (float)(sin(la));
+        int best = 0;
+        float bd = -2.0f;
+        for (int i = 0; i < CITY_NUM; i++) {
+            const float *v = st->city_vec[i];
+            float dd = v[0] * o0 + v[1] * o1 + v[2] * o2;
+            if (dd > bd) { bd = dd; best = i; }
+        }
+        if (bd > 1.0f) bd = 1.0f;
+        st->near_city = best;
+        st->near_km = acos((double)bd) * 6371.0;
+    }
 }
 
 static void orbis_render(const void *buf, DrawCtx *d, const Tempus *t,
                          const RenderStyle *s) {
     const OrbisViewState *st = (const OrbisViewState *)buf;
     float base_alpha = d->alpha;
-    (void)st;
+
+    // ---- City pips: the aiming marks ----
+    // Every charted city on the front hemisphere, riding the live globe;
+    // the nearest one is ringed. Aim, then fine-drag it under the reticle.
+    if (st->orr && st->orr->glob_r > 1.0f) {
+        float gx = st->orr->glob_x, gy = st->orr->glob_y;
+        float gr = st->orr->glob_r;
+        const float *grot = st->orr->glob_rot;
+        draw_set_color(d, dca(0.80f, 0.76f, 0.68f, 0.35f));
+        for (int i = 0; i < CITY_NUM; i++) {
+            float v[3];
+            globe_mat_mul_vec(grot, st->city_vec[i], v);
+            if (v[2] < 0.05f) continue;
+            float x = gx + v[0] * gr;
+            float y = gy + v[1] * gr;
+            draw_rect_filled(d, x - 1.2f, y - 1.2f, x + 1.2f, y + 1.2f);
+        }
+        if (st->near_city >= 0) {
+            float v[3];
+            globe_mat_mul_vec(grot, st->city_vec[st->near_city], v);
+            if (v[2] > 0.05f) {
+                draw_set_color(d, dc_scale(s->sunrise_handle, 1.1f));
+                draw_circle_stroked(d, gx + v[0] * gr,
+                                    gy + v[1] * gr, 6.5f, 1.2f);
+            }
+        }
+    }
 
     // ---- The reticle: you are here, always, at center ----
     // The globe underneath is oriented observer-face-on, so the point
@@ -87,8 +156,23 @@ static void orbis_render(const void *buf, DrawCtx *d, const Tempus *t,
                  fabs(lo), lo >= 0 ? " E" : " W");
         draw_set_color(d, dca(0.78f, 0.75f, 0.68f, 0.95f));
         draw_text_centered(d, FONT_month, 0, 52.0f, loc);
-        draw_set_color(d, dca(0.50f, 0.49f, 0.46f, 0.55f));
-        draw_text_centered(d, FONT_date, 0, 84.0f, "LOCVS OBSERVATORIS");
+
+        // The nearest charted city: just the name when you are on it,
+        // name and distance when you are aiming from afar
+        if (st->near_city >= 0) {
+            char cb[64];
+            if (st->near_km < 20.0)
+                snprintf(cb, sizeof(cb), "%s",
+                         city_pts[st->near_city].name);
+            else
+                snprintf(cb, sizeof(cb), "%s  %d KM",
+                         city_pts[st->near_city].name,
+                         (int)(st->near_km + 0.5));
+            draw_set_color(d, dca(0.68f, 0.65f, 0.58f, 0.85f));
+            draw_text_centered(d, FONT_date, 0, 84.0f, cb);
+        }
+        draw_set_color(d, dca(0.50f, 0.49f, 0.46f, 0.45f));
+        draw_text_centered(d, FONT_date, 0, 112.0f, "LOCVS OBSERVATORIS");
     }
 
     d->alpha = base_alpha;

@@ -40,6 +40,7 @@ struct OrreryViewState {
     float bead_hit;         // hit radius
     float glob_x, glob_y;   // globe center, world coords
     float glob_r;           // globe radius (wheel drags exclude the globe)
+    float glob_rot[16];     // live earth->view rotation (ORBIS city pips)
     bool  dragging;
     bool  drag_earth;       // system view: dragging Earth around its orbit
 
@@ -843,6 +844,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         wst->glob_x = ex;
         wst->glob_y = ey;
         wst->glob_r = earth_r;
+        memcpy(wst->glob_rot, rot, sizeof(rot));
     }
 
     // ---- The moon: ONE object across both worldviews ----
