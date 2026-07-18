@@ -425,17 +425,26 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
 
                 bool is_day = h < 12;
                 bool cur = (dd == pd && h == hcur);
-                float r1 = HORAE_RING_IN + (is_day ? 16.0f : 10.0f);
+                float r0 = HORAE_RING_IN + 2.0f;
+                float r1 = HORAE_RING_IN + (is_day ? 12.0f : 8.0f);
                 if (cur) {
                     draw_set_color(d, dc_scale(s->sunrise_handle, 1.15f));
-                    r1 = HORAE_RING_IN + 20.0f;
+                    horae__cell(d, rcx, rcy, r0, HORAE_RING_IN + 15.0f,
+                                q0, q1);
                 } else if (((dd * 24 + h) & 1) == 0) {
-                    draw_set_color(d, dca(0.86f, 0.84f, 0.78f, 0.75f));
+                    draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
+                    horae__cell(d, rcx, rcy, r0, r1, q0, q1);
                 } else {
-                    draw_set_color(d, dca(0.04f, 0.04f, 0.04f, 0.85f));
+                    // Black cells outline in the light so they read
+                    // against the black ground: light underlay, dark
+                    // fill inset a hairline
+                    const float eps = 0.0007f;   // ~1.3 units at r 300
+                    draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
+                    horae__cell(d, rcx, rcy, r0, r1, q0, q1);
+                    draw_set_color(d, dca(0.03f, 0.03f, 0.03f, 0.95f));
+                    horae__cell(d, rcx, rcy, r0 + 1.1f, r1 - 1.1f,
+                                q0 + eps, q1 - eps);
                 }
-                horae__cell(d, rcx, rcy, HORAE_RING_IN + 2.0f, r1,
-                            q0, q1);
             }
         }
 
