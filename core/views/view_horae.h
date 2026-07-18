@@ -108,14 +108,48 @@ static void horae_update(void *buf, const Tempus *t, double dt, Scene *sc) {
 // purple the ramp passes between fire and blue hour is real too —
 // twilight's "purple light". Rich on purpose: this band is the one
 // place the instrument wears the sky at full voice.
+// Keyframes interpolate in OKLab, not RGB — a straight RGB lerp
+// between saturated hues sags through grey-brown mud; the perceptual
+// space keeps every intermediate luminous, which is how the actual sky
+// manages its own gradients.
+static inline float horae__cbrtf(float x) {
+    return x < 0 ? -powf(-x, 1.0f / 3.0f) : powf(x, 1.0f / 3.0f);
+}
+
+static void horae__rgb2oklab(const float rgb[3], float lab[3]) {
+    float r = powf(rgb[0], 2.2f);
+    float g = powf(rgb[1], 2.2f);
+    float b = powf(rgb[2], 2.2f);
+    float l = horae__cbrtf(0.4122214708f * r + 0.5363325363f * g
+                           + 0.0514459929f * b);
+    float m = horae__cbrtf(0.2119034982f * r + 0.6806995451f * g
+                           + 0.1073969566f * b);
+    float sc = horae__cbrtf(0.0883024619f * r + 0.2817188376f * g
+                            + 0.6299787005f * b);
+    lab[0] = 0.2104542553f * l + 0.7936177850f * m - 0.0040720468f * sc;
+    lab[1] = 1.9779984951f * l - 2.4285922050f * m + 0.4505937099f * sc;
+    lab[2] = 0.0259040371f * l + 0.7827717662f * m - 0.8086757660f * sc;
+}
+
+static DrawColor horae__oklab2rgb(const float lab[3]) {
+    float l = lab[0] + 0.3963377774f * lab[1] + 0.2158037573f * lab[2];
+    float m = lab[0] - 0.1055613458f * lab[1] - 0.0638541728f * lab[2];
+    float sc = lab[0] - 0.0894841775f * lab[1] - 1.2914855480f * lab[2];
+    l = l * l * l; m = m * m * m; sc = sc * sc * sc;
+    float r = 4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * sc;
+    float g = -1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * sc;
+    float b = -0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * sc;
+    r = r < 0 ? 0 : powf(r, 1.0f / 2.2f);
+    g = g < 0 ? 0 : powf(g, 1.0f / 2.2f);
+    b = b < 0 ? 0 : powf(b, 1.0f / 2.2f);
+    return dc(fminf(r, 1.0f), fminf(g, 1.0f), fminf(b, 1.0f));
+}
+
 static DrawColor horae__sky(float alt) {
-    static const float k[9][4] = {
+    static const float k[8][4] = {
         {  25.0f, 0.30f, 0.55f, 0.95f },   // azure day
-        {   9.0f, 0.52f, 0.66f, 0.92f },   // pale blue
-        {   4.0f, 0.90f, 0.80f, 0.62f },   // luminous low light — the
-                                           // bright cream the horizon
-                                           // sky really is, never brown
-        {   1.0f, 1.00f, 0.58f, 0.18f },   // vivid gold
+        {   6.0f, 0.62f, 0.72f, 0.92f },   // pale horizon blue
+        {   1.0f, 1.00f, 0.58f, 0.18f },   // golden hour
         {  -2.0f, 0.95f, 0.30f, 0.14f },   // the crossing: fire
         {  -6.0f, 0.22f, 0.24f, 0.60f },   // the blue hour
         { -11.0f, 0.08f, 0.13f, 0.38f },   // nautical blue
@@ -123,15 +157,18 @@ static DrawColor horae__sky(float alt) {
         { -28.0f, 0.015f, 0.02f, 0.075f }, // night
     };
     if (alt >= k[0][0]) return dc(k[0][1], k[0][2], k[0][3]);
-    for (int i = 0; i < 8; i++) {
+    for (int i = 0; i < 7; i++) {
         if (alt >= k[i + 1][0]) {
             float f = (alt - k[i + 1][0]) / (k[i][0] - k[i + 1][0]);
-            return dc(k[i + 1][1] + (k[i][1] - k[i + 1][1]) * f,
-                      k[i + 1][2] + (k[i][2] - k[i + 1][2]) * f,
-                      k[i + 1][3] + (k[i][3] - k[i + 1][3]) * f);
+            float la[3], lb[3], lm[3];
+            horae__rgb2oklab(&k[i][1], la);
+            horae__rgb2oklab(&k[i + 1][1], lb);
+            for (int c = 0; c < 3; c++)
+                lm[c] = lb[c] + (la[c] - lb[c]) * f;
+            return horae__oklab2rgb(lm);
         }
     }
-    return dc(k[8][1], k[8][2], k[8][3]);
+    return dc(k[7][1], k[7][2], k[7][3]);
 }
 
 // Wrap into [-half, half)
@@ -217,37 +254,49 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     // language, the same numeral voice, because that is what this is —
     // a 24-hour clock.
     {
+        // One continuous gradient around the band: per-vertex color,
+        // sampled from the altitude curve, OKLab between keys — the
+        // sky as the sky actually blends
+        {
+            const int N = 192;
+            int pi = -1, po = -1;
+            for (int i = 0; i <= N; i++) {
+                float fp = (float)i / N;
+                float H = (fp - fnoon) * 2.0f * (float)M_PI;
+                float salt = sphi * sdec + cphi * cdec * cosf(H);
+                if (salt > 1.0f) salt = 1.0f;
+                if (salt < -1.0f) salt = -1.0f;
+                DrawColor cc = horae__sky(asinf(salt) / d2r);
+                cc.a = 0.92f;
+                draw_set_color(d, cc);
+
+                float a = fp * 2.0f * (float)M_PI;
+                float sx = sinf(a), sy = -cosf(a);
+                int vi = draw__push_vert(d,
+                    sx * (HORAE_CLOCK_R - HORAE_CLOCK_W),
+                    sy * (HORAE_CLOCK_R - HORAE_CLOCK_W),
+                    d->white_u, d->white_v);
+                int vo = draw__push_vert(d, sx * HORAE_CLOCK_R,
+                                         sy * HORAE_CLOCK_R,
+                                         d->white_u, d->white_v);
+                if (i > 0) {
+                    draw__tri(d, pi, po, vi);
+                    draw__tri(d, po, vo, vi);
+                }
+                pi = vi;
+                po = vo;
+            }
+        }
+
+        // Temporal hour boundaries: light segmentations over the flow
         for (int h = 0; h < 24; h++) {
             float f0 = rise + u[h];
-            float f1 = rise + u[h + 1];
-            bool cur = h == hcur;
-
-            float fm = rise + (u[h] + u[h + 1]) * 0.5f;
-            float H = (fm - fnoon) * 2.0f * (float)M_PI;
-            float salt = sphi * sdec + cphi * cdec * cosf(H);
-            if (salt > 1.0f) salt = 1.0f;
-            if (salt < -1.0f) salt = -1.0f;
-            float sa = asinf(salt) / d2r;
-            DrawColor sc2 = horae__sky(sa);
-            sc2.a = cur ? 1.0f : 0.85f;
-            if (cur) {
-                sc2.r = fminf(1.0f, sc2.r * 1.15f);
-                sc2.g = fminf(1.0f, sc2.g * 1.15f);
-                sc2.b = fminf(1.0f, sc2.b * 1.15f);
-            }
-            draw_set_color(d, sc2);
-            horae__cell(d, 0, 0, HORAE_CLOCK_R - HORAE_CLOCK_W,
-                        HORAE_CLOCK_R, f0, f1);
-
-            // Temporal cell boundary, a hairline break in the band
-            {
-                float ab = (f0 - floorf(f0)) * 2.0f * (float)M_PI;
-                float sx = sinf(ab), sy = -cosf(ab);
-                draw_set_color(d, dca(0.05f, 0.05f, 0.05f, 0.5f));
-                draw_line(d, sx * (HORAE_CLOCK_R - HORAE_CLOCK_W),
-                          sy * (HORAE_CLOCK_R - HORAE_CLOCK_W),
-                          sx * HORAE_CLOCK_R, sy * HORAE_CLOCK_R, 1.0f);
-            }
+            float ab = (f0 - floorf(f0)) * 2.0f * (float)M_PI;
+            float sx = sinf(ab), sy = -cosf(ab);
+            draw_set_color(d, dca(0.95f, 0.94f, 0.90f, 0.45f));
+            draw_line(d, sx * (HORAE_CLOCK_R - HORAE_CLOCK_W),
+                      sy * (HORAE_CLOCK_R - HORAE_CLOCK_W),
+                      sx * HORAE_CLOCK_R, sy * HORAE_CLOCK_R, 1.0f);
         }
 
         // The current cell wears bright rims
