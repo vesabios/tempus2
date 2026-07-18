@@ -783,7 +783,8 @@ static void frame(void) {
             GlobeFsUniforms fsu;
             memcpy(vsu.rot, gc->rot, sizeof(vsu.rot));
             vsu.place[0] = gc->cx;  vsu.place[1] = gc->cy;
-            vsu.place[2] = gc->radius; vsu.place[3] = 0;
+            vsu.place[2] = gc->radius;
+            vsu.place[3] = 0.85f - 0.3f * (float)gi;   // depth band center
             vsu.screen[0] = w * 0.5f; vsu.screen[1] = h * 0.5f;
             vsu.screen[2] = 0; vsu.screen[3] = 0;
 

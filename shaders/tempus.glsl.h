@@ -44,7 +44,11 @@ static const char *globe_vs_src =
     "    v_en = a_pos;\n"
     "    v_vn = vp;\n"
     "    vec2 world = u_place.xy + vp.xy * u_place.z;\n"
-    "    float depth = 0.5 - vp.z * 0.4;\n"  // front of sphere nearer
+    "    // Per-globe depth band (u_place.w = band center): each sphere\n"
+    "    // self-occludes within its own +/-0.1 slice, and bands are\n"
+    "    // disjoint so spheres never depth-fight each other — slot order\n"
+    "    // is painter's order\n"
+    "    float depth = u_place.w - vp.z * 0.1;\n"
     "    gl_Position = vec4(world.x / u_screen.x, -world.y / u_screen.y, depth, 1.0);\n"
     "}\n";
 
