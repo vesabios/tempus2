@@ -247,8 +247,7 @@ static inline void scene_update(Scene *sc, Tempus *t, double dt) {
             if (c->fling_vel > 60.0) c->fling_vel = 60.0;
             if (c->fling_vel < -60.0) c->fling_vel = -60.0;
         } else if (c->fling_vel != 0.0 && t->time_override) {
-            scene__advance_override_days(t, c->fling_vel * dt,
-                                         sc->horae_blend > 0.5);
+            scene__advance_override_days(t, c->fling_vel * dt, false);
             c->fling_vel *= exp2(-dt / 0.7);   // half-life ~0.7s
             if (fabs(c->fling_vel) < 0.05) c->fling_vel = 0.0;
         } else {
@@ -485,7 +484,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 dv = -(double)along / (2.0 * M_PI * (double)denom)
                    * t->total_days;
             }
-            scene__advance_override_days(t, dv, sc->horae_blend > 0.5);
+            scene__advance_override_days(t, dv, false);
             c->drag_accum += dv;
         }
         c->last_wx = wx;
