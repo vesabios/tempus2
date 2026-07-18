@@ -44,10 +44,10 @@ struct HoraeViewState {
 // Gear geometry (world units; the eccentric ring's farthest sweep,
 // HORAE_ECC + HORAE_RING_OUT + labels, must clear the calendar wheel
 // at 434)
-#define HORAE_CLOCK_R   170.0f   // the fixed day clock, center stage
-#define HORAE_CLOCK_W    40.0f   // its tooth band depth
-#define HORAE_RING_IN   230.0f   // week ring inner (touches the clock)
-#define HORAE_RING_OUT  278.0f   // week ring outer
+#define HORAE_CLOCK_R   210.0f   // the fixed day clock, center stage
+#define HORAE_CLOCK_W    46.0f   // its tooth band depth
+#define HORAE_RING_IN   270.0f   // week ring inner (touches the clock)
+#define HORAE_RING_OUT  330.0f   // week ring outer
 #define HORAE_ECC (HORAE_RING_IN - HORAE_CLOCK_R)   // eccentricity
 
 // Chaldean order, slowest to fastest; colors borrowed from the orrery
@@ -65,9 +65,10 @@ static const char *horae__genitive[7] = {
 // Weekday (0 = Sunday) -> Chaldean index of the day's ruler
 static const uint8_t horae__day_ruler[7] = { 3, 6, 2, 5, 1, 4, 0 };
 
-// Weekday initials in dial order Sunday..Saturday (dies Solis..Saturni)
-static const char *horae__dies_init[7] = {
-    "S", "L", "M", "M", "I", "V", "S",
+// Weekday names in dial order Sunday..Saturday (dies Solis..Saturni)
+static const char *horae__dies[7] = {
+    "SOLIS", "LVNAE", "MARTIS", "MERCVRII",
+    "IOVIS", "VENERIS", "SATVRNI",
 };
 
 static const char *horae__roman[12] = {
@@ -242,64 +243,87 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
 
     // ---- The week ring, riding eccentrically — the spirograph ----
     // Tangent to the clock at the hand's direction: ring center sits
-    // opposite the contact by the eccentricity, and the chain is
-    // oriented so the CURRENT tooth is the one being pressed. Once
-    // around the face per day; the chain precesses home once per week.
+    // opposite the contact by the eccentricity, oriented so the
+    // CURRENT hour's tick is the one being pressed. Seven named day
+    // regions washed in their rulers' colors; the 168-hour chain drawn
+    // as fine ruler-colored ticks on the meshing edge — accents on the
+    // structure, not the structure itself.
     float ah = now * 2.0f * (float)M_PI;         // the hand = the contact
     float hdx = sinf(ah), hdy = -cosf(ah);
     float rcx = -hdx * HORAE_ECC;                // ring center
     float rcy = -hdy * HORAE_ECC;
     {
-        // Chain teeth: ring-local position of week-time m keeps tooth
-        // m_now at the contact direction
+        // Seven day regions + engraved names
+        float lsz = _font_compat[FONT_date].size;
+        for (int i = 0; i < 7; i++) {
+            float q0 = now + horae__wrap((float)i - m_now, 7.0f) / 7.0f;
+            const uint8_t *c =
+                orr__body_col[horae__chaldean_body[horae__day_ruler[i]]];
+            bool today = i == w;
+            draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
+                                  c[2] / 255.0f, today ? 0.16f : 0.06f));
+            horae__cell(d, rcx, rcy, HORAE_RING_IN, HORAE_RING_OUT,
+                        q0, q0 + 1.0f / 7.0f);
+
+            // Midnight boundary spoke
+            {
+                float ab = (q0 - floorf(q0)) * 2.0f * (float)M_PI;
+                float sx = sinf(ab), sy = -cosf(ab);
+                draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.30f));
+                draw_line(d, rcx + sx * (HORAE_RING_IN - 4.0f),
+                          rcy + sy * (HORAE_RING_IN - 4.0f),
+                          rcx + sx * (HORAE_RING_OUT + 4.0f),
+                          rcy + sy * (HORAE_RING_OUT + 4.0f), 1.0f);
+            }
+
+            // Name along the band, waist on the band's center line
+            {
+                float qc = q0 + 0.5f / 7.0f;
+                float ang = qc * 2.0f * (float)M_PI;
+                float na = fmodf(ang, 2.0f * (float)M_PI);
+                if (na < 0) na += 2.0f * (float)M_PI;
+                bool lflip = (na > (float)M_PI * 0.5f
+                              && na < (float)M_PI * 1.5f);
+                float mid = (HORAE_RING_IN + HORAE_RING_OUT) * 0.5f;
+                float lr = mid - lsz * 0.5f
+                         + lsz * (lflip ? 0.51f : 0.37f);
+                draw_set_color(d, today
+                    ? dca(0.80f, 0.77f, 0.70f, 0.95f)
+                    : dca(0.55f, 0.53f, 0.49f, 0.45f));
+                draw_text_curved(d, FONT_date, rcx, rcy, lr, ang,
+                                 horae__dies[i], 0.8f, 1.0f);
+            }
+        }
+
+        // The 168-hour chain as ticks on the meshing edge
         for (int dd = 0; dd < 7; dd++) {
             int dri = horae__day_ruler[dd];
             for (int h = 0; h < 24; h++) {
-                float m0 = dd + rise + u[h];
-                float m1 = dd + rise + u[h + 1];
-                float q0 = now + horae__wrap(m0 - m_now, 7.0f) / 7.0f;
-                float q1 = now + horae__wrap(m1 - m_now, 7.0f) / 7.0f;
-                if (q1 < q0) continue;   // the seam cell opposite now
+                float mc = dd + rise + (u[h] + u[h + 1]) * 0.5f;
+                float q = now + horae__wrap(mc - m_now, 7.0f) / 7.0f;
+                float aq = q * 2.0f * (float)M_PI;
+                float sx = sinf(aq), sy = -cosf(aq);
 
                 int rr = (dri + h) % 7;
                 const uint8_t *c =
                     orr__body_col[horae__chaldean_body[rr]];
                 bool is_day = h < 12;
                 bool cur = (dd == pd && h == hcur);
-                float al = cur ? 0.95f : (is_day ? 0.60f : 0.22f);
+                float len = cur ? 22.0f : (is_day ? 13.0f : 8.0f);
+                float al = cur ? 1.0f : (is_day ? 0.75f : 0.40f);
                 draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                       c[2] / 255.0f, al));
-                horae__cell(d, rcx, rcy, HORAE_RING_IN, HORAE_RING_OUT,
-                            q0, q1);
+                draw_line(d, rcx + sx * (HORAE_RING_IN + 2.0f),
+                          rcy + sy * (HORAE_RING_IN + 2.0f),
+                          rcx + sx * (HORAE_RING_IN + 2.0f + len),
+                          rcy + sy * (HORAE_RING_IN + 2.0f + len),
+                          cur ? 2.2f : 1.4f);
             }
         }
+
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
         draw_circle_stroked(d, rcx, rcy, HORAE_RING_IN, 1.0f);
         draw_circle_stroked(d, rcx, rcy, HORAE_RING_OUT, 1.0f);
-
-        // Civil midnight spokes + day initials, engraved on the ring
-        int iw = _font_compat[FONT_seconds].weight;
-        for (int i = 0; i < 7; i++) {
-            float qm = now + horae__wrap((float)i - m_now, 7.0f) / 7.0f;
-            float am = qm * 2.0f * (float)M_PI;
-            float sx = sinf(am), sy = -cosf(am);
-            draw_set_color(d, dca(0.10f, 0.10f, 0.10f, 0.9f));
-            draw_line(d, rcx + sx * (HORAE_RING_IN - 4.0f),
-                      rcy + sy * (HORAE_RING_IN - 4.0f),
-                      rcx + sx * (HORAE_RING_OUT + 4.0f),
-                      rcy + sy * (HORAE_RING_OUT + 4.0f), 2.0f);
-
-            float qc = now + horae__wrap(i + 0.5f - m_now, 7.0f) / 7.0f;
-            float ac = qc * 2.0f * (float)M_PI;
-            float cx = rcx + sinf(ac) * (HORAE_RING_OUT + 16.0f);
-            float cy = rcy - cosf(ac) * (HORAE_RING_OUT + 16.0f);
-            float tw2 = sdf_measure_width(iw, horae__dies_init[i]) * 15.0f;
-            draw_set_color(d, i == w
-                ? dca(0.78f, 0.75f, 0.68f, 0.9f)
-                : dca(0.50f, 0.49f, 0.46f, 0.40f));
-            draw_text_ex(d, iw, 15.0f, cx - tw2 * 0.5f, cy - 7.5f,
-                         horae__dies_init[i]);
-        }
     }
 
     // ---- The hands, over everything: this is a clock ----
@@ -335,24 +359,25 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_circle_filled(d, 0, 0, 3.0f);
     }
 
-    // ---- Readout in the clock's open center, under the hands ----
+    // ---- The reading, written outside the ring at the contact ----
+    // The hand points through the mesh to the ruling planet; the words
+    // follow the touch around the dial.
     {
         const uint8_t *c = orr__body_col[horae__chaldean_body[ridx]];
+        float tr = HORAE_RING_OUT - HORAE_ECC + 46.0f;
+        float tx = hdx * tr, ty = hdy * tr;
+
         draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                               c[2] / 255.0f, 0.95f));
-        draw_circle_filled(d, 0, -66.0f, 7.5f);
+        draw_circle_filled(d, tx, ty - 34.0f, 6.5f);
+        draw_set_color(d, dca(0.80f, 0.77f, 0.70f, 0.95f));
+        draw_text_centered(d, FONT_month, tx, ty, horae__genitive[ridx]);
 
-        draw_set_color(d, dca(0.50f, 0.49f, 0.46f, 0.55f));
-        draw_text_centered(d, FONT_date, 0, -40.0f, "HORA");
-        draw_set_color(d, dca(0.78f, 0.75f, 0.68f, 0.95f));
-        draw_text_centered(d, FONT_month, 0, 40.0f,
-                          horae__genitive[ridx]);
-
-        char hb[24];
-        snprintf(hb, sizeof(hb), "%s %s", horae__roman[hcur % 12],
+        char hb[28];
+        snprintf(hb, sizeof(hb), "HORA %s %s", horae__roman[hcur % 12],
                  hcur < 12 ? "DIEI" : "NOCTIS");
-        draw_set_color(d, dca(0.50f, 0.49f, 0.46f, 0.55f));
-        draw_text_centered(d, FONT_date, 0, 66.0f, hb);
+        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.60f));
+        draw_text_centered(d, FONT_date, tx, ty + 26.0f, hb);
     }
 
     d->alpha = base_alpha;
