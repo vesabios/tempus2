@@ -176,17 +176,21 @@ static void apply_view_mode(void) {
 static void set_view_opacities(void) {
     double hb = g_scene.helio_blend;
     double sky = g_scene.sky_blend;
-    // The whole machine dissolves under the sky chart
-    g_scene.views[VIEW_CALENDAR].opacity = 1.0 - sky;
+    // The machine dissolves EARLY under the sky morph — its beads and
+    // rings hand off to the sky view's moving copies, which render at
+    // full strength for the whole flight (the sky view alphas its own
+    // elements internally).
+    double fade = 1.0 - tempus_smoothstep(0.0, 0.55, sky);
+    g_scene.views[VIEW_CALENDAR].opacity = fade;
     g_scene.views[VIEW_SOLAR].opacity = 0.0;    // data only, never draws
-    g_scene.views[VIEW_ORRERY].opacity = 1.0 - sky;
+    g_scene.views[VIEW_ORRERY].opacity = fade;
     // Clock face and hands exit in the first quarter of the transit (and
     // return in the last quarter coming home) — they're geocentric
     // furniture and have no business lingering over the flight
     double clock_vis = 1.0 - hb * 4.0;
     if (clock_vis < 0) clock_vis = 0.0;
-    g_scene.views[VIEW_CLOCK].opacity = clock_vis * (1.0 - sky);
-    g_scene.views[VIEW_SKY].opacity = sky;
+    g_scene.views[VIEW_CLOCK].opacity = clock_vis * fade;
+    g_scene.views[VIEW_SKY].opacity = sky > 0.001 ? 1.0 : 0.0;
 }
 
 // Pacing: vsync drives the frame callback, but update/rebuild work only
@@ -539,6 +543,15 @@ static void init(void) {
     if (sblend) {
         g_scene.helio_blend = 1.0;
         g_scene.system_blend = atof(sblend);
+    }
+    const char *kblend = getenv("TEMPUS_SKYBLEND");  // dev: pin sky morph
+    if (kblend) {
+        g_worldview = WV_CAELVM;
+        g_scene.helio_blend = 1.0;
+        g_scene.system_blend = 1.0;
+        g_scene.sky_blend = atof(kblend);
+        g_scene.calendar_state.zoom = 0.0;
+        g_scene.calendar_state.target_zoom = 0.0;
     }
     apply_view_mode();
     set_view_opacities();

@@ -53,8 +53,13 @@ true azimuth and altitude, sized by apparent magnitude, tracing its
 diurnal arc from rising to setting. The ecliptic lies across the bowl
 with the sign cusps ticked, the background breathes with the sun's own
 altitude through the twilights, and the moon hangs as a phase-lit globe
-with its bright limb aimed at the sun. The stations are named on the
-instrument: HOROLOGIVM, TELLVS, MACHINA MVNDI, CAELVM.
+with its bright limb aimed at the sun. Entering from MACHINA MVNDI is a
+true morph, element to element: beads fly from their orbit rings to
+their places in your sky (setting bodies exit through the rim), orbit
+rings unfurl into diurnal arcs — the year becomes the day — the zodiac
+dial bends into the ecliptic's lie across the bowl, and the calendar
+wheel grows into the horizon: the year becomes the ground. The stations
+are named on the instrument: HOROLOGIVM, TELLVS, MACHINA MVNDI, CAELVM.
 
 The local horizon cuts through the dial as the chart's ascendant axis:
 the below-horizon arc of the zodiac shades dark in the moat and wheels
