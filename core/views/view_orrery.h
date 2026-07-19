@@ -162,10 +162,117 @@ static const uint8_t orr__aspect_col[ASPECT_TYPE_COUNT][3] = {
     [ASPECT_QUINCUNX]       = { 138, 112, 160 },
 };
 
-static const char *orr__sign_names[12] = {
-    "ARIES", "TAURUS", "GEMINI", "CANCER", "LEO", "VIRGO",
-    "LIBRA", "SCORPIO", "SAGITTARIUS", "CAPRICORNUS", "AQUARIUS", "PISCES",
+// ---- Zodiac sigils ----
+// The traditional glyphs, engraved as polyline strokes like the rest
+// of the instrument (no raster text). Unit box: x right, y up,
+// extents ~±0.46. Each table is a run of polylines — point count,
+// then that many x,y pairs — terminated by 0.
+static const float orr__gl_aries[] = {
+    7, 0,-0.50f, -0.05f,-0.20f, -0.13f,0.05f, -0.22f,0.26f,
+       -0.33f,0.38f, -0.42f,0.33f, -0.46f,0.18f,
+    7, 0,-0.50f, 0.05f,-0.20f, 0.13f,0.05f, 0.22f,0.26f,
+       0.33f,0.38f, 0.42f,0.33f, 0.46f,0.18f, 0 };
+static const float orr__gl_taurus[] = {
+    13, 0.27f,-0.16f, 0.23f,-0.03f, 0.14f,0.07f, 0,0.11f,
+        -0.14f,0.07f, -0.23f,-0.03f, -0.27f,-0.16f, -0.23f,-0.30f,
+        -0.14f,-0.39f, 0,-0.43f, 0.14f,-0.39f, 0.23f,-0.30f,
+        0.27f,-0.16f,
+    7, -0.38f,0.40f, -0.30f,0.26f, -0.17f,0.15f, 0,0.11f,
+       0.17f,0.15f, 0.30f,0.26f, 0.38f,0.40f, 0 };
+static const float orr__gl_gemini[] = {
+    2, -0.17f,-0.34f, -0.17f,0.34f,
+    2, 0.17f,-0.34f, 0.17f,0.34f,
+    5, -0.36f,0.44f, -0.18f,0.36f, 0,0.34f, 0.18f,0.36f, 0.36f,0.44f,
+    5, -0.36f,-0.44f, -0.18f,-0.36f, 0,-0.34f, 0.18f,-0.36f,
+       0.36f,-0.44f, 0 };
+static const float orr__gl_cancer[] = {
+    9, -0.11f,0.16f, -0.15f,0.25f, -0.24f,0.29f, -0.33f,0.25f,
+       -0.37f,0.16f, -0.33f,0.07f, -0.24f,0.03f, -0.15f,0.07f,
+       -0.11f,0.16f,
+    4, -0.24f,0.29f, -0.02f,0.34f, 0.20f,0.29f, 0.36f,0.16f,
+    9, 0.11f,-0.16f, 0.15f,-0.25f, 0.24f,-0.29f, 0.33f,-0.25f,
+       0.37f,-0.16f, 0.33f,-0.07f, 0.24f,-0.03f, 0.15f,-0.07f,
+       0.11f,-0.16f,
+    4, 0.24f,-0.29f, 0.02f,-0.34f, -0.20f,-0.29f, -0.36f,-0.16f, 0 };
+static const float orr__gl_leo[] = {
+    9, -0.15f,-0.24f, -0.19f,-0.16f, -0.27f,-0.12f, -0.35f,-0.16f,
+       -0.39f,-0.24f, -0.35f,-0.33f, -0.27f,-0.36f, -0.19f,-0.33f,
+       -0.15f,-0.24f,
+    12, -0.27f,-0.12f, -0.26f,0.08f, -0.16f,0.28f, 0,0.38f,
+        0.16f,0.34f, 0.25f,0.20f, 0.26f,0.02f, 0.17f,-0.16f,
+        0.13f,-0.30f, 0.19f,-0.42f, 0.32f,-0.44f, 0.42f,-0.36f, 0 };
+static const float orr__gl_virgo[] = {
+    2, -0.44f,0.30f, -0.44f,-0.38f,
+    5, -0.44f,0.16f, -0.38f,0.30f, -0.28f,0.30f, -0.22f,0.16f,
+       -0.22f,-0.38f,
+    5, -0.22f,0.16f, -0.16f,0.30f, -0.06f,0.30f, 0,0.16f, 0,-0.38f,
+    5, 0,0.16f, 0.06f,0.30f, 0.16f,0.30f, 0.22f,0.16f, 0.22f,-0.10f,
+    6, 0.22f,-0.10f, 0.30f,-0.26f, 0.40f,-0.34f, 0.36f,-0.44f,
+       0.22f,-0.44f, 0.10f,-0.36f, 0 };
+static const float orr__gl_libra[] = {
+    2, -0.42f,-0.34f, 0.42f,-0.34f,
+    9, -0.42f,-0.12f, -0.20f,-0.12f, -0.18f,0.06f, -0.10f,0.18f,
+       0,0.22f, 0.10f,0.18f, 0.18f,0.06f, 0.20f,-0.12f,
+       0.42f,-0.12f, 0 };
+static const float orr__gl_scorpio[] = {
+    2, -0.46f,0.30f, -0.46f,-0.38f,
+    5, -0.46f,0.16f, -0.40f,0.30f, -0.31f,0.30f, -0.25f,0.16f,
+       -0.25f,-0.38f,
+    5, -0.25f,0.16f, -0.19f,0.30f, -0.10f,0.30f, -0.04f,0.16f,
+       -0.04f,-0.24f,
+    5, -0.04f,-0.24f, 0.02f,-0.38f, 0.16f,-0.42f, 0.30f,-0.36f,
+       0.38f,-0.24f,
+    2, 0.38f,-0.24f, 0.24f,-0.26f,
+    2, 0.38f,-0.24f, 0.36f,-0.40f, 0 };
+static const float orr__gl_sagittarius[] = {
+    2, -0.34f,-0.36f, 0.40f,0.38f,
+    2, 0.40f,0.38f, 0.12f,0.34f,
+    2, 0.40f,0.38f, 0.36f,0.10f,
+    2, -0.26f,0.02f, 0,-0.24f, 0 };
+static const float orr__gl_capricorn[] = {
+    3, -0.46f,0.34f, -0.32f,-0.08f, -0.20f,0.30f,
+    10, -0.20f,0.30f, -0.12f,0.02f, -0.06f,-0.20f, 0.04f,-0.38f,
+        0.20f,-0.44f, 0.34f,-0.38f, 0.38f,-0.24f, 0.30f,-0.10f,
+        0.16f,-0.08f, 0.06f,-0.16f, 0 };
+static const float orr__gl_aquarius[] = {
+    7, -0.42f,0.10f, -0.28f,0.30f, -0.14f,0.10f, 0,0.30f,
+       0.14f,0.10f, 0.28f,0.30f, 0.42f,0.10f,
+    7, -0.42f,-0.32f, -0.28f,-0.12f, -0.14f,-0.32f, 0,-0.12f,
+       0.14f,-0.32f, 0.28f,-0.12f, 0.42f,-0.32f, 0 };
+static const float orr__gl_pisces[] = {
+    7, -0.10f,0.44f, -0.24f,0.36f, -0.32f,0.18f, -0.34f,0,
+       -0.32f,-0.18f, -0.24f,-0.36f, -0.10f,-0.44f,
+    7, 0.10f,0.44f, 0.24f,0.36f, 0.32f,0.18f, 0.34f,0,
+       0.32f,-0.18f, 0.24f,-0.36f, 0.10f,-0.44f,
+    2, -0.30f,0, 0.30f,0, 0 };
+static const float *orr__glyphs[12] = {
+    orr__gl_aries, orr__gl_taurus, orr__gl_gemini, orr__gl_cancer,
+    orr__gl_leo, orr__gl_virgo, orr__gl_libra, orr__gl_scorpio,
+    orr__gl_sagittarius, orr__gl_capricorn, orr__gl_aquarius,
+    orr__gl_pisces,
 };
+
+// Draw one sigil at (cx,cy): (ux,uy) is glyph-up in screen space —
+// pointed radially outward, every glyph stands feet-to-center like a
+// clock face's engravings. Screen y runs down, so right = (-uy, ux)
+// keeps the sigil unmirrored.
+static void orr__zodiac_glyph(DrawCtx *d, int sign, float cx, float cy,
+                              float ux, float uy, float sz) {
+    const float *g = orr__glyphs[sign];
+    float rx = -uy, ry = ux;
+    int i = 0;
+    while (g[i] > 0.5f) {
+        int n = (int)g[i++];
+        float lx = 0, ly = 0;
+        for (int k = 0; k < n; k++) {
+            float gx = g[i++], gy = g[i++];
+            float sx = cx + (rx * gx + ux * gy) * sz;
+            float sy = cy + (ry * gx + uy * gy) * sz;
+            if (k) draw_line(d, lx, ly, sx, sy, 1.1f);
+            lx = sx; ly = sy;
+        }
+    }
+}
 
 // Pip radius from apparent magnitude: how bright a body looks in the
 // real sky is how big its dial marker draws. Clamped so the sun and
@@ -478,22 +585,16 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 draw_line(d, dx * ORR_ZODIAC_IN, dy * ORR_ZODIAC_IN,
                           dx * r1, dy * r1, 1.0f);
             }
-            draw_set_color(d, dc_scale(s->medium_grey, 0.60f));
+            // Sigils on the band's waist, feet toward the center all
+            // the way around — engraved glyphs, not letters, so no
+            // readability flip on the lower half
+            draw_set_color(d, dc_scale(s->medium_grey, 0.72f));
             for (int i = 0; i < 12; i++) {
-                float ang = (float)((0.75 + (i * 30.0 + 15.0) / 360.0)
-                                    * 2.0 * M_PI);
-                // Names sit INSIDE the band, letterforms centered on
-                // its waist — same flip-compensated recipe as the
-                // planet labels
-                float na = fmodf(ang, 2.0f * (float)M_PI);
-                if (na < 0) na += 2.0f * (float)M_PI;
-                bool zflip = (na > (float)M_PI * 0.5f
-                              && na < (float)M_PI * 1.5f);
-                float zsz = _font_compat[FONT_month].size * 0.85f;
-                float zr = 0.5f * (ORR_ZODIAC_IN + ORR_ZODIAC_OUT)
-                         + zsz * (zflip ? 0.51f : 0.37f);
-                draw_text_curved(d, FONT_month, 0, 0, zr,
-                                 ang, orr__sign_names[i], 1.6f, 0.85f);
+                float dx, dy;
+                orr__ecl_dir(i * 30.0 + 15.0, &dx, &dy);
+                float gr = 0.5f * (ORR_ZODIAC_IN + ORR_ZODIAC_OUT);
+                orr__zodiac_glyph(d, i, dx * gr, dy * gr, dx, dy,
+                                  28.0f);
             }
 
             // ---- The local horizon, cut through the zodiac ----
