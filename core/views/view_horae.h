@@ -303,23 +303,23 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                     if (salt > 1.0f) salt = 1.0f;
                     if (salt < -1.0f) salt = -1.0f;
                     float sun_alt = asinf(salt) / d2r;
-                    // Two rays: LOW TOWARD THE SUN (6 deg — where the
-                    // reddened path length is maximal, the seat of the
-                    // drama) blended with the anti-solar sky at 25 deg
-                    // so the day keeps its blue against the sunward
-                    // white. The fire is real; we just look at it.
-                    float sd2[3], ra[3], rb[3], ca[3], cb[3];
+                    // ONE ray per hour, aimed AT THE SUN'S PLACE in
+                    // that hour's sky (Seren's fix — no averaging
+                    // fixed-altitude rays across the day): noon looks
+                    // high into the blue around the sun, sunset looks
+                    // along the horizon into the fire, night's ray
+                    // grazes a sky the sun no longer reaches. The ray
+                    // stays just above the horizon once the sun sets —
+                    // you can't look below it — which is exactly what
+                    // makes twilight decay instead of snapping dark.
+                    float sd2[3], ra[3], ca[3];
                     atmo_dir(0.0f, sun_alt, sd2);
-                    atmo_dir(0.0f, 6.0f, ra);
-                    atmo_dir(180.0f, 25.0f, rb);
+                    float ray_alt = sun_alt < 1.5f ? 1.5f : sun_alt;
+                    atmo_dir(0.0f, ray_alt, ra);
                     atmo_scatter(ra, sd2, ca);
-                    atmo_scatter(rb, sd2, cb);
-                    float mixv[3];
                     static const float band_base[3] = { 0.030f, 0.036f,
                                                         0.075f };
-                    for (int cch = 0; cch < 3; cch++)
-                        mixv[cch] = ca[cch] * 0.62f + cb[cch] * 0.38f;
-                    atmo_tone(mixv, 1.0f, band_base,
+                    atmo_tone(ca, 1.0f, band_base,
                               stw->band_col[i]);
                 }
             }
