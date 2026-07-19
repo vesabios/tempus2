@@ -562,11 +562,18 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // view owns them during the CAELVM morph
         if (a_ring > 0.001f && !sky_owns) {
             d->alpha = base_alpha * a_ring;
-            draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.13f));
             // Earth's ring draws too now — the calendar wheel has
-            // moved out to the moat and no longer marks the orbit
-            for (int p = 0; p < PL_COUNT; p++)
-                draw_circle_stroked(d, 0, 0, orr__orbit_r(p, wheel_R), 1.0f);
+            // moved out to the moat and no longer marks the orbit.
+            // The HOME orbit reads a clear step above the others: this
+            // is the ring the whole instrument turns on.
+            for (int p = 0; p < PL_COUNT; p++) {
+                bool home = (p == PL_EARTH);
+                draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
+                                      home ? 0.34f : 0.13f));
+                draw_circle_stroked(d, 0, 0,
+                                    orr__orbit_r(p, wheel_R),
+                                    home ? 1.3f : 1.0f);
+            }
         }
 
         // Zodiac dial: 30-degree signs, 10-degree ticks, engraved names
