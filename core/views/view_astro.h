@@ -49,6 +49,8 @@ struct AstroViewState {
     // bowl DEFORMS into the lens instead of crossfading shapes
     const SkyViewState *skyv;
     double skb;         // mirrored scene sky_blend
+    double sysb;        // mirrored scene system_blend (limb = clip)
+    double orbw;        // mirrored scene orbis_wheel  (limb = clip)
 
     // Luminary chart targets, published for the orrery's composition
     // (the ONE OBJECT law): the sun and moon fly onto the plate as
@@ -168,6 +170,8 @@ static void astro_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->blend = sc->astro_blend;
     st->skyv = &sc->sky_state;
     st->skb = sc->sky_blend;
+    st->sysb = sc->system_blend;
+    st->orbw = sc->orbis_wheel;
     // The shared sky circle needs this state at CAELVM too — the
     // whole chart family runs through this update
     if (st->blend <= 0.001 && sc->sky_blend <= 0.001) return;
@@ -338,9 +342,21 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
     // shared shape across the whole chart family.)
 
     // ---- The plate: limb, equator, tropics ----
+    // The limb rides the SAME blended radius the sky's clip uses —
+    // flush with the clipping circle at every moment of a flight
+    // (Seren), landing at the true limb only when the plate rests
+    float limb_r;
+    {
+        float bez = (float)tempus_wheel_radius(s->calendar_base_radius,
+                                               st->sysb, st->skb,
+                                               st->orbw);
+        float wcl = (float)(st->skb + st->blend > 1.0e-6
+                    ? st->skb / (st->skb + st->blend) : 0.0);
+        limb_r = ASTRO_R_CAP + (bez - ASTRO_R_CAP) * wcl;
+    }
     draw_set_color(d, dca(0.50f, 0.48f, 0.44f, 0.75f));
     d->alpha = base_alpha * 0.9f;
-    draw_circle_stroked(d, 0, 0, ASTRO_R_CAP, 1.6f);
+    draw_circle_stroked(d, 0, 0, limb_r, 1.6f);
     d->alpha = base_alpha * 0.20f;
     draw_circle_stroked(d, 0, 0, Req, 1.0f);
     draw_circle_stroked(d, 0, 0,
@@ -350,9 +366,9 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
         float ux = sinf(a), uy = -cosf(a);
         bool major = (i % 3) == 0;
         d->alpha = base_alpha * (major ? 0.50f : 0.22f);
-        draw_line(d, ux * ASTRO_R_CAP, uy * ASTRO_R_CAP,
-                  ux * (ASTRO_R_CAP - (major ? 12.0f : 6.0f)),
-                  uy * (ASTRO_R_CAP - (major ? 12.0f : 6.0f)), 1.0f);
+        draw_line(d, ux * limb_r, uy * limb_r,
+                  ux * (limb_r - (major ? 12.0f : 6.0f)),
+                  uy * (limb_r - (major ? 12.0f : 6.0f)), 1.0f);
     }
 
     // ---- The tympan: your latitude, engraved live ----

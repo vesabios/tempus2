@@ -393,9 +393,6 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // counterpart fades in late.
     float mb = (float)st->blend;               // morph position
     float fb = ink_in(INK_CHART_LATE, st->blend);
-    // The astrolabe takes the shared sky elements with it — this
-    // chart's copies bow out as the plate rises
-    float asup = 1.0f - (float)tempus_smoothstep(0.0, 0.15, st->astb);
     sky__set_center(st->view_az, st->view_alt);
     // Machine-counterpart weight: only MACHINA has zodiac/rings/beads
     // to hand off. Parked there (system stage 1) every element takes
