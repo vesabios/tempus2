@@ -34,11 +34,6 @@ struct SkyViewState {
     // view
     float rise_hr, set_hr;
 
-    // The bowl's tint anchor: sun altitude at the DATE's solar
-    // midnight — the sky stays an instrument night under any hour
-    // scrub, no day/night strobing
-    float bowl_sun_alt;
-
     // The hour ring (between the chart and the calendar bezel) is the
     // rendering-time control: drag it and the bodies wheel along
     // their arcs
@@ -162,9 +157,8 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
 
     // CAELVM shows the sky AT THE RENDERING INSTANT: the horizon is
     // the fixed circle, and the hour ring scrubs the display time —
-    // bodies wheel along their diurnal arcs across the chart. Only
-    // the BOWL's tint stays anchored to the date's solar midnight,
-    // so no scrub ever strobes day and night.
+    // bodies wheel along their diurnal arcs across the chart, and the
+    // bowl wears the sky's own color for that instant.
     double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
                  - t->config.timezone / 24.0;
     if (fabs(jd_ut - st->cache_jd) <= 1.0 / 1440.0) return;
@@ -173,16 +167,6 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     double lat = t->config.latitude, lon = t->config.longitude;
     planets_compute(&st->now, jd_ut);
     planets_sky_compute(&st->sky, &st->now, lat, lon);
-
-    // Tint anchor: the sun's altitude at the date's solar midnight
-    {
-        double jd_mid = st->tv.jd_current + 0.5
-                      - t->config.longitude / (15.0 * 24.0);
-        double blon, blat, az, alt;
-        planets__body_lonlat(BODY_SUN, jd_mid, &blon, &blat);
-        planets_sky_azalt(blon, blat, jd_mid, lat, lon, &az, &alt);
-        st->bowl_sun_alt = (float)alt;
-    }
 
     for (int b = 0; b < BODY_COUNT; b++) {
         double blon, blat, az, alt;
@@ -287,20 +271,69 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         s->calendar_base_radius, st->orr ? st->orr->sys : 1.0,
         st->blend);
 
-    // ---- The bowl: sky tint riding the (midnight) sun ----
+    // ---- The bowl: a DIMENSIONAL sky at the rendering instant ----
+    // HORAE's Rayleigh machinery, but sampled per point of the dome:
+    // each vertex of the disc reads the gradient at an EFFECTIVE
+    // altitude — the sun's true altitude, biased up toward the sun's
+    // place in the sky and down away from it and toward the zenith.
+    // At sunset the sunward horizon burns gold while the antisolar
+    // sky is already blue hour; at noon the azure pales toward the
+    // horizon and deepens overhead; at night the whole dome settles.
+    // A realistic sunrise, from the same calibrated keyframes.
     {
-        float sa = st->bowl_sun_alt;
-        float day = (float)tempus_smoothstep(-18.0, 8.0, sa);
+        float R_live = bez_R + (SKY_HOR - bez_R) * mb;
+        float sv[3];
+        sky__vec(st->body_az[BODY_SUN], st->body_alt[BODY_SUN], sv);
+        float salt = st->body_alt[BODY_SUN];
+
         d->alpha = base_alpha * mb;
         // Under the earth: the whole chart, a dark warm ground
         draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
         draw_circle_filled(d, 0, 0, SKY_R);
-        // The visible sky: the circle inside the horizon, unfurling
-        // from the calendar wheel on the entry morph
-        draw_set_color(d, dca(0.020f + 0.055f * day,
-                              0.022f + 0.075f * day,
-                              0.035f + 0.130f * day, 1.0f));
-        draw_circle_filled(d, 0, 0, bez_R + (SKY_HOR - bez_R) * mb);
+
+        // The dome mesh: rings of altitude, sectors of azimuth
+        static const float ALTS[6] = { 68.0f, 47.0f, 29.0f, 14.0f,
+                                       5.0f, 0.0f };
+        enum { SEC = 64 };
+        int prev[SEC + 1], curv[SEC + 1];
+        // Center vertex: the zenith
+        {
+            float eff = salt + 10.0f * sv[2] - 4.0f;
+            DrawColor cc = dc_scale(horae__sky(eff), 0.62f);
+            cc.a = 1.0f;
+            draw_set_color(d, cc);
+        }
+        int cvi = draw__push_vert(d, 0, 0, d->white_u, d->white_v);
+        for (int ri = 0; ri < 6; ri++) {
+            float alt = ALTS[ri];
+            float rr = (90.0f - alt) / 90.0f * R_live;
+            for (int si = 0; si <= SEC; si++) {
+                float az = (float)si / SEC * 360.0f;
+                float pv[3];
+                sky__vec(az, alt, pv);
+                float sdot = pv[0] * sv[0] + pv[1] * sv[1]
+                           + pv[2] * sv[2];
+                float eff = salt + 10.0f * sdot
+                          - 4.0f * (alt / 90.0f);
+                DrawColor cc = dc_scale(horae__sky(eff), 0.62f);
+                cc.a = 1.0f;
+                draw_set_color(d, cc);
+                float a = az * (float)M_PI / 180.0f;
+                int vi = draw__push_vert(d, -sinf(a) * rr,
+                                         -cosf(a) * rr,
+                                         d->white_u, d->white_v);
+                curv[si] = vi;
+                if (si > 0) {
+                    if (ri == 0) {
+                        draw__tri(d, cvi, curv[si - 1], vi);
+                    } else {
+                        draw__tri(d, prev[si - 1], curv[si - 1], vi);
+                        draw__tri(d, prev[si - 1], vi, prev[si]);
+                    }
+                }
+            }
+            memcpy(prev, curv, sizeof(prev));
+        }
         d->alpha = base_alpha;
     }
 
