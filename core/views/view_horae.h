@@ -590,30 +590,21 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         float hfrac = (u_now - u[hcur])
                     / (u[hcur + 1] - u[hcur] + 1.0e-6f);
         float phi = m_now / 7.0f - ((float)ridx + hfrac) / 7.0f;
-        // The pinion wears the RAILROAD'S OWN DRESS, inverted: a dark
-        // band, and the ruling hour as the one LIGHT filled box on it
-        // (full angular width, inset only radially — the chemin de
-        // fer idiom exactly). No metals, no second visual language.
-        // The plate is solid — it occludes the numerals it rolls over.
+        // A dark solid plate, its seven sigils, and nothing else: the
+        // lozenge points at the mesh and the ruling sigil stands
+        // bright — the wheel needs no box or band to say what the
+        // marks already say. The plate occludes the numerals it
+        // rolls over.
         draw_set_color(d, dca(0.02f, 0.02f, 0.02f, 1.0f));
         draw_circle_filled(d, pcx2, pcy2, rp);
-        float pr0 = rp - 10.0f;
         for (int c = 0; c < 7; c++) {
             bool curp = (c == ridx);
-            draw_set_color(d, dca(0.03f, 0.03f, 0.03f, 0.95f));
-            horae__cell(d, pcx2, pcy2, pr0, rp,
-                        c / 7.0f + phi, (c + 1) / 7.0f + phi);
-            if (curp) {
-                draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
-                horae__cell(d, pcx2, pcy2, pr0 + 1.1f, rp - 1.1f,
-                            c / 7.0f + phi, (c + 1) / 7.0f + phi);
-            }
             float sa = ((c + 0.5f) / 7.0f + phi) * 2.0f * (float)M_PI;
             float sux = sinf(sa), suy = -cosf(sa);
             draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
                                   curp ? 0.95f : 0.30f));
-            orr__strokes(d, horae__sigil[c], pcx2 + sux * 33.0f,
-                         pcy2 + suy * 33.0f, sux, suy, 24.0f, 1.0f);
+            orr__strokes(d, horae__sigil[c], pcx2 + sux * 42.0f,
+                         pcy2 + suy * 42.0f, sux, suy, 24.0f, 1.0f);
         }
         // The meshing edge, so the dark wheel holds its shape
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
