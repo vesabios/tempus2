@@ -420,47 +420,12 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // sunset fire climbing from wherever the sun actually stands.
     {
         float R_live = bez_R + (SKY_HOR - bez_R) * mb;
-        // The astrolabe takes the sky with it: ITS wash draws the
-        // shared shape (this bowl's projection blended toward the
-        // plate's), so the bowl bows out as soon as the plate rises
-        d->alpha = base_alpha * mb * asup;
-        // Under the earth: the whole chart, a dark warm ground
-        draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
-        draw_circle_filled(d, 0, 0, SKY_R);
+        (void)R_live;
+        // (The ground disc and the dome are drawn ONCE by the
+        // calendar view — the shared sky circle and its dark earth.)
 
-        enum { SEC = SKY_DOME_SEC };
-        float mk = R_live / SKY_HOR;   // morph scale about center
-        int prev[SEC + 1], curv[SEC + 1];
-        draw_set_color(d, dca(st->dome[0][0], st->dome[0][1],
-                              st->dome[0][2], 1.0f));
-        float zx0, zy0;
-        sky__project(0.0f, 90.0f, &zx0, &zy0);
-        int cvi = draw__push_vert(d, zx0 * mk, zy0 * mk,
-                                  d->white_u, d->white_v);
-        for (int ri = 0; ri < SKY_DOME_RINGS; ri++) {
-            float alt = sky__dome_alts[ri];
-            for (int si = 0; si <= SEC; si++) {
-                const float *dc2 =
-                    st->dome[1 + ri * (SEC + 1) + si];
-                draw_set_color(d, dca(dc2[0], dc2[1], dc2[2], 1.0f));
-                float az = (float)si / SEC * 360.0f;
-                float vx2, vy2;
-                sky__project(az, alt, &vx2, &vy2);
-                int vi = draw__push_vert(d, vx2 * mk, vy2 * mk,
-                                         d->white_u, d->white_v);
-                curv[si] = vi;
-                if (si > 0) {
-                    if (ri == 0) {
-                        draw__tri(d, cvi, curv[si - 1], vi);
-                    } else {
-                        draw__tri(d, prev[si - 1], curv[si - 1], vi);
-                        draw__tri(d, prev[si - 1], vi, prev[si]);
-                    }
-                }
-            }
-            memcpy(prev, curv, sizeof(prev));
-        }
-        d->alpha = base_alpha;
+        // (The dome is drawn ONCE by the calendar view — the shared
+        // sky circle across the whole chart family.)
     }
 
     // Altitude circles at +/-30 and +/-60 degrees + the zenith cross —

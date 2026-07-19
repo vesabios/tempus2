@@ -31,10 +31,13 @@ struct AstroViewState {
     double blend;     // mirrored scene astro_blend
 
     // Rayleigh-Mie sky colors for the wash, cached on the minute
-    // (and on the latitude — the ORBIS drag re-lights the plate)
+    // (and on the latitude — the ORBIS drag re-lights the plate).
+    // The wash itself is drawn ONCE, by the calendar view, as the
+    // shared sky circle — these are its colors and its plate seat.
     double sky_jd;
     float  sky_lat;
     float  sky_cols[1 + ASTRO_SKY_RINGS * (ASTRO_SKY_SEC + 1)][3];
+    float  sky_hyc, sky_hr;   // the horizon circle: center y, radius
 
     // The hour ring between the limb and the band: the rendering-
     // time control, one revolution one day (CAELVM's control, here)
@@ -142,8 +145,9 @@ static void astro_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->blend = sc->astro_blend;
     st->skyv = &sc->sky_state;
     st->skb = sc->sky_blend;
-    if (st->blend <= 0.001) return;
-
+    // The shared sky circle needs this state at CAELVM too — the
+    // whole chart family runs through this update
+    if (st->blend <= 0.001 && sc->sky_blend <= 0.001) return;
     // The wash: true single-scattering per vertex, cached on the
     // minute and the latitude. The sun's az/alt come from the same
     // dec/H the rule uses — one sky, one sun.
@@ -204,6 +208,14 @@ static void astro_update(void *buf, const Tempus *t, double dt, Scene *sc) {
             st->pl_x[b] = px2;
             st->pl_y[b] = py2;
         }
+    }
+
+    {
+        float hxn, hyn, hxs, hys;
+        astro__project_altaz(0.0f, 0.0f, lat, &hxn, &hyn);
+        astro__project_altaz(0.0f, 180.0f, lat, &hxs, &hys);
+        st->sky_hyc = (hyn + hys) * 0.5f;
+        st->sky_hr = fabsf(hyn - hys) * 0.5f;
     }
 
     double key = floor(jd_ut * 1440.0);
@@ -282,58 +294,8 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
     // Day / twilight / night, from the sun's true altitude
     float dayk = (float)tempus_smoothstep(-12.0, 6.0, sun_alt);
 
-    // ---- The sky itself: one CIRCLE, clipped by the plate ----
-    // Seren's law: the sky region is the SAME SHAPE at both stations
-    // — a perfect circle. CAELVM's bowl (centered, half-radius) RISES
-    // and grows into the astrolabe's horizon circle (offset up the
-    // meridian), and where it passes the limb it is CLIPPED. The
-    // lens is not a deformed bowl; it is a circle behind a plate,
-    // and the clip appearing at the top IS the transition.
-    {
-        float hxn, hyn, hxs, hys;
-        astro__project_altaz(0.0f, 0.0f, lat, &hxn, &hyn);
-        astro__project_altaz(0.0f, 180.0f, lat, &hxs, &hys);
-        float hyc = (hyn + hys) * 0.5f;
-        float hr = fabsf(hyn - hys) * 0.5f;
-        float cy = hyc * (1.0f - wc);      // the bowl sits at origin
-        float cr = hr + (SKY_HOR - hr) * wc;
-        int prev[ASTRO_SKY_SEC + 1], curv[ASTRO_SKY_SEC + 1];
-        d->alpha = 0.94f * fam;
-        draw_set_color(d, dca(st->sky_cols[0][0], st->sky_cols[0][1],
-                              st->sky_cols[0][2], 1.0f));
-        int cvi = draw__push_vert(d, 0, cy, d->white_u, d->white_v);
-        for (int ri = 0; ri < ASTRO_SKY_RINGS; ri++) {
-            float altv = astro__sky_alts[ri];
-            float rr2 = cr * (90.0f - altv) / 90.0f;
-            for (int si = 0; si <= ASTRO_SKY_SEC; si++) {
-                const float *c =
-                    st->sky_cols[1 + ri * (ASTRO_SKY_SEC + 1) + si];
-                draw_set_color(d, dca(c[0], c[1], c[2], 1.0f));
-                float az = (float)si / ASTRO_SKY_SEC * 360.0f
-                         * d2r;
-                float x = -sinf(az) * rr2;
-                float y = cy + cosf(az) * rr2;
-                float pr2 = sqrtf(x * x + y * y);
-                if (pr2 > ASTRO_R_CAP) {   // the plate clips the sky
-                    x *= ASTRO_R_CAP / pr2;
-                    y *= ASTRO_R_CAP / pr2;
-                }
-                int vi = draw__push_vert(d, x, y,
-                                         d->white_u, d->white_v);
-                curv[si] = vi;
-                if (si > 0) {
-                    if (ri == 0) {
-                        draw__tri(d, cvi, curv[si - 1], vi);
-                    } else {
-                        draw__tri(d, prev[si - 1], curv[si - 1], vi);
-                        draw__tri(d, prev[si - 1], vi, prev[si]);
-                    }
-                }
-            }
-            memcpy(prev, curv, sizeof(prev));
-        }
-        d->alpha = base_alpha;
-    }
+    // (The sky circle is drawn ONCE by the calendar view — the
+    // shared shape across the whole chart family.)
 
     // ---- The plate: limb, equator, tropics ----
     draw_set_color(d, dca(0.50f, 0.48f, 0.44f, 0.75f));
