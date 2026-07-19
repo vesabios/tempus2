@@ -99,7 +99,7 @@ static inline RenderStyle style_default(void) {
     s.month_arc_radius_b = 54.0f;  s.month_arc_width_b = -49.0f;
     s.month_text_radius_a = 82.0f; s.month_text_radius_b = 94.0f;
     s.wheel_pointer_offset_a = 9.0f; s.wheel_pointer_offset_b = 9.0f;
-    s.glyph_start_offset = 50.0f;
+    s.glyph_start_offset = 108.0f;
     s.glyph_end_offset = -120.0f;
     s.glyph_line_start = -10.0f;
     s.glyph_line_end = 19.0f;
