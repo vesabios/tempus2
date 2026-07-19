@@ -582,6 +582,27 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             orr__strokes(d, horae__sigil[c], pcx2 + sux * 42.0f,
                          pcy2 + suy * 42.0f, sux, suy, 24.0f, 1.0f);
         }
+        // The magnifying glass: the plate occludes the dial's
+        // numerals as it rolls, so it SHOWS the one that matters —
+        // the current temporal hour, enlarged at its center, curved
+        // and flip-compensated exactly like the face's own numerals
+        // (the lens renders what it covers, only larger)
+        {
+            float na2 = fmodf(ah, 2.0f * (float)M_PI);
+            if (na2 < 0) na2 += 2.0f * (float)M_PI;
+            bool mflip = (na2 > (float)M_PI * 0.5f
+                          && na2 < (float)M_PI * 1.5f);
+            // The face's numerals run 15px by day; the lens shows
+            // its one at 24 — magnified, same voice
+            float msz = 24.0f;
+            float mr = (Rn - rp - 2.0f) - msz * 0.5f
+                     + msz * (mflip ? 0.51f : 0.37f);
+            draw_set_color(d, dca(0.80f, 0.77f, 0.70f,
+                                  hcur < 12 ? 0.95f : 0.70f));
+            draw_text_curved(d, FONT_clock, 0, 0, mr, ah,
+                             horae__roman[hcur % 12], 0.25f,
+                             msz / _font_compat[FONT_clock].size);
+        }
         // The meshing edge, so the dark wheel holds its shape
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
         draw_circle_stroked(d, pcx2, pcy2, rp, 1.0f);
