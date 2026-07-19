@@ -61,7 +61,9 @@ struct OrreryViewState {
     bool  lum_pq_valid;
     const SkyViewState *skyv;
     const DracoViewState *drav;
+    const AstroViewState *astv;
     double drab;        // mirrored scene draco_blend (DRACO handoff)
+    double astb;        // mirrored scene astro_blend (chart handoff)
     double w_dial;      // station-weight sum of the dial family
     double w_globe;     // station-weight sum of the globe family
 
@@ -372,6 +374,8 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->skyv = &sc->sky_state;
     st->drav = &sc->draco_state;
     st->drab = sc->draco_blend;
+    st->astv = &sc->astro_state;
+    st->astb = sc->astro_blend;
     // The station weight vector, folded into the two families the
     // machine's own seats know: dial furniture vs globe attachment
     st->w_dial  = sc->stw[ST_HOROLOGIVM] + sc->stw[ST_HORAE]
@@ -1387,26 +1391,32 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // aperture leak back in mid-flight: the sun dipped inward
         // and back out).
         float dw = (float)st->drab;
+        float ab = (float)st->astb;
         float wS = (st->skyv && skw > 0.001f) ? skw : 0.0f;
         float wD = (st->drav && dw > 0.001f) ? dw : 0.0f;
-        if (wS > 0.0f || wD > 0.0f) {
+        float wA = (st->astv && ab > 0.001f) ? ab : 0.0f;
+        if (wS > 0.0f || wD > 0.0f || wA > 0.0f) {
             // MEMBER ROWS (Stage 2): seat 0 is the machine's own
             // composed seat (its internal morph over helio/system/
-            // orbis); seats 1..2 are the chart stations' published
-            // members. Cross-frame outputs, so seat_mix_pos (rule 3).
-            float wB = 1.0f - wS - wD;
+            // orbis); seats 1..3 are the chart stations' published
+            // members — CAELVM, DRACO, and the astrolabe's plate.
+            // Cross-frame outputs, so seat_mix_pos (rule 3).
+            float wB = 1.0f - wS - wD - wA;
             if (wB < 0.0f) wB = 0.0f;
-            double wT = wB + wS + wD;
-            double w[3] = { wB / wT, wS / wT, wD / wT };
-            float mx[3] = { px, wS > 0 ? st->skyv->lum_sun_x : 0,
-                            wD > 0 ? st->drav->lum_sun_x : 0 };
-            float my[3] = { py, wS > 0 ? st->skyv->lum_sun_y : 0,
-                            wD > 0 ? st->drav->lum_sun_y : 0 };
-            seat_mix_pos(mx, my, w, 3, &px, &py);
-            float mr[3] = { sz, wS > 0 ? st->skyv->lum_sun_r : 0,
-                            28.0f };
+            double wT = wB + wS + wD + wA;
+            double w[4] = { wB / wT, wS / wT, wD / wT, wA / wT };
+            float mx[4] = { px, wS > 0 ? st->skyv->lum_sun_x : 0,
+                            wD > 0 ? st->drav->lum_sun_x : 0,
+                            wA > 0 ? st->astv->lum_sun_x : 0 };
+            float my[4] = { py, wS > 0 ? st->skyv->lum_sun_y : 0,
+                            wD > 0 ? st->drav->lum_sun_y : 0,
+                            wA > 0 ? st->astv->lum_sun_y : 0 };
+            seat_mix_pos(mx, my, w, 4, &px, &py);
+            float mr[4] = { sz, wS > 0 ? st->skyv->lum_sun_r : 0,
+                            28.0f,
+                            wA > 0 ? st->astv->lum_sun_r : 0 };
             sz = mr[0] * (float)w[0] + mr[1] * (float)w[1]
-               + mr[2] * (float)w[2];
+               + mr[2] * (float)w[2] + mr[3] * (float)w[3];
             // the dragon's gold rides its share of the mix
             float gd = (float)w[2];
             sun_c.r += (0.85f - sun_c.r) * gd;
@@ -1422,7 +1432,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         wst->lum_sun_col[0] = sun_c.r;
         wst->lum_sun_col[1] = sun_c.g;
         wst->lum_sun_col[2] = sun_c.b;
-        wst->lum_sun_ray = ss * (1.0f - skw) * (1.0f - dw);
+        wst->lum_sun_ray = ss * (1.0f - skw) * (1.0f - dw)
+                         * (1.0f - ab);
         wst->bead_x = px;
         wst->bead_y = py;
         wst->bead_r = sz;
@@ -1576,34 +1587,41 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // machine's aperture seat must not leak into a sky<->draco
         // flight. Position, size, and phase light all share weights.
         float dw2 = (float)st->drab;
+        float ab2 = (float)st->astb;
         {
             float wS = (st->skyv && skw > 0.001f) ? skw : 0.0f;
             float wD = (st->drav && dw2 > 0.001f) ? dw2 : 0.0f;
-            if (wS > 0.0f || wD > 0.0f) {
+            float wA = (st->astv && ab2 > 0.001f) ? ab2 : 0.0f;
+            if (wS > 0.0f || wD > 0.0f || wA > 0.0f) {
                 // MEMBER ROWS (Stage 2): seat 0 = the machine's composed
-                // moon; seats 1..2 = the chart stations' published
-                // members. Cross-frame outputs, so seat_mix_pos (rule 3);
+                // moon; seats 1..3 = the chart stations' published
+                // members (CAELVM, DRACO, the astrolabe's plate).
+                // Cross-frame outputs, so seat_mix_pos (rule 3);
                 // the phase light is a live-frame dir3 (never nlerp'd).
-                float wB = 1.0f - wS - wD;
+                float wB = 1.0f - wS - wD - wA;
                 if (wB < 0.0f) wB = 0.0f;
-                double wT = wB + wS + wD;
-                double w[3] = { wB / wT, wS / wT, wD / wT };
-                float mx[3] = { mmx, wS > 0 ? st->skyv->lum_moon_x : 0,
-                                wD > 0 ? st->drav->lum_moon_x : 0 };
-                float my[3] = { mmy, wS > 0 ? st->skyv->lum_moon_y : 0,
-                                wD > 0 ? st->drav->lum_moon_y : 0 };
-                seat_mix_pos(mx, my, w, 3, &mmx, &mmy);
-                float mr[3] = { mmr, wS > 0 ? st->skyv->lum_moon_r : 0,
-                                28.0f };
+                double wT = wB + wS + wD + wA;
+                double w[4] = { wB / wT, wS / wT, wD / wT, wA / wT };
+                float mx[4] = { mmx, wS > 0 ? st->skyv->lum_moon_x : 0,
+                                wD > 0 ? st->drav->lum_moon_x : 0,
+                                wA > 0 ? st->astv->lum_moon_x : 0 };
+                float my[4] = { mmy, wS > 0 ? st->skyv->lum_moon_y : 0,
+                                wD > 0 ? st->drav->lum_moon_y : 0,
+                                wA > 0 ? st->astv->lum_moon_y : 0 };
+                seat_mix_pos(mx, my, w, 4, &mmx, &mmy);
+                float mr[4] = { mmr, wS > 0 ? st->skyv->lum_moon_r : 0,
+                                28.0f,
+                                wA > 0 ? st->astv->lum_moon_r : 0 };
                 mmr = mr[0] * (float)w[0] + mr[1] * (float)w[1]
-                    + mr[2] * (float)w[2];
-                float lv[3][3];
+                    + mr[2] * (float)w[2] + mr[3] * (float)w[3];
+                float lv[4][3];
                 memcpy(lv[0], ml, sizeof(lv[0]));
                 for (int i = 0; i < 3; i++) {
                     lv[1][i] = wS > 0 ? st->skyv->lum_moon_light[i] : 0;
                     lv[2][i] = wD > 0 ? st->drav->lum_light[i] : 0;
+                    lv[3][i] = wA > 0 ? st->astv->lum_moon_light[i] : 0;
                 }
-                seat_mix_dir3((const float (*)[3])lv, w, 3, ml);
+                seat_mix_dir3((const float (*)[3])lv, w, 4, ml);
             }
         }
         // Publish for VIEW_LVMEN (and the pointer code's exclusions)
@@ -1631,13 +1649,20 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             globe_rot_slerp_cont(rot_geo, rot_helio, morb,
                                  stw->moon_pq, &stw->moon_pq_valid,
                                  mrot0);
-            globe_rot_slerp_cont(mrot0, rot_geo, skw,
+            // Every CHART returns the moon to the near side — the
+            // claim is the chart family's combined weight
+            double chw = skw + ab2;
+            if (chw > 1.0) chw = 1.0;
+            globe_rot_slerp_cont(mrot0, rot_geo, chw,
                                  stw->lum_pq, &stw->lum_pq_valid,
                                  stw->lum_moon_rot);
         }
-        stw->lum_moon_aux[0] = edx * morb * (1.0f - skw) * (1.0f - dw2);
-        stw->lum_moon_aux[1] = edy * morb * (1.0f - skw) * (1.0f - dw2);
-        stw->lum_moon_aux[2] = 1.0f - morb * (1.0f - skw) * (1.0f - dw2);
+        stw->lum_moon_aux[0] = edx * morb * (1.0f - skw) * (1.0f - dw2)
+                             * (1.0f - ab2);
+        stw->lum_moon_aux[1] = edy * morb * (1.0f - skw) * (1.0f - dw2)
+                             * (1.0f - ab2);
+        stw->lum_moon_aux[2] = 1.0f - morb * (1.0f - skw)
+                                    * (1.0f - dw2) * (1.0f - ab2);
         stw->lum_moon_aux[3] = 1.0f;
     }
 

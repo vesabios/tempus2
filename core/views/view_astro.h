@@ -35,6 +35,13 @@ struct AstroViewState {
     double sky_jd;
     float  sky_lat;
     float  sky_cols[1 + ASTRO_SKY_RINGS * (ASTRO_SKY_SEC + 1)][3];
+
+    // Luminary chart targets, published for the orrery's composition
+    // (the ONE OBJECT law): the sun and moon fly onto the plate as
+    // the same objects they are everywhere else.
+    float lum_sun_x, lum_sun_y, lum_sun_r;
+    float lum_moon_x, lum_moon_y, lum_moon_r;
+    float lum_moon_light[3];
 };
 
 #endif // VIEW_ASTRO_H
@@ -140,12 +147,7 @@ static void astro_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     // dec/H the rule uses — one sky, one sun.
     double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
                  - t->config.timezone / 24.0;
-    double key = floor(jd_ut * 1440.0);
     float lat = (float)t->config.latitude;
-    if (key == st->sky_jd && lat == st->sky_lat) return;
-    st->sky_jd = key;
-    st->sky_lat = lat;
-
     float d2r = (float)M_PI / 180.0f;
     float sp = sinf(lat * d2r), cp = cosf(lat * d2r);
     float lst = (float)fmod(planets__gmst(jd_ut) + t->config.longitude,
@@ -157,6 +159,43 @@ static void astro_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     float sdec = asinf(sinf(eps) * sinf(lam));
     float ra = atan2f(cosf(eps) * sinf(lam), cosf(lam)) / d2r;
     float H = (lst - ra) * d2r;
+
+    // Luminary chart targets, every frame (positions are cheap; the
+    // atmosphere below is the minute-cached part)
+    {
+        float sx2, sy2;
+        astro__project(sdec / d2r, (lst - ra), &sx2, &sy2);
+        st->lum_sun_x = sx2;
+        st->lum_sun_y = sy2;
+        st->lum_sun_r = 9.0f;
+        double mlon, mlat2;
+        planets__body_lonlat(BODY_MOON, jd_ut, &mlon, &mlat2);
+        float lmm = (float)mlon * d2r, bmm = (float)mlat2 * d2r;
+        float sdm = sinf(bmm) * cosf(eps)
+                  + cosf(bmm) * sinf(eps) * sinf(lmm);
+        float decm = asinf(sdm) / d2r;
+        float ram = atan2f(sinf(lmm) * cosf(eps)
+                           - tanf(bmm) * sinf(eps), cosf(lmm)) / d2r;
+        float mx2, my2;
+        astro__project(decm, lst - ram, &mx2, &my2);
+        st->lum_moon_x = mx2;
+        st->lum_moon_y = my2;
+        st->lum_moon_r = 10.0f;
+        double phb = globe_moon_phase(st->tv.jd_current
+                                      + st->tv.percent_of_day - 0.5);
+        float bb = (float)(phb * 2.0 * M_PI);
+        float ux = sx2 - mx2, uy = sy2 - my2;
+        float un = sqrtf(ux * ux + uy * uy);
+        if (un > 1.0e-4f) { ux /= un; uy /= un; }
+        st->lum_moon_light[0] = ux * sinf(bb);
+        st->lum_moon_light[1] = uy * sinf(bb);
+        st->lum_moon_light[2] = -cosf(bb);
+    }
+
+    double key = floor(jd_ut * 1440.0);
+    if (key == st->sky_jd && lat == st->sky_lat) return;
+    st->sky_jd = key;
+    st->sky_lat = lat;
     float salt = asinf(sp * sinf(sdec) + cp * cosf(sdec) * cosf(H));
     float saz = atan2f(-cosf(sdec) * sinf(H),
                        sinf(sdec) * cp - cosf(sdec) * sp * cosf(H));
@@ -424,10 +463,12 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_set_color(d, dca(0.72f, 0.55f, 0.25f, 0.9f));
         draw_line(d, ux * ASTRO_R_CAP, uy * ASTRO_R_CAP,
                   -ux * ASTRO_R_CAP, -uy * ASTRO_R_CAP, 1.2f);
+        // The sun's DISC is VIEW_LVMEN's — the same object that rides
+        // every station flies onto the plate. This view keeps only
+        // the regalia: the risen sun's rays, the rule, the caption.
         d->alpha = base_alpha * (up ? 1.0f : 0.45f);
         draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 1.0f));
         if (up) {
-            draw_circle_filled(d, sx, sy, 8.0f);
             for (int i = 0; i < 8; i++) {
                 float a = ((float)i / 8.0f) * 2.0f * (float)M_PI;
                 float rx2 = sinf(a), ry2 = -cosf(a);
@@ -437,8 +478,6 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
                           sy + ry2 * (11.0f + ((i & 1) ? 4.0f : 7.0f)),
                           1.1f);
             }
-        } else {
-            draw_circle_stroked(d, sx, sy, 8.0f, 1.5f);
         }
         // The altitude, written where the rule meets the limb
         {
@@ -472,16 +511,14 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
                            + cp * cosf(decm * d2r)
                              * cosf(ham * d2r)) / d2r;
         float mx, my;
+        // The moon's globe is VIEW_LVMEN's; only the name is ours
         if (astro__project(decm, ham, &mx, &my)
             && mx * mx + my * my <= ASTRO_R_CAP * ASTRO_R_CAP) {
-            d->alpha = base_alpha * (altm > 0 ? 0.95f : 0.35f);
-            draw_set_color(d, dca(0.84f, 0.83f, 0.80f, 0.95f));
-            draw_circle_stroked(d, mx, my, 5.5f, 1.5f);
             if (altm > 0) {
                 int fw = _font_compat[FONT_date].weight;
                 d->alpha = base_alpha * 0.5f;
                 draw_set_color(d, dca(0.66f, 0.63f, 0.57f, 0.85f));
-                draw_text_ex(d, fw, 11.0f, mx + 8.0f, my + 4.0f,
+                draw_text_ex(d, fw, 11.0f, mx + 13.0f, my + 4.0f,
                              "LVNA");
             }
         }

@@ -293,6 +293,8 @@ static void apply_view_mode(void) {
     // scenery; at full blend draco draws its own beads late in its
     // own layer, so the sandwich (furnace under, umbra over) holds.
     scene_add_layer(&g_scene, VIEW_DRACO);
+    scene_add_layer(&g_scene, VIEW_ASTRO);   // a chart: under the
+                                             // luminaries, like the sky
     scene_add_layer(&g_scene, VIEW_LVMEN);
     scene_add_layer(&g_scene, VIEW_CLOCK);
     scene_add_layer(&g_scene, VIEW_HORAE);
@@ -300,7 +302,6 @@ static void apply_view_mode(void) {
     scene_add_layer(&g_scene, VIEW_SAEC);
     scene_add_layer(&g_scene, VIEW_ORBIS);
     scene_add_layer(&g_scene, VIEW_OFFIC);
-    scene_add_layer(&g_scene, VIEW_ASTRO);
 }
 
 static void set_view_opacities(void) {
@@ -382,6 +383,12 @@ static void set_view_opacities(void) {
         double lum = (double)ink_out(INK_LUM_SKYVIS, sky);
         double skyvis = (double)ink_in(INK_LUM_SKYVIS, sky);
         lum = fade > skyvis ? fade : skyvis;
+        // The astrolabe is a CHART: it keeps the luminaries the whole
+        // way, riding its published plate targets
+        {
+            double avis = (double)ink_in(INK_LUM_SKYVIS, astro);
+            if (avis > lum) lum = avis;
+        }
         // DRACO flights keep the luminaries with VIEW_LVMEN the whole
         // way (the orrery composes toward draco's published targets);
         // at full blend the station takes over at exact coincidence —
