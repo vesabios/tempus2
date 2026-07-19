@@ -571,9 +571,15 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         for (int c = 0; c < 7; c++) {
             const uint8_t *mc = horae__metal_col[c];
             bool curp = (c == ridx);
-            draw_set_color(d, dca(mc[0] / 255.0f, mc[1] / 255.0f,
-                                  mc[2] / 255.0f,
-                                  curp ? 0.85f : 0.30f));
+            // A quiet wheel: six cells in the instrument's engraved
+            // neutral, only the hour's own ruler wearing its metal —
+            // the alchemical color lives at the reading point, not
+            // as a rainbow around the pinion
+            if (curp)
+                draw_set_color(d, dca(mc[0] / 255.0f, mc[1] / 255.0f,
+                                      mc[2] / 255.0f, 0.60f));
+            else
+                draw_set_color(d, dca(0.30f, 0.29f, 0.27f, 0.22f));
             horae__cell(d, pcx2, pcy2, rp - 15.0f, rp,
                         c / 7.0f + phi, (c + 1) / 7.0f + phi);
             float sa = ((c + 0.5f) / 7.0f + phi) * 2.0f * (float)M_PI;
