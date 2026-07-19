@@ -177,6 +177,7 @@ typedef enum {
     VIEW_ORBIS,
     VIEW_LVMEN,
     VIEW_OFFIC,
+    VIEW_DRACO,
     VIEW_COUNT,
 } ViewId;
 
@@ -192,6 +193,7 @@ typedef struct SaecViewState SaecViewState;
 typedef struct OrbisViewState OrbisViewState;
 typedef struct LumenViewState LumenViewState;
 typedef struct OfficViewState OfficViewState;
+typedef struct DracoViewState DracoViewState;
 
 // View state is a tagged union — properly typed, no byte buffer casts.
 typedef union {

@@ -20,6 +20,7 @@
 #include "views/view_orbis.h"
 #include "views/view_lumen.h"
 #include "views/view_offic.h"
+#include "views/view_draco.h"
 
 // ---- Transitions ----
 
@@ -52,7 +53,7 @@ static inline PacePolicy pace_default(void) {
 
 // ---- Scene ----
 
-#define SCENE_MAX_LAYERS  12
+#define SCENE_MAX_LAYERS  14
 #define SCENE_MAX_CYCLE  16
 
 struct Scene {
@@ -71,6 +72,7 @@ struct Scene {
     OrbisViewState    orbis_state;
     LumenViewState    lumen_state;
     OfficViewState    offic_state;
+    DracoViewState    draco_state;
 
     // Active layer stack (back to front)
     ViewId      layers[SCENE_MAX_LAYERS];
@@ -128,6 +130,7 @@ struct Scene {
     // Instrument <-> the book of hours (OFFICIVM): the canonical
     // offices strung around the day wheel
     double      offic_blend;
+    double      draco_blend;
 };
 
 // Now Scene is defined — include view function implementations
@@ -143,6 +146,7 @@ struct Scene {
 #include "views/view_orbis.h"
 #include "views/view_lumen.h"
 #include "views/view_offic.h"
+#include "views/view_draco.h"
 
 // ---- Layer management ----
 
@@ -222,6 +226,7 @@ static inline void scene_init(Scene *sc, const Tempus *t) {
     sc->views[VIEW_ORBIS].state    = &sc->orbis_state;
     sc->views[VIEW_LVMEN].state    = &sc->lumen_state;
     sc->views[VIEW_OFFIC].state    = &sc->offic_state;
+    sc->views[VIEW_DRACO].state    = &sc->draco_state;
 }
 
 static inline void scene_register_view(Scene *sc, ViewId id, const ViewVtable *vt) {
