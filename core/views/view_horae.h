@@ -612,8 +612,8 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             float sux = sinf(sa), suy = -cosf(sa);
             draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
                                   curp ? 0.95f : 0.30f));
-            orr__strokes(d, horae__sigil[c], pcx2 + sux * 26.0f,
-                         pcy2 + suy * 26.0f, sux, suy, 18.0f, 1.0f);
+            orr__strokes(d, horae__sigil[c], pcx2 + sux * 33.0f,
+                         pcy2 + suy * 33.0f, sux, suy, 24.0f, 1.0f);
         }
         // The meshing edge, so the dark wheel holds its shape
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
