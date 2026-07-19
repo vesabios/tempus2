@@ -551,7 +551,7 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
 // share; the plate's limb clips the blended result — the circle
 // rises, meets the plate, and is eaten by it.
 static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
-                            const RenderStyle *s) {
+                            const Tempus *t, const RenderStyle *s) {
     float fam = st->sky_a;
     if (fam < 0.004f || !st->astv) return;
     const AstroViewState *av = st->astv;
@@ -699,89 +699,103 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
                   1.0f + 0.5f * (1.0f - wc));
 
     // ---- The CARDINALS: one set, riding the rim between stations --
-    // Anchors blend between CAELVM's fixed compass circle and the
-    // plate's closed-form horizon points (E/W at +-Req always, N/S at
-    // the circle's meridian crossings). The letter fades into the
-    // engraved word as it travels; MERIDIES has no plate seat and
-    // exits through the limb with CAELVM's share.
+    // Anchors blend between CAELVM's horizon (SCALED with the live
+    // bowl — they ride the growing rim, never a fixed circle) and
+    // the plate's closed-form horizon points. Letters only, both
+    // stations (Seren); S has no plate seat and fades with CAELVM.
     {
-        static const struct {
-            float az; const char *word; const char *letter;
-        } cardn[4] = {
-            { 0.0f,   "SEPTENTRIO", "N" },
-            { 90.0f,  "ORIENS",     "E" },
-            { 180.0f, "MERIDIES",   "S" },
-            { 270.0f, "OCCIDENS",   "W" },
+        static const struct { float az; const char *letter; }
+        cardn[4] = {
+            { 0.0f, "N" }, { 90.0f, "E" },
+            { 180.0f, "S" }, { 270.0f, "W" },
         };
         float Req = astro__req();
-        float cy = av->sky_hyc * (1.0f - wc);  // blended circle center
-        float a_let = ink_in(INK_CHART_LATE, st->skyb_l);
-        float a_word = fam * (1.0f - wc);
+        float cyb = av->sky_hyc * (1.0f - wc);
+        float a_let = ink_in(INK_CHART_LATE, fam);
         int cw = _font_compat[FONT_month].weight;
         for (int i = 0; i < 4; i++) {
-            float ax, ay;                   // the plate's seat
+            float ax, ay;
             if (i == 0) { ax = 0; ay = av->sky_hyc + av->sky_hr; }
             else if (i == 1) { ax = -Req; ay = 0; }
             else if (i == 2) { ax = 0; ay = av->sky_hyc - av->sky_hr; }
             else { ax = Req; ay = 0; }
             float x = ax, y = ay;
-            if (wc > 0.001f && sv) {        // CAELVM's fixed circle
+            if (wc > 0.001f && sv) {
                 float bx, by;
                 sky__project(cardn[i].az, 0.0f, &bx, &by);
-                x = ax * (1.0f - wc) + bx * wc;
-                y = ay * (1.0f - wc) + by * wc;
+                x = ax * (1.0f - wc) + bx * mk * wc;
+                y = ay * (1.0f - wc) + by * mk * wc;
             }
             float pr2 = sqrtf(x * x + y * y);
             if (pr2 > clip) { x *= clip / pr2; y *= clip / pr2; }
-            float dnx = x, dny = y - cy;
+            float dnx = x, dny = y - cyb;
             float dl = sqrtf(dnx * dnx + dny * dny);
             if (dl < 1.0e-3f) continue;
             dnx /= dl; dny /= dl;
-            // the tick, straddling the rim at the true bearing
-            d->alpha = base_alpha * fam
-                     * (0.35f + 0.40f * (1.0f - wc) + 0.25f * a_let);
+            float a_this = a_let * (i == 2 ? wc : 1.0f);
+            if (a_this < 0.004f) continue;
+            d->alpha = base_alpha * a_this
+                     * (0.55f + 0.20f * (1.0f - wc));
             draw_set_color(d, dca(0.66f, 0.63f, 0.55f, 0.9f));
             draw_line(d, x - dnx * 5.0f, y - dny * 5.0f,
                       x + dnx * 5.0f, y + dny * 5.0f, 1.4f);
-            // CAELVM's letter, outside the rim
-            if (a_let > 0.004f) {
-                float sz2 = _font_compat[FONT_month].size;
-                float tw2 = sdf_measure_width(cw, cardn[i].letter)
-                          * sz2;
-                d->alpha = base_alpha * a_let * 0.75f;
-                draw_set_color(d, dca(0.66f, 0.63f, 0.57f, 0.75f));
-                draw_text_ex(d, cw, sz2,
-                             x + dnx * 26.0f - tw2 * 0.5f,
-                             y + dny * 26.0f - sz2 * 0.5f,
-                             cardn[i].letter);
-            }
-            // the plate's engraved word, along the rim beside the
-            // tick (MERIDIES stays silent — no seat on the plate)
-            if (a_word > 0.004f && i != 2) {
-                float ca = atan2f(x, -(y - cy));
-                float lsz = _font_compat[FONT_date].size * 0.78f;
-                float ltrack = 0.5f;
-                int lw2 = _font_compat[FONT_date].weight;
-                float wpx = (sdf_measure_width(lw2, cardn[i].word)
-                             + ltrack
-                               * (float)strlen(cardn[i].word))
-                          * lsz;
-                float na = fmodf(ca, 2.0f * (float)M_PI);
-                if (na < 0) na += 2.0f * (float)M_PI;
-                float side = (na < (float)M_PI) ? 1.0f : -1.0f;
-                float ca2 = ca + side * (wpx * 0.5f + 10.0f)
-                                 / (dl - 13.0f);
-                float na2 = fmodf(ca2, 2.0f * (float)M_PI);
-                if (na2 < 0) na2 += 2.0f * (float)M_PI;
-                bool lflip = (na2 > (float)M_PI * 0.5f
-                              && na2 < (float)M_PI * 1.5f);
-                float lr = dl - 14.0f
-                         + lsz * (lflip ? 0.51f : 0.37f)
-                         - lsz * 0.44f;
-                d->alpha = base_alpha * a_word * 0.55f;
-                draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.85f));
-                draw_text_curved(d, FONT_date, 0, cy, lr, ca2,
-                                 cardn[i].word, ltrack, 0.78f);
+            float sz2 = _font_compat[FONT_month].size;
+            float tw2 = sdf_measure_width(cw, cardn[i].letter) * sz2;
+            d->alpha = base_alpha * a_this * 0.75f;
+            draw_set_color(d, dca(0.66f, 0.63f, 0.57f, 0.75f));
+            draw_text_ex(d, cw, sz2,
+                         x + dnx * 26.0f - tw2 * 0.5f,
+                         y + dny * 26.0f - sz2 * 0.5f,
+                         cardn[i].letter);
+        }
+    }
+
+    // ---- The HORIZON CALENDAR: the eight days' sightlines, shared -
+    // The sabbats' rise/set bearings straddle the LIVE blended rim —
+    // perfectly aligned with the horizon at every moment of flight.
+    {
+        float cyb = av->sky_hyc * (1.0f - wc);
+        int cur = 0;
+        double bd = 1.0e9;
+        for (int i = 0; i < 8; i++) {
+            double dd = fabs(st->tv.jd_current - t->jd_events[i]);
+            if (dd < bd) { bd = dd; cur = i; }
+        }
+        float a_hc = ink_in(INK_CHART_LATE, fam);
+        for (int ev = 0; ev < 8; ev++) {
+            double dec = sunset__sun_declination(
+                sunset__time_julian_cent(t->jd_events[ev]));
+            float azr;
+            if (!tempus_rise_azimuth(dec, t->config.latitude, &azr))
+                continue;
+            bool sol = (ev == 3 || ev == 7);
+            float em = (ev == cur) ? 0.95f : (sol ? 0.62f : 0.38f);
+            float ln = sol ? 24.0f : 15.0f;
+            for (int side = 0; side < 2; side++) {
+                float az = side ? 360.0f - azr : azr;
+                float ax2, ay2;
+                if (!astro__project_altaz(0.0f, az,
+                                          (float)t->config.latitude,
+                                          &ax2, &ay2))
+                    continue;
+                float x = ax2, y = ay2;
+                if (wc > 0.001f && sv) {
+                    float bx, by;
+                    sky__project(az, 0.0f, &bx, &by);
+                    x = ax2 * (1.0f - wc) + bx * mk * wc;
+                    y = ay2 * (1.0f - wc) + by * mk * wc;
+                }
+                float pr2 = sqrtf(x * x + y * y);
+                if (pr2 > clip) { x *= clip / pr2; y *= clip / pr2; }
+                float dnx = x, dny = y - cyb;
+                float dl = sqrtf(dnx * dnx + dny * dny);
+                if (dl < 1.0e-3f) continue;
+                dnx /= dl; dny /= dl;
+                d->alpha = base_alpha * a_hc * em;
+                draw_set_color(d, dca(0.72f, 0.55f, 0.25f, 0.85f));
+                draw_line(d, x - dnx * 4.0f, y - dny * 4.0f,
+                          x + dnx * ln, y + dny * ln,
+                          sol ? 1.5f : 1.0f);
             }
         }
     }

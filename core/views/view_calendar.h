@@ -213,7 +213,7 @@ static void calendar_update(void *buf, const Tempus *t, double dt, Scene *sc) {
 static void cal__hour_ring(const CalendarViewState *st, DrawCtx *d,
                            const RenderStyle *s);
 static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
-                            const RenderStyle *s);
+                            const Tempus *t, const RenderStyle *s);
 
 static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
                             const RenderStyle *s) {
@@ -423,7 +423,7 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
     d->sx = save_sx;
     d->sy = save_sy;
 
-    cal__sky_circle(st, d, s);
+    cal__sky_circle(st, d, t, s);
     cal__hour_ring(st, d, s);
 }
 

@@ -579,49 +579,9 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                       1.0f);
         }
 
-        // ---- The horizon calendar: the eight days as sightlines ----
-        // Before brass, the year was kept exactly here: where on YOUR
-        // horizon the sun rises and sets on each of the eight days —
-        // Stonehenge's diagram, at your latitude. Gold sightline
-        // ticks pointing inward from the horizon at each rise/set
-        // bearing; the solstice pair emphasized (they bound the fan),
-        // the season underway brightest.
-        {
-            int cur = 0;
-            double bd = 1.0e9;
-            for (int i = 0; i < 8; i++) {
-                double dd = fabs(st->tv.jd_current - t->jd_events[i]);
-                if (dd < bd) { bd = dd; cur = i; }
-            }
-            for (int ev = 0; ev < 8; ev++) {
-                double dec = sunset__sun_declination(
-                    sunset__time_julian_cent(t->jd_events[ev]));
-                float azr;
-                if (!tempus_rise_azimuth(dec, t->config.latitude, &azr))
-                    continue;   // no crossing at this latitude
-                bool sol = (ev == 3 || ev == 7);   // Litha, Yule
-                float em = (ev == cur) ? 0.95f : (sol ? 0.62f : 0.38f);
-                float ln = sol ? 24.0f : 15.0f;
-                for (int side = 0; side < 2; side++) {
-                    float az = side ? 360.0f - azr : azr;
-                    float bx, by;
-                    sky__project(az, 0.0f, &bx, &by);
-                    float dx = bx - zpx, dy = by - zpy;
-                    float dn = sqrtf(dx * dx + dy * dy);
-                    if (dn < 1.0e-3f) continue;
-                    dx /= dn; dy /= dn;
-                    d->alpha = base_alpha * fb * em;
-                    draw_set_color(d, dca(0.72f, 0.55f, 0.25f, 0.85f));
-                    // The sightline straddles the horizon, reaching
-                    // OUTWARD into the dark (inward it drowns in the
-                    // daylit bowl) — a gnomon seen from above
-                    draw_line(d, bx - dx * 4.0f, by - dy * 4.0f,
-                              bx + dx * ln, by + dy * ln,
-                              sol ? 1.5f : 1.0f);
-                }
-            }
-            d->alpha = base_alpha * fb;
-        }
+        // (The horizon calendar is a SHARED element now — the one
+        // drawer rides its sightlines on the blended rim.)
+
     }
 
     // (The 24-hour ring is ONE OBJECT now — the calendar view
