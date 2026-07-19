@@ -159,7 +159,7 @@ static inline void sky_view_pan(SkyViewState *st, float dx, float dy) {
     } else {
         st->view_az = atan2f(nx, ny) * 180.0f / (float)M_PI;
     }
-    if (alt < 10.0f) alt = 10.0f;   // the pitch clamp: no digging
+    if (alt < 5.0f) alt = 5.0f;     // the pitch clamp: no digging
     st->view_alt = alt;
 }
 
@@ -235,6 +235,33 @@ static void sky_exit(void *buf, const Tempus *t, Scene *sc) {
     (void)buf; (void)t; (void)sc;
 }
 
+// Luminary chart targets for VIEW_LVMEN: positions on this chart
+// through the LIVE look, one shared legible size (the sun and moon
+// subtend the same half degree of real sky), and the moon's phase
+// light aimed at the sun's chart position. Requires body_az/body_alt
+// already filled — call only after the ephemeris cache is valid.
+static void sky__lum_targets(SkyViewState *st) {
+    float sx, sy, mx2, my2;
+    sky__project(st->body_az[BODY_SUN], st->body_alt[BODY_SUN],
+                 &sx, &sy);
+    sky__project(st->body_az[BODY_MOON], st->body_alt[BODY_MOON],
+                 &mx2, &my2);
+    st->lum_sun_x = sx;
+    st->lum_sun_y = sy;
+    st->lum_sun_r = 14.0f;
+    st->lum_moon_x = mx2;
+    st->lum_moon_y = my2;
+    st->lum_moon_r = 14.0f;
+    double phb = globe_moon_phase(st->cache_jd);
+    float bb = (float)(phb * 2.0 * M_PI);
+    float ux = sx - mx2, uy = sy - my2;
+    float un = sqrtf(ux * ux + uy * uy);
+    if (un > 1.0e-4f) { ux /= un; uy /= un; }
+    st->lum_moon_light[0] = ux * sinf(bb);
+    st->lum_moon_light[1] = uy * sinf(bb);
+    st->lum_moon_light[2] = -cosf(bb);
+}
+
 static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     SkyViewState *st = (SkyViewState *)buf;
     st->orr = &sc->orrery_state;
@@ -249,36 +276,14 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     // the fixed circle, and the hour ring scrubs the display time —
     // bodies wheel along their diurnal arcs across the chart, and the
     // bowl wears the sky's own color for that instant.
-    // Luminary chart targets — refreshed EVERY update, before the
-    // time gate: they depend on the LOOK as much as the clock, and
-    // the look can move while time stands still.
-    // Positions on this chart, arrival sizes,
-    // and the moon's phase light aimed at the sun's chart position
-    {
-        float sx, sy, mx2, my2;
-        sky__project(st->body_az[BODY_SUN], st->body_alt[BODY_SUN],
-                     &sx, &sy);
-        sky__project(st->body_az[BODY_MOON], st->body_alt[BODY_MOON],
-                     &mx2, &my2);
-        st->lum_sun_x = sx;
-        st->lum_sun_y = sy;
-        st->lum_sun_r = orr__pip_r(st->now.mag[BODY_SUN]);
-        st->lum_moon_x = mx2;
-        st->lum_moon_y = my2;
-        st->lum_moon_r = orr__pip_r(st->now.mag[BODY_MOON]) + 12.0f;
-        double phb = globe_moon_phase(st->cache_jd);
-        float bb = (float)(phb * 2.0 * M_PI);
-        float ux = sx - mx2, uy = sy - my2;
-        float un = sqrtf(ux * ux + uy * uy);
-        if (un > 1.0e-4f) { ux /= un; uy /= un; }
-        st->lum_moon_light[0] = ux * sinf(bb);
-        st->lum_moon_light[1] = uy * sinf(bb);
-        st->lum_moon_light[2] = -cosf(bb);
-    }
-
     double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
                  - t->config.timezone / 24.0;
-    if (fabs(jd_ut - st->cache_jd) <= 1.0 / 1440.0) return;
+    if (fabs(jd_ut - st->cache_jd) <= 1.0 / 1440.0) {
+        // Ephemeris cache holds — but the LOOK moves between minute
+        // ticks, so the luminary chart targets reproject every update
+        sky__lum_targets(st);
+        return;
+    }
     st->cache_jd = jd_ut;
 
     double lat = t->config.latitude, lon = t->config.longitude;
@@ -348,6 +353,10 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         st->sign_alt[i] = (float)alt;
     }
 
+    // Targets from the fresh ephemeris — always AFTER the fill, so
+    // the very first update never publishes zeroed az/alt (the sun
+    // and moon were landing pinned to the north horizon)
+    sky__lum_targets(st);
 }
 
 // Alias kept for the morph call sites: the full-sphere projection
