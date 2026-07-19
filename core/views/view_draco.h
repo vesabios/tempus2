@@ -344,10 +344,11 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
             gm->tex_id = 1;
             gm->grid_boost = 0.0f;
             gm->obs_lat = 999.0f;
-            // EARTHSHINE first (the same recipe VIEW_LVMEN wears, so
-            // the coincidence handoff stays seamless), then the blood
-            // moon on top: entering Earth's shadow, the disc reddens
-            // to the umbral copper of refracted sunset light
+            // EARTHSHINE, this station only (the other moons' fixed
+            // indigo is already tuned; DRACO's big lune on bare black
+            // needed its shadow side lifted), then the blood moon on
+            // top: entering Earth's shadow, the disc reddens to the
+            // umbral copper of refracted sunset light
             float es = 0.5f * (1.0f + cosf(bb));
             float nr = 0.10f + 0.17f * es;
             float ng = 0.105f + 0.175f * es;
