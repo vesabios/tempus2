@@ -340,6 +340,15 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
             gm->light[0] = sinf(bb);
             gm->light[1] = 0.0f;
             gm->light[2] = -cosf(bb);
+            // Observer direction for the shader's phase-legibility
+            // dim: straight at the viewer, the geo aperture's "no
+            // change" setting. Left unset, the shader falls back to
+            // the EARTH solstice sun — a phantom second terminator
+            // (Seren caught the double shadow).
+            gm->aux_dir[0] = 0.0f;
+            gm->aux_dir[1] = 0.0f;
+            gm->aux_dir[2] = 1.0f;
+            gm->aux_dir[3] = 1.0f;
             gm->land = true;
             gm->tex_id = 1;
             gm->grid_boost = 0.0f;
