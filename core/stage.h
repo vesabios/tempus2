@@ -9,6 +9,18 @@
 #ifndef TEMPUS_STAGE_H
 #define TEMPUS_STAGE_H
 
+// The CAMERA: the instrument is drawn in a 1280-tall world, and the
+// full system pulls the view back to fit the outer rings. CAELVM eases
+// most of the way home again — room for the sky bowl with the calendar
+// wheel riding outside it as the bezel.
+#define SYS_CAMERA_ZOOM    0.62f
+#define CAELVM_CAMERA_ZOOM 0.85f
+
+static float tempus_camera_scale(const Scene *sc) {
+    float k = 1.0f - (1.0f - SYS_CAMERA_ZOOM) * (float)sc->system_blend;
+    return k + (CAELVM_CAMERA_ZOOM - k) * (float)sc->sky_blend;
+}
+
 static void tempus_stage_views(Scene *sc, int station) {
     double hb = sc->helio_blend;
     double sky = sc->sky_blend;

@@ -295,7 +295,11 @@ static double g_prefsTimer = 1e9;   // force a read on the first frame
     scene_update(&g_scene, &g_tempus, dt);
     tempus_stage_views(&g_scene, g_tour[g_tourIdx]);
 
+    // The system stage pulls the camera back; CAELVM eases it home
+    float scale = h / 1280.0f * tempus_camera_scale(&g_scene);
     draw_begin(&g_draw, w, h);
+    g_draw.sx = scale;
+    g_draw.sy = scale;
     scene_render(&g_scene, &g_draw, &g_tempus);
 
     if (g_draw.num_verts > 0) {

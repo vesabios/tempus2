@@ -123,15 +123,9 @@ static float g_wv_btn[WV_COUNT][4];   // x0, y0, x1, y1
 static double g_ffwd = 0.0;
 static float g_tc_btn[3][4];
 
-#define SYS_CAMERA_ZOOM    0.62f
-#define CAELVM_CAMERA_ZOOM 0.85f
+// (The camera lives in core/stage.h, shared with the saver.)
 static float sys_camera_scale(void) {
-    float k = 1.0f - (1.0f - SYS_CAMERA_ZOOM) * (float)g_scene.system_blend;
-    // CAELVM: camera eases most of the way home — enough room for the
-    // sky bowl AND the calendar wheel riding outside it as the bezel.
-    // The zodiac ring still hands off to the horizon rim at near-
-    // matching screen size.
-    return k + (CAELVM_CAMERA_ZOOM - k) * (float)g_scene.sky_blend;
+    return tempus_camera_scale(&g_scene);
 }
 
 // Fly the instrument to a worldview station: geo (0,0,0), heliocentric
