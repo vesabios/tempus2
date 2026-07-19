@@ -205,9 +205,9 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         orr__ecl_dir(st->sun_lon, &sx, &sy);
         float spx = sx * DRACO_R, spy = sy * DRACO_R;
         draw_set_color(d, dca(0.85f, 0.62f, 0.18f, 0.95f));
-        draw_circle_filled(d, spx, spy, 15.0f);
+        draw_circle_filled(d, spx, spy, 22.0f);
         draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
-        draw_circle_stroked(d, spx, spy, 19.0f, 1.0f);
+        draw_circle_stroked(d, spx, spy, 27.0f, 1.0f);
 
         float mx, my;
         orr__ecl_dir(st->moon_lon, &mx, &my);
@@ -215,7 +215,7 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         // own exaggeration — it rides the dragon's back exactly
         float mr = DRACO_R + DRACO_AMP / 5.145f * (float)st->moon_lat;
         float mpx = mx * mr, mpy = my * mr;
-        GlobeCmd *gm = draw_globe_slot(d, mpx, mpy, 15.0f);
+        GlobeCmd *gm = draw_globe_slot(d, mpx, mpy, 22.0f);
         if (gm) {
             double phb = globe_moon_phase(st->cache_jd);
             float bb = (float)(phb * 2.0 * M_PI);
