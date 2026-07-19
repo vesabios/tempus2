@@ -82,9 +82,11 @@ static inline void sky__project(float az_deg, float alt_deg,
     if (alt_deg > 90.0f) alt_deg = 90.0f;
     if (alt_deg < -90.0f) alt_deg = -90.0f;
     float rr = (90.0f - alt_deg) / 180.0f * SKY_R;
+    // North at the BOTTOM, east on the right (Seren's orientation —
+    // the chart as you'd hold it facing south)
     float a = az_deg * (float)M_PI / 180.0f;
-    *x = -sinf(a) * rr;
-    *y = -cosf(a) * rr;
+    *x = sinf(a) * rr;
+    *y = cosf(a) * rr;
 }
 
 #define SKY_HOR (SKY_R * 0.5f)   // the horizon circle
@@ -332,8 +334,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                     st->dome[1 + ri * (SEC + 1) + si];
                 draw_set_color(d, dca(dc2[0], dc2[1], dc2[2], 1.0f));
                 float a = (float)si / SEC * 2.0f * (float)M_PI;
-                int vi = draw__push_vert(d, -sinf(a) * rr,
-                                         -cosf(a) * rr,
+                int vi = draw__push_vert(d, sinf(a) * rr,
+                                         cosf(a) * rr,
                                          d->white_u, d->white_v);
                 curv[si] = vi;
                 if (si > 0) {
@@ -624,7 +626,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         static const char *card[4] = { "N", "E", "S", "W" };
         for (int i = 0; i < 36; i++) {
             float a = (float)i * 10.0f * (float)M_PI / 180.0f;
-            float dx = -sinf(a), dy = -cosf(a);
+            float dx = sinf(a), dy = cosf(a);
             bool major = (i % 9) == 0;
             draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
                                   major ? 0.6f : 0.25f));
