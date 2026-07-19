@@ -303,15 +303,23 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                     if (salt > 1.0f) salt = 1.0f;
                     if (salt < -1.0f) salt = -1.0f;
                     float sun_alt = asinf(salt) / d2r;
-                    float sd2[3], rd2[3], col[3];
+                    // Two rays: LOW TOWARD THE SUN (6 deg — where the
+                    // reddened path length is maximal, the seat of the
+                    // drama) blended with the anti-solar sky at 25 deg
+                    // so the day keeps its blue against the sunward
+                    // white. The fire is real; we just look at it.
+                    float sd2[3], ra[3], rb[3], ca[3], cb[3];
                     atmo_dir(0.0f, sun_alt, sd2);
-                    atmo_dir(0.0f, 16.0f, rd2);
-                    atmo_scatter(rd2, sd2, col);
+                    atmo_dir(0.0f, 6.0f, ra);
+                    atmo_dir(180.0f, 25.0f, rb);
+                    atmo_scatter(ra, sd2, ca);
+                    atmo_scatter(rb, sd2, cb);
                     for (int cch = 0; cch < 3; cch++) {
-                        float c = 1.0f - expf(-col[cch]);
+                        float mixv = ca[cch] * 0.62f + cb[cch] * 0.38f;
+                        float c = 1.0f - expf(-mixv);
                         float base = cch == 0 ? 0.030f
                                    : cch == 1 ? 0.036f : 0.075f;
-                        float v = base + c * 0.86f;
+                        float v = base + c * 0.92f;
                         stw->band_col[i][cch] = v > 1.0f ? 1.0f : v;
                     }
                 }
