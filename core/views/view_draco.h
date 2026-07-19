@@ -315,6 +315,52 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
             gm->night_col[2] = 0.23f - 0.16f * bl;
             gm->night_col[3] = 1.0f;
         }
+
+        // ---- The umbra itself, crossing the moon ----
+        // Earth's shadow hangs at the exact anti-solar point on the
+        // road, ~2.7 moon-widths wide — and it is INVISIBLE, a dark
+        // disc on a dark sky, until the full moon sails into it. Then
+        // the bite crosses the disc: entry, totality, exit, a few
+        // hours by the true clock. Soft penumbral rim; drawn over
+        // the lune (the globe pass renders beneath later pushes).
+        if (glow_lun > 0.005f) {
+            float ax, ay;
+            orr__ecl_dir(st->sun_lon + 180.0, &ax, &ay);
+            float ucx = ax * DRACO_R, ucy = ay * DRACO_R;
+            const int SEG = 40;
+            float r_umb = 74.0f;
+            float uf = glow_lun * 6.0f;
+            if (uf > 1.0f) uf = 1.0f;
+            // Dark but not opaque: a totally eclipsed moon stays
+            // VISIBLE as the blood disc through the shadow — the
+            // umbra darkens what it covers, it doesn't erase it
+            static const float ush_r[3] = { 0.0f, 0.70f, 1.0f };
+            static const float ush_a[3] = { 0.62f, 0.55f, 0.0f };
+            int base[3];
+            for (int sh = 0; sh < 3; sh++) {
+                draw_set_color(d, dca(0.05f, 0.012f, 0.008f,
+                                      ush_a[sh] * uf));
+                if (sh == 0) {
+                    base[0] = draw__push_vert(d, ucx, ucy,
+                                              d->white_u, d->white_v);
+                } else {
+                    base[sh] = d->num_verts;
+                    for (int i = 0; i < SEG; i++) {
+                        float a = (float)i / SEG * 2.0f * (float)M_PI;
+                        draw__push_vert(d,
+                            ucx + cosf(a) * r_umb * ush_r[sh],
+                            ucy + sinf(a) * r_umb * ush_r[sh],
+                            d->white_u, d->white_v);
+                    }
+                }
+            }
+            for (int i = 0; i < SEG; i++) {
+                int j = (i + 1) % SEG;
+                draw__tri(d, base[0], base[1] + i, base[1] + j);
+                draw__tri(d, base[1] + i, base[2] + i, base[2] + j);
+                draw__tri(d, base[1] + i, base[2] + j, base[1] + j);
+            }
+        }
     }
 
     // ---- The reading ----
