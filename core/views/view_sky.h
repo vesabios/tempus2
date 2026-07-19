@@ -133,32 +133,15 @@ static inline void sky__project(float az_deg, float alt_deg,
     *y = py / len * rr;
 }
 
-// Pan the look: the content follows the finger; the center walks the
-// sphere the other way. Called from the pointer code.
+// Pan the look: PITCH ONLY — the azimuth is fixed, so the drag's
+// vertical component tips the view between the zenith and the faced
+// horizon and nothing else moves. Drag down = look up (the content
+// follows the finger). With the yaw frozen there is no pole to
+// mishandle: alt runs the full clamp to 90.
 static inline void sky_view_pan(SkyViewState *st, float dx, float dy) {
-    float mag = sqrtf(dx * dx + dy * dy);
-    if (mag < 1.0e-4f) return;
-    sky__set_center(st->view_az, st->view_alt);
-    float dAng = mag / SKY_R * (float)M_PI;
-    float tx = (-dx * sky__vr[0] - dy * sky__vd[0]) / mag;
-    float ty = (-dx * sky__vr[1] - dy * sky__vd[1]) / mag;
-    float tz = (-dx * sky__vr[2] - dy * sky__vd[2]) / mag;
-    float ca = cosf(dAng), sa = sinf(dAng);
-    float nx = sky__vc[0] * ca + tx * sa;
-    float ny = sky__vc[1] * ca + ty * sa;
-    float nz = sky__vc[2] * ca + tz * sa;
-    float nn = sqrtf(nx*nx + ny*ny + nz*nz);
-    nx /= nn; ny /= nn; nz /= nn;
-    if (nz > 1.0f) nz = 1.0f;
-    float alt = asinf(nz) * 180.0f / (float)M_PI;
-    // Hold short of the pole: crossing the exact zenith flips the
-    // azimuth frame 180 degrees in a frame — the whole chart would
-    // spin. Panning stops at 89; the azimuth only updates below it.
-    if (alt > 89.0f) {
-        alt = 89.0f;
-    } else {
-        st->view_az = atan2f(nx, ny) * 180.0f / (float)M_PI;
-    }
+    (void)dx;
+    float alt = st->view_alt + dy / SKY_R * 180.0f;
+    if (alt > 90.0f) alt = 90.0f;
     if (alt < 5.0f) alt = 5.0f;     // the pitch clamp: no digging
     st->view_alt = alt;
 }
