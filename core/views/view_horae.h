@@ -553,6 +553,29 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_circle_stroked(d, rcx, rcy, HORAE_RING_OUT, 1.0f);
     }
 
+    // ---- The hand, UNDER the gear train ----
+    // One revolution per week, aimed at the contact. Warm bone, not
+    // white — the same voice as the reading — and it slides BENEATH
+    // the pinion: the wheel meshes over it, and the gold tooth beyond
+    // reads as the hand's continuation through the works.
+    {
+        float px2 = -hdy, py2 = hdx;
+        float hw = 3.4f;
+        float h0 = 46.0f, h1 = HORAE_CLOCK_R - HORAE_CLOCK_W - 12.0f;
+        draw_set_color(d, dca(0.82f, 0.79f, 0.71f, 0.92f));
+        int vb = d->num_verts;
+        draw__push_vert(d, hdx * h0 - px2 * hw, hdy * h0 - py2 * hw,
+                        d->white_u, d->white_v);
+        draw__push_vert(d, hdx * h0 + px2 * hw, hdy * h0 + py2 * hw,
+                        d->white_u, d->white_v);
+        draw__push_vert(d, hdx * h1 + px2 * hw, hdy * h1 + py2 * hw,
+                        d->white_u, d->white_v);
+        draw__push_vert(d, hdx * h1 - px2 * hw, hdy * h1 - py2 * hw,
+                        d->white_u, d->white_v);
+        draw__tri(d, vb, vb + 1, vb + 2);
+        draw__tri(d, vb, vb + 2, vb + 3);
+    }
+
     // ---- The rulers' pinion ----
     // The tangent idea carried inward: the seven Chaldean rulers as a
     // small wheel meshing the INSIDE of the sky wheel at the same
@@ -585,37 +608,13 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             float sa = ((c + 0.5f) / 7.0f + phi) * 2.0f * (float)M_PI;
             float sux = sinf(sa), suy = -cosf(sa);
             draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
-                                  curp ? 0.95f : 0.45f));
+                                  curp ? 0.95f : 0.30f));
             orr__strokes(d, horae__sigil[c], pcx2 + sux * 26.0f,
                          pcy2 + suy * 26.0f, sux, suy, 18.0f, 1.0f);
         }
+        // One rim only — the meshing edge
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
         draw_circle_stroked(d, pcx2, pcy2, rp, 1.0f);
-        draw_circle_stroked(d, pcx2, pcy2, rp - 15.0f, 1.0f);
-    }
-
-    // ---- The hands, over everything: this is a clock ----
-    {
-        // Day hand: hour-hand dress, one revolution per day, aimed at
-        // the contact — it points AT the ruling planet's tooth
-        float px2 = -hdy, py2 = hdx;
-        float hw = 5.0f;
-        // The hands hold off the center, as on the 12-hour face — the
-        // hub is negative space
-        float h0 = 46.0f, h1 = HORAE_CLOCK_R - 10.0f;
-        draw_set_color(d, s->hours_color);
-        int vb = d->num_verts;
-        draw__push_vert(d, hdx * h0 - px2 * hw, hdy * h0 - py2 * hw,
-                        d->white_u, d->white_v);
-        draw__push_vert(d, hdx * h0 + px2 * hw, hdy * h0 + py2 * hw,
-                        d->white_u, d->white_v);
-        draw__push_vert(d, hdx * h1 + px2 * hw, hdy * h1 + py2 * hw,
-                        d->white_u, d->white_v);
-        draw__push_vert(d, hdx * h1 - px2 * hw, hdy * h1 - py2 * hw,
-                        d->white_u, d->white_v);
-        draw__tri(d, vb, vb + 1, vb + 2);
-        draw__tri(d, vb, vb + 2, vb + 3);
-
     }
 
     // ---- The reading, written outside the ring at the contact ----
@@ -624,7 +623,6 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     // and HORA line flickered through their changes at every scrub;
     // the pinion's sigil and the gold tooth already carry the hour.)
     {
-        const uint8_t *c = horae__metal_col[ridx];
         float na = fmodf(ah, 2.0f * (float)M_PI);
         if (na < 0) na += 2.0f * (float)M_PI;
         bool lflip = (na > (float)M_PI * 0.5f && na < (float)M_PI * 1.5f);
@@ -642,15 +640,9 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_text_curved(d, FONT_month, rcx, rcy, rn, ah, db,
                          1.2f, 1.0f);
 
-        // The ruler's pip sits directly ON the week ring's outer rim
-        // at the contact, a bead threaded on the line — hand, pip,
-        // day: one radial procession
-        {
-            float pr = HORAE_RING_OUT - HORAE_ECC;
-            draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
-                                  c[2] / 255.0f, 0.95f));
-            draw_circle_filled(d, hdx * pr, hdy * pr, 6.5f);
-        }
+        // (The ruler's pip is retired — the pinion's metal cell and
+        // sigil at the mesh already name the ruler; the outer rim
+        // belongs to the day's words alone.)
     }
 
     d->alpha = base_alpha;
