@@ -76,7 +76,7 @@ never need to be.
 
 - **Stage 0 — done**: `TEMPUS_FLY` deterministic flight harness +
   `scripts/flight_matrix.sh` / `flight_diff.py`; baseline baked.
-- **Stage 1**: station weight vector + station descriptor table
+- **Stage 1 — done**: station weight vector + station descriptor table
   (fly targets, wheel radius, furniture scale, input policy, layer
   dimming as table columns).
 - **Stage 2 — done**: members + manager for the sun and moon; the
@@ -87,7 +87,7 @@ never need to be.
   whole flight instead of welding at the first quarter. Acceptance:
   interleaved arbitration under the pinned observer, drift confined
   to the two intended buckets.
-- **Stage 3**: planets onto the manager; `sky_owns` and coincidence
+- **Stage 3 — done**: planets onto the manager; `sky_owns` and coincidence
   handoffs deleted. Shape: the sky publishes per-body chart members
   (position, pip radius, alpha policy, style) exactly as it already
   publishes the luminaries' targets; the orrery renders every bead at
