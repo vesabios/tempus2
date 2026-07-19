@@ -105,8 +105,19 @@ never need to be.
   chart*(1-mw); alpha = ba (0.78 subdued below horizon, stroked ring
   when not observable) * (ms + (1-ms)*fin). The orrery's machine-side
   stagger is a_planet = smoothstep(0.20, 0.60, ss), gated off by
-  sky_owns today — that gate is what Stage 3 deletes. Check how the
-  sky's beads fade at DRACO (drab term) before moving them.
+  sky_owns today — that gate is what Stage 3 deletes. The sky has NO
+  draco term: planets fade on DRACO flights purely through mb/fin
+  (born-in-place in reverse) — carry that over unchanged. RENDERER
+  DECISION: the orrery's opacity is floored at 0.002 at chart
+  stations (it renders as the luminaries' composer only), so the
+  beads cannot live in its pass — VIEW_LVMEN becomes the body
+  renderer for all nine objects. The orrery composes each planet's
+  member row (machine ring seat, published sky chart target, weights
+  mw/sw from the vocabulary above) and publishes to LVMEN exactly as
+  it does for the sun and moon. Stacking consequence, accepted:
+  beads draw above the sky's compass/labels instead of under —
+  review at-rest CAELVM diffs for real overlaps. Ring NAMES stay in
+  the orrery (a_name tail), sky NAME labels stay in the sky (fb).
 - **Stage 4**: ink staging table — the ~27 scattered smoothstep
   windows become one declarative per-element table; entrance
   choreography tuned globally.
