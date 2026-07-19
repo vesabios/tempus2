@@ -56,7 +56,7 @@ static const StationDesc station_table[ST_COUNT] = {
     [ST_ORBIS]      = { "ORBIS",         0,   0,   0,  false,  505, 0.85f, true, false },
     [ST_OFFICIVM]   = { "OFFICIVM",      0,   0,   0,  false,  450, 1.0f, true,  false },
     [ST_DRACO]      = { "DRACO",         0,   0,   0,  false,  450, 1.0f, false, false },
-    [ST_ASTROLAB]   = { "ASTROLABIVM",   0,   0,   0,  false,  450, 1.0f, false, false },
+    [ST_ASTROLAB]   = { "ASTROLABIVM",   0,   0,   0,  false,  450, 1.0f, true,  false },
 };
 
 // The station weight vector: normalized, barycentric, derived from
