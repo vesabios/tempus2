@@ -56,11 +56,11 @@ static const char *offic__feria[7] = {
 };
 
 // ---- The labors of the months ----
-// The canonical northern cycle every book of hours engraves over its
-// calendar (Tres Riches Heures, Amiens, Chartres): feast, fire, plow,
-// bloom, hunt, hay, harvest, threshing, vintage, sowing, acorns,
-// slaughter. Emblems in the same stroke-table idiom as the zodiac
-// sigils — point count then x,y pairs, unit box y-up, 0 ends.
+// The cycle of the Tres Riches Heures calendar pages: feast, fire,
+// plow, betrothal, the Maying bough, hay, harvest, falconry, vintage,
+// sowing, acorns, the boar hunt. Emblems in the same stroke-table
+// idiom as the zodiac sigils — point count then x,y pairs, unit box
+// y-up, 0 ends.
 static const float offic__lab_jan[] = {   // the feast: a goblet
     6, -0.20f,0.30f, -0.16f,0.10f, -0.06f,0, 0.06f,0, 0.16f,0.10f,
        0.20f,0.30f,
@@ -78,20 +78,16 @@ static const float offic__lab_mar[] = {   // plowing: the ard
     3, -0.10f,-0.36f, 0.10f,-0.30f, 0.02f,-0.24f,
     7, -0.20f,-0.24f, -0.24f,-0.14f, -0.34f,-0.14f, -0.40f,-0.24f,
        -0.34f,-0.34f, -0.24f,-0.34f, -0.20f,-0.24f, 0 };
-static const float offic__lab_apr[] = {   // greening: a bloom
-    3, 0,-0.42f, 0.02f,-0.10f, 0,0.10f,
-    9, 0,0.10f, -0.14f,0.16f, -0.16f,0.34f, -0.04f,0.26f, 0.02f,0.40f,
-       0.10f,0.26f, 0.18f,0.32f, 0.14f,0.14f, 0,0.10f,
-    2, 0.01f,-0.14f, 0.20f,-0.26f,
-    2, -0.01f,-0.22f, -0.18f,-0.34f, 0 };
-static const float offic__lab_may[] = {   // the hunt: a horn
-    5, -0.34f,0.10f, -0.24f,-0.14f, -0.04f,-0.28f, 0.18f,-0.24f,
-       0.34f,-0.10f,
-    5, -0.30f,0.06f, -0.20f,-0.08f, -0.02f,-0.20f, 0.16f,-0.16f,
-       0.28f,-0.06f,
-    2, -0.34f,0.10f, -0.30f,0.06f,
-    2, 0.34f,-0.10f, 0.28f,-0.06f,
-    2, -0.34f,0.10f, -0.42f,0.22f, 0 };
+static const float offic__lab_apr[] = {   // the betrothal: a gem ring
+    9, 0.22f,-0.08f, 0.16f,0.06f, 0,0.12f, -0.16f,0.06f, -0.22f,-0.08f,
+       -0.16f,-0.22f, 0,-0.28f, 0.16f,-0.22f, 0.22f,-0.08f,
+    5, -0.10f,0.16f, 0,0.34f, 0.10f,0.16f, 0,0.09f, -0.10f,0.16f, 0 };
+static const float offic__lab_may[] = {   // the Maying: a green bough
+    4, -0.05f,-0.44f, 0,-0.15f, 0.10f,0.15f, 0.06f,0.42f,
+    2, 0,-0.15f, -0.16f,-0.04f,
+    2, 0.02f,-0.08f, 0.18f,0.02f,
+    2, 0.08f,0.10f, -0.08f,0.22f,
+    2, 0.09f,0.18f, 0.24f,0.28f, 0 };
 static const float offic__lab_jun[] = {   // haymaking: the scythe
     4, -0.30f,-0.44f, -0.10f,0, 0.02f,0.30f, 0,0.44f,
     2, -0.10f,0, -0.24f,0.06f,
@@ -104,10 +100,13 @@ static const float offic__lab_jul[] = {   // harvest: the sickle
     2, -0.30f,-0.06f, -0.38f,0.06f,
     2, -0.30f,-0.06f, -0.24f,0.08f,
     2, -0.31f,-0.16f, -0.39f,-0.06f, 0 };
-static const float offic__lab_aug[] = {   // threshing: the flail
-    2, -0.24f,-0.44f, -0.06f,0.06f,
-    2, -0.06f,0.06f, 0.02f,0.14f,
-    2, 0.02f,0.14f, 0.32f,0.32f, 0 };
+static const float offic__lab_aug[] = {   // falconry: bird on perch
+    11, -0.06f,-0.30f, -0.14f,-0.16f, -0.16f,0.04f, -0.10f,0.22f,
+        0,0.30f, 0.10f,0.26f, 0.18f,0.20f, 0.12f,0.14f, 0.10f,0.02f,
+        0.02f,-0.16f, -0.06f,-0.30f,
+    3, -0.10f,0.12f, -0.02f,-0.06f, -0.04f,-0.24f,
+    2, -0.34f,-0.36f, 0.26f,-0.36f,
+    2, -0.04f,-0.30f, -0.04f,-0.36f, 0 };
 static const float offic__lab_sep[] = {   // vintage: the cluster
     7, 0,0.02f, -0.06f,0.10f, -0.14f,0.06f, -0.14f,-0.02f, -0.06f,-0.06f,
        0.02f,-0.02f, 0,0.02f,
@@ -137,10 +136,13 @@ static const float offic__lab_nov[] = {   // pannage: the acorn
        0.10f,0.16f,
     2, -0.02f,0.24f, -0.02f,0.34f,
     2, 0.26f,-0.30f, 0.29f,-0.30f, 0 };
-static const float offic__lab_dec[] = {   // slaughter: the axe
-    2, -0.30f,-0.44f, 0.14f,0.20f,
-    5, 0.06f,0.10f, 0.30f,0.28f, 0.44f,0.06f, 0.20f,-0.06f,
-       0.06f,0.10f, 0 };
+static const float offic__lab_dec[] = {   // the boar hunt: the boar
+    10, -0.30f,0.20f, -0.10f,0.26f, 0.10f,0.18f, 0.28f,0.06f,
+        0.40f,-0.06f, 0.34f,-0.16f, 0.20f,-0.18f, 0,-0.26f,
+        -0.22f,-0.24f, -0.30f,0.20f,
+    2, 0.28f,-0.18f, 0.36f,-0.08f,
+    3, -0.16f,0.24f, -0.06f,0.38f, 0.02f,0.22f,
+    2, 0.12f,0.02f, 0.15f,0.02f, 0 };
 static const float *offic__labors[12] = {
     offic__lab_jan, offic__lab_feb, offic__lab_mar, offic__lab_apr,
     offic__lab_may, offic__lab_jun, offic__lab_jul, offic__lab_aug,
