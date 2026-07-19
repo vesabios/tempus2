@@ -238,6 +238,11 @@ static void apply_view_mode(void) {
     // over them (the moon lives in the dial's aperture at HOROLOGIVM).
     // The two never fight: wherever the sky is up, the clock is gone.
     scene_add_layer(&g_scene, VIEW_SKY);
+    // DRACO's tracks live UNDER the luminaries: during flights the
+    // sun and moon are VIEW_LVMEN's and must ride over the dragon's
+    // scenery; at full blend draco draws its own beads late in its
+    // own layer, so the sandwich (furnace under, umbra over) holds.
+    scene_add_layer(&g_scene, VIEW_DRACO);
     scene_add_layer(&g_scene, VIEW_LVMEN);
     scene_add_layer(&g_scene, VIEW_CLOCK);
     scene_add_layer(&g_scene, VIEW_HORAE);
@@ -245,7 +250,6 @@ static void apply_view_mode(void) {
     scene_add_layer(&g_scene, VIEW_SAEC);
     scene_add_layer(&g_scene, VIEW_ORBIS);
     scene_add_layer(&g_scene, VIEW_OFFIC);
-    scene_add_layer(&g_scene, VIEW_DRACO);
 }
 
 static void set_view_opacities(void) {
