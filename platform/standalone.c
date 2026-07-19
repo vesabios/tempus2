@@ -1151,7 +1151,7 @@ static void frame(void) {
     }
 
     g_desired_fps = scene_desired_fps(&g_scene);
-    if (g_show_debug || g_time < g_boost_until)
+    if (g_show_debug || g_time < g_boost_until || g_ffwd > 0.0)
         g_desired_fps = g_scene.pace.animate_fps;  // interactive: full rate
 
     bool do_update = (g_time - g_last_update) >= (1.0 / g_desired_fps) - dt * 0.5;
@@ -1168,11 +1168,12 @@ static void frame(void) {
                 || g_scene.sky_state.hour_dragging
                 || g_scene.horae_state.ring_dragging))
             g_ffwd = 0.0;
-        // Fast-forward: the override river runs at LX or DC
+        // Fast-forward: the override river runs at DC rate
         if (g_ffwd > 0.0) {
             scene__begin_override(&g_tempus);
             scene__advance_override_days(&g_tempus,
-                                         g_ffwd * dt / 1440.0, false);
+                                         g_ffwd * upd_dt / 1440.0,
+                                         false);
         }
         tempus_update(&g_tempus, g_time);
         scene_update(&g_scene, &g_tempus, upd_dt);
@@ -1323,17 +1324,16 @@ static void frame(void) {
                                 x0 + tw + 12.0f, mer_y, 0.20f, meridiem);
 
             // Time controls: NVNC returns to the living present;
-            // LX and DC pour the override forward at 60x and 600x
+            // DC pours the override forward at 600x
             {
-                const char *lbl[3] = { "NVNC", "LX", "DC" };
-                bool lit[3] = {
+                const char *lbl[2] = { "NVNC", "DC" };
+                bool lit[2] = {
                     !g_tempus.time_override && g_ffwd == 0.0,
-                    g_ffwd == 1.0,
                     g_ffwd == 10.0,
                 };
                 float bx = x0;
                 float by = -444.0f;
-                for (int i = 0; i < 3; i++) {
+                for (int i = 0; i < 2; i++) {
                     draw_set_color(&g_draw, lit[i]
                         ? dca(0.78f, 0.75f, 0.68f, 0.95f)
                         : dca(0.50f, 0.49f, 0.46f, 0.38f));
@@ -1514,7 +1514,7 @@ static void event(const sapp_event *e) {
                 return;
             }
         }
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 2; i++) {
             if (cx >= g_tc_btn[i][0] && cx <= g_tc_btn[i][2]
                 && cy >= g_tc_btn[i][1] && cy <= g_tc_btn[i][3]) {
                 g_scene.calendar_state.fling_vel = 0;
@@ -1523,7 +1523,7 @@ static void event(const sapp_event *e) {
                     g_ffwd = 0.0;
                     g_tempus.time_override = false;
                 } else {
-                    g_ffwd = (i == 1) ? 1.0 : 10.0;
+                    g_ffwd = 10.0;
                     scene__begin_override(&g_tempus);
                 }
                 return;

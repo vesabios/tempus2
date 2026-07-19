@@ -344,6 +344,28 @@ static const ConStar con__cru[] = {
     {183.79f,-58.75f} };
 static const uint8_t con__cru_e[] = {0,2,1,3};
 
+static const ConStar con__sgr[] = {
+    {271.45f,-30.42f},{275.25f,-29.83f},{276.04f,-34.38f},
+    {276.99f,-25.42f},{281.41f,-26.99f},{283.82f,-26.30f},
+    {285.65f,-29.88f},{286.74f,-27.67f} };
+static const uint8_t con__sgr_e[] =
+    {0,1,1,2,2,6,6,4,4,1,3,1,3,4,4,5,5,7,7,6};
+static const ConStar con__cen[] = {
+    {219.90f,-60.83f},{210.96f,-60.37f},{211.67f,-36.37f},
+    {190.38f,-48.96f},{204.97f,-53.47f},{208.88f,-47.29f} };
+static const uint8_t con__cen_e[] = {0,1,1,4,4,3,4,5,5,2};
+static const ConStar con__car[] = {
+    {95.99f,-52.70f},{138.30f,-69.72f},{125.63f,-59.51f},
+    {139.27f,-59.28f},{160.74f,-64.39f} };
+static const uint8_t con__car_e[] = {0,2,2,3,3,4,4,1};
+static const ConStar con__psa[] = {
+    {344.41f,-29.62f},{337.88f,-32.35f},{340.16f,-27.04f} };
+static const uint8_t con__psa_e[] = {0,1,0,2};
+static const ConStar con__gru[] = {
+    {332.06f,-46.96f},{340.67f,-46.88f},{328.48f,-37.36f},
+    {342.14f,-51.32f} };
+static const uint8_t con__gru_e[] = {2,0,0,1,1,3};
+
 static const Constellation planets_constellations[] = {
     { "VRSA MAIOR", 7, 7, con__uma, con__uma_e },
     { "VRSA MINOR", 7, 7, con__umi, con__umi_e },
@@ -362,6 +384,11 @@ static const Constellation planets_constellations[] = {
     { "PEGASVS",    6, 6, con__peg, con__peg_e },
     { "PERSEVS",    5, 4, con__per, con__per_e },
     { "CRVX",       4, 2, con__cru, con__cru_e },
+    { "SAGITTARIVS",8,10, con__sgr, con__sgr_e },
+    { "CENTAVRVS",  6, 5, con__cen, con__cen_e },
+    { "CARINA",     5, 4, con__car, con__car_e },
+    { "PISCIS AVSTRINVS", 3, 2, con__psa, con__psa_e },
+    { "GRVS",       4, 3, con__gru, con__gru_e },
 };
 #define PLANETS_NCON \
     (int)(sizeof(planets_constellations) \
