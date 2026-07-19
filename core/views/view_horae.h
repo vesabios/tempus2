@@ -593,8 +593,8 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     {
         float px2 = -hdy, py2 = hdx;
         float rmid = HORAE_CLOCK_R - HORAE_CLOCK_W * 0.5f;
-        float rout = HORAE_CLOCK_R + 8.0f;
-        float rin  = HORAE_CLOCK_R - HORAE_CLOCK_W - 8.0f;
+        float rout = HORAE_CLOCK_R + 6.5f;
+        float rin  = HORAE_CLOCK_R - HORAE_CLOCK_W - 6.5f;
         float half = 7.0f;
         draw_set_color(d, dca(0.82f, 0.79f, 0.71f, 0.95f));
         int vb = d->num_verts;
