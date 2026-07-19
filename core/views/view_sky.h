@@ -530,6 +530,70 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // (The horizon rim is stroked by the shared sky drawer — the
     // same boundary the circle itself renders, no drift possible.)
 
+    // ---- The constellations: the figures of the fixed sky ----
+    // The classical stick figures, engraved faint: risen edges read,
+    // set edges whisper, each name at the center of its risen stars.
+    // They bow out under the astrolabe's plate (whose rete carries
+    // pointer stars instead — the period instrument's own idiom).
+    if (fb > 0.001f) {
+        float csup = 1.0f - (float)tempus_smoothstep(0.0, 0.15,
+                                                     st->astb);
+        if (csup > 0.004f) {
+            float lst2 = (float)fmod(
+                planets__gmst(st->tv.jd_current
+                              + st->tv.percent_of_day - 0.5
+                              - t->config.timezone / 24.0)
+                + t->config.longitude, 360.0);
+            float latf = (float)t->config.latitude;
+            int fw2 = _font_compat[FONT_date].weight;
+            for (int c = 0; c < PLANETS_NCON; c++) {
+                const Constellation *cn = &planets_constellations[c];
+                float cx2[12], cy2[12], calt[12];
+                for (int k = 0; k < cn->nstars; k++) {
+                    float saz, salt2;
+                    planets_star_azalt(cn->stars[k].ra,
+                                       cn->stars[k].dec, lst2,
+                                       latf, &saz, &salt2);
+                    calt[k] = salt2;
+                    sky__project(saz, salt2, &cx2[k], &cy2[k]);
+                }
+                draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.8f));
+                for (int e = 0; e < cn->nedges; e++) {
+                    int a2 = cn->edges[e * 2];
+                    int b2 = cn->edges[e * 2 + 1];
+                    bool up2 = calt[a2] > 0 && calt[b2] > 0;
+                    d->alpha = base_alpha * fb * csup
+                             * (up2 ? 0.30f : 0.10f);
+                    draw_line(d, cx2[a2], cy2[a2],
+                              cx2[b2], cy2[b2], 1.0f);
+                }
+                float nx = 0, ny = 0;
+                int nup = 0;
+                for (int k = 0; k < cn->nstars; k++) {
+                    bool up2 = calt[k] > 0;
+                    d->alpha = base_alpha * fb * csup
+                             * (up2 ? 0.60f : 0.20f);
+                    draw_set_color(d, dca(0.80f, 0.77f, 0.68f,
+                                          0.9f));
+                    draw_circle_filled(d, cx2[k], cy2[k], 1.8f);
+                    if (up2) { nx += cx2[k]; ny += cy2[k]; nup++; }
+                }
+                if (nup >= 2) {
+                    char nm[20];
+                    snprintf(nm, sizeof(nm), "%s", cn->name);
+                    float tw2 = sdf_measure_width(fw2, nm) * 11.0f;
+                    d->alpha = base_alpha * fb * csup * 0.35f;
+                    draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
+                                          0.8f));
+                    draw_text_ex(d, fw2, 11.0f,
+                                 nx / nup - tw2 * 0.5f,
+                                 ny / nup + 4.0f, nm);
+                }
+            }
+            d->alpha = base_alpha;
+        }
+    }
+
     // ---- The bodies themselves ----
     // Beads leave their orbit rings and fly to where they truly hang in
     // your sky; anything below the horizon exits through the rim and

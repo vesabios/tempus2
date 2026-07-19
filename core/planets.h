@@ -256,6 +256,117 @@ static inline void planets_star_azalt(float ra, float dec, float lst,
     *az = atan2f(-cd * sinf(H), sd * cp - cd * sp * cosf(H)) / d2r;
 }
 
+// The major constellations: classical figures as star tables (J2000
+// RA/dec) + edge lists, for any chart that draws the fixed sky.
+typedef struct { float ra, dec; } ConStar;
+typedef struct {
+    const char *name;
+    uint8_t nstars, nedges;
+    const ConStar *stars;
+    const uint8_t *edges;    // index pairs into stars
+} Constellation;
+
+static const ConStar con__uma[] = {
+    {165.93f,61.75f},{165.46f,56.38f},{178.46f,53.69f},
+    {183.86f,57.03f},{193.51f,55.96f},{200.98f,54.93f},
+    {206.89f,49.31f} };
+static const uint8_t con__uma_e[] = {0,1,1,2,2,3,3,0,3,4,4,5,5,6};
+static const ConStar con__umi[] = {
+    {37.95f,89.26f},{263.06f,86.59f},{251.49f,82.04f},
+    {236.02f,77.79f},{222.68f,74.16f},{230.18f,71.83f},
+    {244.38f,75.76f} };
+static const uint8_t con__umi_e[] = {0,1,1,2,2,3,3,4,4,5,5,6,6,3};
+static const ConStar con__cas[] = {
+    {2.29f,59.15f},{10.13f,56.54f},{14.18f,60.72f},
+    {21.45f,60.24f},{28.60f,63.67f} };
+static const uint8_t con__cas_e[] = {0,1,1,2,2,3,3,4};
+static const ConStar con__ori[] = {
+    {88.79f,7.41f},{81.28f,6.35f},{83.00f,-0.30f},{84.05f,-1.20f},
+    {85.19f,-1.94f},{86.94f,-9.67f},{78.63f,-8.20f} };
+static const uint8_t con__ori_e[] =
+    {0,1,1,2,2,3,3,4,4,0,2,6,4,5,5,6};
+static const ConStar con__cyg[] = {
+    {310.36f,45.28f},{305.56f,40.26f},{311.55f,33.97f},
+    {296.24f,45.13f},{292.68f,27.96f} };
+static const uint8_t con__cyg_e[] = {0,1,1,2,1,3,1,4};
+static const ConStar con__lyr[] = {
+    {279.23f,38.78f},{281.19f,37.60f},{282.52f,33.36f},
+    {284.74f,32.69f},{283.63f,36.90f} };
+static const uint8_t con__lyr_e[] = {0,1,1,2,2,3,3,4,4,1};
+static const ConStar con__aql[] = {
+    {297.70f,8.87f},{296.56f,10.61f},{298.83f,6.41f},
+    {286.35f,13.86f},{302.83f,-0.82f} };
+static const uint8_t con__aql_e[] = {1,0,0,2,0,3,0,4};
+static const ConStar con__sco[] = {
+    {240.08f,-22.62f},{241.36f,-19.81f},{239.71f,-26.11f},
+    {247.35f,-26.43f},{248.97f,-28.22f},{252.54f,-34.29f},
+    {263.40f,-37.10f},{264.33f,-43.00f} };
+static const uint8_t con__sco_e[] =
+    {1,0,0,2,0,3,3,4,4,5,5,6,6,7};
+static const ConStar con__tau[] = {
+    {68.98f,16.51f},{64.95f,15.63f},{65.73f,17.54f},
+    {67.15f,19.18f},{81.57f,28.61f},{84.41f,21.14f},
+    {67.17f,15.87f} };
+static const uint8_t con__tau_e[] = {1,2,2,3,3,4,1,6,6,0,0,5};
+static const ConStar con__gem[] = {
+    {113.65f,31.89f},{116.33f,28.03f},{99.43f,16.40f},
+    {100.98f,25.13f},{110.03f,21.98f} };
+static const uint8_t con__gem_e[] = {0,3,1,4,4,2,0,1};
+static const ConStar con__leo[] = {
+    {152.09f,11.97f},{151.83f,16.76f},{154.99f,19.84f},
+    {154.17f,23.42f},{146.46f,23.77f},{168.53f,20.52f},
+    {177.26f,14.57f},{168.56f,15.43f} };
+static const uint8_t con__leo_e[] =
+    {0,1,1,2,2,3,3,4,2,5,5,6,6,7,7,0};
+static const ConStar con__boo[] = {
+    {213.92f,19.18f},{208.67f,18.40f},{221.25f,27.07f},
+    {228.88f,33.31f},{225.49f,40.39f},{218.02f,38.31f},
+    {217.96f,30.37f} };
+static const uint8_t con__boo_e[] = {0,2,2,3,3,4,4,5,5,6,6,0,0,1};
+static const ConStar con__aur[] = {
+    {79.17f,46.00f},{89.88f,44.95f},{89.93f,37.21f},
+    {81.57f,28.61f},{74.25f,33.17f},{75.49f,43.82f} };
+static const uint8_t con__aur_e[] = {0,1,1,2,2,3,3,4,4,5,5,0};
+static const ConStar con__cma[] = {
+    {101.29f,-16.72f},{95.67f,-17.96f},{104.66f,-28.97f},
+    {107.10f,-26.39f},{111.02f,-29.30f} };
+static const uint8_t con__cma_e[] = {1,0,0,3,3,2,3,4};
+static const ConStar con__peg[] = {
+    {346.19f,15.21f},{345.94f,28.08f},{3.31f,15.18f},
+    {2.10f,29.09f},{17.43f,35.62f},{30.97f,42.33f} };
+static const uint8_t con__peg_e[] = {0,1,1,3,3,2,2,0,3,4,4,5};
+static const ConStar con__per[] = {
+    {51.08f,49.86f},{46.20f,53.51f},{47.04f,40.96f},
+    {55.73f,47.79f},{58.53f,31.88f} };
+static const uint8_t con__per_e[] = {1,0,0,2,0,3,3,4};
+static const ConStar con__cru[] = {
+    {186.65f,-63.10f},{191.93f,-59.69f},{187.79f,-57.11f},
+    {183.79f,-58.75f} };
+static const uint8_t con__cru_e[] = {0,2,1,3};
+
+static const Constellation planets_constellations[] = {
+    { "VRSA MAIOR", 7, 7, con__uma, con__uma_e },
+    { "VRSA MINOR", 7, 7, con__umi, con__umi_e },
+    { "CASSIOPEIA", 5, 4, con__cas, con__cas_e },
+    { "ORION",      7, 8, con__ori, con__ori_e },
+    { "CYGNVS",     5, 4, con__cyg, con__cyg_e },
+    { "LYRA",       5, 5, con__lyr, con__lyr_e },
+    { "AQVILA",     5, 4, con__aql, con__aql_e },
+    { "SCORPIVS",   8, 7, con__sco, con__sco_e },
+    { "TAVRVS",     7, 6, con__tau, con__tau_e },
+    { "GEMINI",     5, 4, con__gem, con__gem_e },
+    { "LEO",        8, 8, con__leo, con__leo_e },
+    { "BOOTES",     7, 7, con__boo, con__boo_e },
+    { "AVRIGA",     6, 6, con__aur, con__aur_e },
+    { "CANIS MAIOR",5, 4, con__cma, con__cma_e },
+    { "PEGASVS",    6, 6, con__peg, con__peg_e },
+    { "PERSEVS",    5, 4, con__per, con__per_e },
+    { "CRVX",       4, 2, con__cru, con__cru_e },
+};
+#define PLANETS_NCON \
+    (int)(sizeof(planets_constellations) \
+          / sizeof(planets_constellations[0]))
+
 // Geocentric ecliptic longitudes of every body at jd_ut (deg, BODY_* order)
 static inline void planets__geo_lons(double jd_ut, double out[BODY_COUNT]) {
     double e[3];
