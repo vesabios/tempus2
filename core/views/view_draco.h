@@ -69,6 +69,39 @@ static const float draco__sg_cauda[] = {
        0.11f,0.23f, 0.136f,0.294f, 0.20f,0.32f, 0.264f,0.294f,
        0.29f,0.23f, 0 };
 
+// The dragon itself, in figure: a manuscript serpent for the dial's
+// heart — S-coiled spine, open jaws, horns, dorsal spikes, barbed
+// tail. Head at the top of the unit box, so drawn with up = the
+// CAPVT direction it points at its own jaws.
+static const float draco__dragon[] = {
+    // spine: tail to neck, three bends
+    14, -0.10f,-0.48f, 0.10f,-0.44f, 0.26f,-0.34f, 0.30f,-0.20f,
+        0.22f,-0.06f, 0.02f,0.02f, -0.18f,-0.02f, -0.30f,-0.10f,
+        -0.34f,0.02f, -0.28f,0.16f, -0.12f,0.24f, 0.06f,0.26f,
+        0.20f,0.32f, 0.26f,0.42f,
+    // body volume: a parallel stroke shadowing the main coil
+    8, 0.24f,-0.32f, 0.245f,-0.20f, 0.16f,-0.09f, 0.02f,-0.04f,
+       -0.14f,-0.08f, -0.245f,-0.145f, -0.28f,-0.08f, -0.285f,0.02f,
+    // skull and brow to snout
+    3, 0.26f,0.42f, 0.34f,0.47f, 0.44f,0.44f,
+    // upper jaw back to the mouth's corner, lower jaw open
+    2, 0.44f,0.44f, 0.36f,0.40f,
+    2, 0.36f,0.40f, 0.44f,0.35f,
+    // forked tongue
+    2, 0.44f,0.40f, 0.50f,0.41f,
+    // horns
+    2, 0.31f,0.47f, 0.26f,0.54f,
+    2, 0.36f,0.46f, 0.33f,0.54f,
+    // eye
+    2, 0.335f,0.435f, 0.35f,0.435f,
+    // dorsal spikes on the outer bends
+    2, 0.30f,-0.20f, 0.37f,-0.21f,
+    2, -0.34f,0.02f, -0.41f,0.00f,
+    2, -0.12f,0.24f, -0.15f,0.31f,
+    // tail barb
+    2, -0.10f,-0.48f, -0.17f,-0.52f,
+    2, -0.10f,-0.48f, -0.06f,-0.55f, 0 };
+
 // Sign names in the ablative — "the head IN Leo" — dial order
 static const char *draco__sign_abl[12] = {
     "ARIETE", "TAVRO", "GEMINIS", "CANCRO", "LEONE", "VIRGINE",
@@ -269,6 +302,18 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
             }
             pox = ox; poy = oy; pix = ix; piy = iy;
         }
+    }
+
+    // ---- The dragon in figure, coiled in the dial's heart ----
+    // For the eye that hasn't fused wave and myth: the same creature
+    // the geometry draws around the rim, here as an engraved serpent.
+    // Its head aims at CAPVT, its tail at CAVDA, and it turns with
+    // the regressing nodes — once around in 18.6 years.
+    {
+        float hx, hy;
+        orr__ecl_dir(st->node_lon, &hx, &hy);
+        draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.30f));
+        orr__strokes(d, draco__dragon, 0, 0, hx, hy, 420.0f, 1.4f);
     }
 
     // ---- Head and tail at the crossings ----
