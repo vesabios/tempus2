@@ -21,6 +21,7 @@
 #include "views/view_lumen.h"
 #include "views/view_offic.h"
 #include "views/view_draco.h"
+#include "views/view_astro.h"
 
 // ---- Transitions ----
 
@@ -53,7 +54,7 @@ static inline PacePolicy pace_default(void) {
 
 // ---- Scene ----
 
-#define SCENE_MAX_LAYERS  14
+#define SCENE_MAX_LAYERS  15
 #define SCENE_MAX_CYCLE  16
 
 struct Scene {
@@ -73,6 +74,7 @@ struct Scene {
     LumenViewState    lumen_state;
     OfficViewState    offic_state;
     DracoViewState    draco_state;
+    AstroViewState    astro_state;
 
     // Active layer stack (back to front)
     ViewId      layers[SCENE_MAX_LAYERS];
@@ -131,6 +133,7 @@ struct Scene {
     // offices strung around the day wheel
     double      offic_blend;
     double      draco_blend;
+    double      astro_blend;
     // ORBIS releases in two voices: orbis_blend PARKS on flights to
     // pure overlays (the globe's absent-seat hold), while orbis_wheel
     // always flies — the calendar wheel, furniture scale, and the
@@ -158,6 +161,7 @@ struct Scene {
 #include "views/view_lumen.h"
 #include "views/view_offic.h"
 #include "views/view_draco.h"
+#include "views/view_astro.h"
 
 // ---- Layer management ----
 
@@ -238,6 +242,7 @@ static inline void scene_init(Scene *sc, const Tempus *t) {
     sc->views[VIEW_LVMEN].state    = &sc->lumen_state;
     sc->views[VIEW_OFFIC].state    = &sc->offic_state;
     sc->views[VIEW_DRACO].state    = &sc->draco_state;
+    sc->views[VIEW_ASTRO].state    = &sc->astro_state;
     sc->views[VIEW_CLOCKBACK].state = &sc->clock_state;   // shared
 }
 
@@ -277,7 +282,7 @@ static inline void scene_update(Scene *sc, Tempus *t, double dt) {
     station_weights(sc->helio_blend, sc->system_blend, sc->sky_blend,
                     sc->horae_blend, sc->rotae_blend, sc->saec_blend,
                     sc->orbis_blend, sc->offic_blend, sc->draco_blend,
-                    sc->stw);
+                    sc->astro_blend, sc->stw);
 
     // Time-scrub flywheel: while dragging, estimate velocity from the
     // accumulated motion; after release, coast with exponential decay —

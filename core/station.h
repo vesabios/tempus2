@@ -22,6 +22,7 @@ typedef enum {
     ST_ORBIS,            // the world chart: choose your place
     ST_OFFICIVM,         // the book of hours
     ST_DRACO,            // the eclipse dragon
+    ST_ASTROLAB,         // the planispheric astrolabe
     ST_COUNT
 } Station;
 
@@ -55,6 +56,7 @@ static const StationDesc station_table[ST_COUNT] = {
     [ST_ORBIS]      = { "ORBIS",         0,   0,   0,  false,  505, 0.85f, true, false },
     [ST_OFFICIVM]   = { "OFFICIVM",      0,   0,   0,  false,  450, 1.0f, true,  false },
     [ST_DRACO]      = { "DRACO",         0,   0,   0,  false,  450, 1.0f, false, false },
+    [ST_ASTROLAB]   = { "ASTROLABIVM",   0,   0,   0,  false,  450, 1.0f, true,  false },
 };
 
 // The station weight vector: normalized, barycentric, derived from
@@ -66,7 +68,7 @@ static inline void station_weights(double helio, double system,
                                    double sky, double horae,
                                    double rotae, double saec,
                                    double orbis, double offic,
-                                   double draco,
+                                   double draco, double astro,
                                    double out[ST_COUNT]) {
     out[ST_TELLVS]   = helio * (1.0 - system);
     out[ST_MACHINA]  = helio * system;
@@ -77,6 +79,7 @@ static inline void station_weights(double helio, double system,
     out[ST_ORBIS]    = orbis;
     out[ST_OFFICIVM] = offic;
     out[ST_DRACO]    = draco;
+    out[ST_ASTROLAB] = astro;
     double sum = 0;
     for (int i = 1; i < ST_COUNT; i++) sum += out[i];
     out[ST_HOROLOGIVM] = (sum < 1.0) ? 1.0 - sum : 0.0;

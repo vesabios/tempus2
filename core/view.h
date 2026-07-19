@@ -204,6 +204,7 @@ typedef enum {
     VIEW_LVMEN,
     VIEW_OFFIC,
     VIEW_DRACO,
+    VIEW_ASTRO,
     VIEW_CLOCKBACK,   // the clock's face furniture, under the globes
     VIEW_COUNT,
 } ViewId;
@@ -221,6 +222,7 @@ typedef struct OrbisViewState OrbisViewState;
 typedef struct LumenViewState LumenViewState;
 typedef struct OfficViewState OfficViewState;
 typedef struct DracoViewState DracoViewState;
+typedef struct AstroViewState AstroViewState;
 
 // View state is a tagged union — properly typed, no byte buffer casts.
 typedef union {

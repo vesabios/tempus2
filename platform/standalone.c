@@ -123,6 +123,7 @@ typedef Station Worldview;
 #define WV_ORBIS      ST_ORBIS
 #define WV_OFFICIVM   ST_OFFICIVM
 #define WV_DRACO      ST_DRACO
+#define WV_ASTROLAB   ST_ASTROLAB
 #define WV_COUNT      ST_COUNT
 #define g_worldview_names_at(i) (station_table[i].name)
 
@@ -196,6 +197,7 @@ static void snap_station(Worldview wv) {
     g_scene.orbis_blend  = (wv == WV_ORBIS) ? 1.0 : 0.0;
     g_scene.orbis_wheel  = g_scene.orbis_blend;
     g_scene.offic_blend  = (wv == WV_OFFICIVM) ? 1.0 : 0.0;
+    g_scene.astro_blend  = (wv == WV_ASTROLAB) ? 1.0 : 0.0;
     g_scene.draco_blend  = (wv == WV_DRACO) ? 1.0 : 0.0;
     g_scene.calendar_state.zoom = (wv == WV_TELLVS) ? 1.0 : 0.0;
     g_scene.calendar_state.target_zoom = g_scene.calendar_state.zoom;
@@ -236,6 +238,7 @@ static void set_worldview(Worldview wv) {
         [ST_ROTAE]    = &g_scene.rotae_blend,
         [ST_SAECVLVM] = &g_scene.saec_blend,
         [ST_OFFICIVM] = &g_scene.offic_blend,
+        [ST_ASTROLAB] = &g_scene.astro_blend,
         [ST_DRACO]    = &g_scene.draco_blend,
         [ST_ORBIS]    = &g_scene.orbis_blend,
     };
@@ -297,6 +300,7 @@ static void apply_view_mode(void) {
     scene_add_layer(&g_scene, VIEW_SAEC);
     scene_add_layer(&g_scene, VIEW_ORBIS);
     scene_add_layer(&g_scene, VIEW_OFFIC);
+    scene_add_layer(&g_scene, VIEW_ASTRO);
 }
 
 static void set_view_opacities(void) {
@@ -311,13 +315,15 @@ static void set_view_opacities(void) {
     double saec = g_scene.saec_blend;
     double orbis = g_scene.orbis_blend;
     double offic = g_scene.offic_blend;
+    double astro = g_scene.astro_blend;
     double draco = g_scene.draco_blend;
     double fade = (double)ink_out(INK_MACHINE_EXIT, sky)
                 * (double)ink_out(INK_MACHINE_EXIT, horae)
                 * (double)ink_out(INK_MACHINE_EXIT, rotae)
                 * (double)ink_out(INK_MACHINE_EXIT, saec)
                 * (double)ink_out(INK_MACHINE_EXIT, offic)
-                * (double)ink_out(INK_MACHINE_EXIT, draco);
+                * (double)ink_out(INK_MACHINE_EXIT, draco)
+                * (double)ink_out(INK_MACHINE_EXIT, astro);
     // ORBIS keeps the orrery: the globe IS the station (it grows to the
     // closeup inside the orrery itself). Only the clock chrome bows out
     // — and it bows out FAST (gone by a fifth of the flight): the dial
@@ -366,6 +372,7 @@ static void set_view_opacities(void) {
     g_scene.views[VIEW_ORBIS].opacity =
         orbis < g_scene.orbis_wheel ? orbis : g_scene.orbis_wheel;
     g_scene.views[VIEW_OFFIC].opacity = offic;
+    g_scene.views[VIEW_ASTRO].opacity = astro;
     g_scene.views[VIEW_DRACO].opacity = draco;
     // The luminaries ride whichever surface is up: the machine's fade
     // or the sky — never both gone unless an overlay dial owns the
@@ -741,6 +748,7 @@ static void init(void) {
     scene_register_view(&g_scene, VIEW_ORBIS,     &orbis_vtable);
     scene_register_view(&g_scene, VIEW_LVMEN,     &lumen_vtable);
     scene_register_view(&g_scene, VIEW_OFFIC,     &offic_vtable);
+    scene_register_view(&g_scene, VIEW_ASTRO,     &astro_vtable);
     scene_register_view(&g_scene, VIEW_DRACO,     &draco_vtable);
     scene_register_view(&g_scene, VIEW_CLOCKBACK, &clockback_vtable);
     scene_init_views(&g_scene, &g_tempus);
