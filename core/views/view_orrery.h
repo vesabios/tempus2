@@ -152,16 +152,20 @@ static const uint8_t orr__body_col[BODY_COUNT][3] = {
 
 // Aspect chord colors: hard aspects in oxidized red, soft in the
 // instrument's teal, the quincunx off on its own uneasy violet
+// Saturated, deliberately APART from the planet palette (the muted
+// body colors ride the sight-line curves; the aspect web speaks in
+// pure hues): hard aspects burn crimson, soft aspects vivid emerald,
+// the conjunction white-gold, the quincunx electric violet.
 static const uint8_t orr__aspect_col[ASPECT_TYPE_COUNT][3] = {
-    [ASPECT_CONJUNCTION]    = { 220, 205, 175 },
-    [ASPECT_OPPOSITION]     = { 190,  70,  55 },
-    [ASPECT_TRINE]          = {   0, 150, 130 },
-    [ASPECT_SQUARE]         = { 190,  70,  55 },
-    [ASPECT_SEXTILE]        = {  45, 150, 122 },
-    [ASPECT_SEMISEXTILE]    = {  70, 122, 108 },
-    [ASPECT_SEMISQUARE]     = { 148,  84,  72 },
-    [ASPECT_SESQUIQUADRATE] = { 148,  84,  72 },
-    [ASPECT_QUINCUNX]       = { 138, 112, 160 },
+    [ASPECT_CONJUNCTION]    = { 255, 228, 160 },
+    [ASPECT_OPPOSITION]     = { 235,  40,  50 },
+    [ASPECT_TRINE]          = {   0, 210, 140 },
+    [ASPECT_SQUARE]         = { 235,  40,  50 },
+    [ASPECT_SEXTILE]        = {  40, 205, 175 },
+    [ASPECT_SEMISEXTILE]    = {  50, 160, 135 },
+    [ASPECT_SEMISQUARE]     = { 200,  60,  55 },
+    [ASPECT_SESQUIQUADRATE] = { 200,  60,  55 },
+    [ASPECT_QUINCUNX]       = { 175,  90, 235 },
 };
 
 // ---- Zodiac sigils ----
@@ -578,7 +582,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             for (int p = 0; p < PL_COUNT; p++) {
                 bool home = (p == PL_EARTH);
                 draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
-                                      home ? 0.34f : 0.13f));
+                                      home ? 0.34f : 0.22f));
                 draw_circle_stroked(d, 0, 0,
                                     orr__orbit_r(p, wheel_R),
                                     home ? 1.3f : 1.0f);
@@ -757,7 +761,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                                           c[2] / 255.0f, 1.0f));
                     orr__dashed_line(d, mpx[A->a], mpy[A->a],
                                      mpx[A->b], mpy[A->b], wdt,
-                                     7.0f, 9.0f);
+                                     6.0f, 10.0f);
                 }
             }
             d->alpha = base_alpha;
