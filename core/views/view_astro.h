@@ -41,6 +41,12 @@ struct AstroViewState {
     bool  hour_dragging;
     float last_wx, last_wy;
 
+    // CAELVM's state: the SAME sky, seen through its projection —
+    // the wash blends per-vertex between the two (rule 3), so the
+    // bowl DEFORMS into the lens instead of crossfading shapes
+    const SkyViewState *skyv;
+    double skb;         // mirrored scene sky_blend
+
     // Luminary chart targets, published for the orrery's composition
     // (the ONE OBJECT law): the sun and moon fly onto the plate as
     // the same objects they are everywhere else.
@@ -145,6 +151,8 @@ static void astro_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     AstroViewState *st = (AstroViewState *)buf;
     (void)dt;
     st->blend = sc->astro_blend;
+    st->skyv = &sc->sky_state;
+    st->skb = sc->sky_blend;
     if (st->blend <= 0.001) return;
 
     // The wash: true single-scattering per vertex, cached on the
@@ -269,9 +277,29 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
     // the limb where it runs off the plate.
     {
         int prev[ASTRO_SKY_SEC + 1], curv[ASTRO_SKY_SEC + 1];
-        d->alpha = base_alpha * 0.94f;
+        // ONE SKY, TWO PROJECTIONS: when CAELVM shares the stage its
+        // bowl bows out and THIS mesh draws the shared shape — every
+        // vertex blended between the bowl's azimuthal projection and
+        // the plate's stereographic one (rule 3: evaluate both live,
+        // blend outputs). The wash strength rides the chart family's
+        // combined presence, so the sky never dips mid-handoff.
+        float skw2 = (float)st->skb;
+        float wc = 0.0f;
+        float fam = (float)st->blend + skw2;
+        if (fam > 1.0f) fam = 1.0f;
+        if (st->skyv && skw2 > 0.001f) {
+            wc = skw2 / ((float)st->blend + skw2);
+            sky__set_center(st->skyv->view_az, st->skyv->view_alt);
+        }
+        d->alpha = 0.94f * fam;
         float zx, zy;
         astro__project(lat, 0, &zx, &zy);
+        if (wc > 0.0f) {
+            float czx, czy;
+            sky__project(0.0f, 90.0f, &czx, &czy);
+            zx = zx * (1.0f - wc) + czx * wc;
+            zy = zy * (1.0f - wc) + czy * wc;
+        }
         draw_set_color(d, dca(st->sky_cols[0][0], st->sky_cols[0][1],
                               st->sky_cols[0][2], 1.0f));
         int cvi = draw__push_vert(d, zx, zy, d->white_u, d->white_v);
@@ -288,6 +316,12 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
                 if (r > ASTRO_R_CAP) {
                     x *= ASTRO_R_CAP / r;
                     y *= ASTRO_R_CAP / r;
+                }
+                if (wc > 0.0f) {
+                    float cx2, cy2;
+                    sky__project(az, altv, &cx2, &cy2);
+                    x = x * (1.0f - wc) + cx2 * wc;
+                    y = y * (1.0f - wc) + cy2 * wc;
                 }
                 int vi = draw__push_vert(d, x, y,
                                          d->white_u, d->white_v);

@@ -34,6 +34,7 @@ struct SkyViewState {
     // view
     float rise_hr, set_hr;
     double orbw;      // mirrored scene orbis_wheel (bezel radius)
+    double astb;      // mirrored scene astro_blend (the shared sky)
 
     // The hour ring (between the chart and the calendar bezel) is the
     // rendering-time control: drag it and the bodies wheel along
@@ -270,6 +271,7 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     (void)dt;
     st->blend = sc->sky_blend;
     st->orbw = sc->orbis_wheel;
+    st->astb = sc->astro_blend;
     if (st->blend < 0.001) return;
     sky__set_center(st->view_az, st->view_alt);
     st->rise_hr = (float)sc->solar_state.sunrise_hr;
@@ -412,7 +414,12 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // sunset fire climbing from wherever the sun actually stands.
     {
         float R_live = bez_R + (SKY_HOR - bez_R) * mb;
-        d->alpha = base_alpha * mb;
+        // The astrolabe takes the sky with it: ITS wash draws the
+        // shared shape (this bowl's projection blended toward the
+        // plate's), so the bowl bows out as soon as the plate rises
+        float asup = 1.0f - (float)tempus_smoothstep(0.0, 0.15,
+                                                     st->astb);
+        d->alpha = base_alpha * mb * asup;
         // Under the earth: the whole chart, a dark warm ground
         draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
         draw_circle_filled(d, 0, 0, SKY_R);
