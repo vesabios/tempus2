@@ -21,6 +21,7 @@
 #include "../lib/stb_image.h"
 
 #include "../core/scene.h"
+#include "../core/stage.h"
 #include "../core/globe.h"
 #include "../shaders/tempus.glsl.h"
 
@@ -263,6 +264,7 @@ static __weak id g_activeView = nil;
 
     tempus_update(&g_tempus, g_clock);
     scene_update(&g_scene, &g_tempus, dt);
+    tempus_stage_views(&g_scene, g_tour[_tourIdx]);
 
     draw_begin(&g_draw, w, h);
     scene_render(&g_scene, &g_draw, &g_tempus);
