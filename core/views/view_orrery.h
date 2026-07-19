@@ -252,13 +252,13 @@ static const float *orr__glyphs[12] = {
     orr__gl_pisces,
 };
 
-// Draw one sigil at (cx,cy): (ux,uy) is glyph-up in screen space —
-// pointed radially outward, every glyph stands feet-to-center like a
-// clock face's engravings. Screen y runs down, so right = (-uy, ux)
-// keeps the sigil unmirrored.
-static void orr__zodiac_glyph(DrawCtx *d, int sign, float cx, float cy,
-                              float ux, float uy, float sz) {
-    const float *g = orr__glyphs[sign];
+// Draw a stroke table at (cx,cy): (ux,uy) is glyph-up in screen
+// space — pointed radially outward, every glyph stands feet-to-center
+// like a clock face's engravings. Screen y runs down, so
+// right = (-uy, ux) keeps the figure unmirrored. Shared by the zodiac
+// sigils here and the labors of the months at OFFICIVM.
+static void orr__strokes(DrawCtx *d, const float *g, float cx, float cy,
+                         float ux, float uy, float sz, float w) {
     float rx = -uy, ry = ux;
     int i = 0;
     while (g[i] > 0.5f) {
@@ -268,10 +268,15 @@ static void orr__zodiac_glyph(DrawCtx *d, int sign, float cx, float cy,
             float gx = g[i++], gy = g[i++];
             float sx = cx + (rx * gx + ux * gy) * sz;
             float sy = cy + (ry * gx + uy * gy) * sz;
-            if (k) draw_line(d, lx, ly, sx, sy, 1.1f);
+            if (k) draw_line(d, lx, ly, sx, sy, w);
             lx = sx; ly = sy;
         }
     }
+}
+
+static void orr__zodiac_glyph(DrawCtx *d, int sign, float cx, float cy,
+                              float ux, float uy, float sz) {
+    orr__strokes(d, orr__glyphs[sign], cx, cy, ux, uy, sz, 1.1f);
 }
 
 // Pip radius from apparent magnitude: how bright a body looks in the

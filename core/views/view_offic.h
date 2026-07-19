@@ -55,6 +55,98 @@ static const char *offic__feria[7] = {
     "FERIA QVINTA", "FERIA SEXTA", "SABBATO",
 };
 
+// ---- The labors of the months ----
+// The canonical northern cycle every book of hours engraves over its
+// calendar (Tres Riches Heures, Amiens, Chartres): feast, fire, plow,
+// bloom, hunt, hay, harvest, threshing, vintage, sowing, acorns,
+// slaughter. Emblems in the same stroke-table idiom as the zodiac
+// sigils — point count then x,y pairs, unit box y-up, 0 ends.
+static const float offic__lab_jan[] = {   // the feast: a goblet
+    6, -0.20f,0.30f, -0.16f,0.10f, -0.06f,0, 0.06f,0, 0.16f,0.10f,
+       0.20f,0.30f,
+    2, -0.20f,0.30f, 0.20f,0.30f,
+    2, 0,0, 0,-0.34f,
+    2, -0.16f,-0.34f, 0.16f,-0.34f, 0 };
+static const float offic__lab_feb[] = {   // warming: flame on hearth
+    9, -0.16f,-0.38f, -0.22f,-0.08f, -0.10f,0.10f, -0.14f,0.30f,
+       0,0.44f, 0.10f,0.24f, 0.20f,0.08f, 0.16f,-0.14f, 0.12f,-0.38f,
+    2, -0.28f,-0.38f, 0.28f,-0.38f, 0 };
+static const float offic__lab_mar[] = {   // plowing: the ard
+    3, -0.42f,0.10f, 0.10f,0.02f, 0.30f,0.18f,
+    2, 0.30f,0.18f, 0.44f,0.34f,
+    3, 0.10f,0.02f, 0.02f,-0.24f, -0.10f,-0.36f,
+    3, -0.10f,-0.36f, 0.10f,-0.30f, 0.02f,-0.24f,
+    7, -0.20f,-0.24f, -0.24f,-0.14f, -0.34f,-0.14f, -0.40f,-0.24f,
+       -0.34f,-0.34f, -0.24f,-0.34f, -0.20f,-0.24f, 0 };
+static const float offic__lab_apr[] = {   // greening: a bloom
+    3, 0,-0.42f, 0.02f,-0.10f, 0,0.10f,
+    9, 0,0.10f, -0.14f,0.16f, -0.16f,0.34f, -0.04f,0.26f, 0.02f,0.40f,
+       0.10f,0.26f, 0.18f,0.32f, 0.14f,0.14f, 0,0.10f,
+    2, 0.01f,-0.14f, 0.20f,-0.26f,
+    2, -0.01f,-0.22f, -0.18f,-0.34f, 0 };
+static const float offic__lab_may[] = {   // the hunt: a horn
+    5, -0.34f,0.10f, -0.24f,-0.14f, -0.04f,-0.28f, 0.18f,-0.24f,
+       0.34f,-0.10f,
+    5, -0.30f,0.06f, -0.20f,-0.08f, -0.02f,-0.20f, 0.16f,-0.16f,
+       0.28f,-0.06f,
+    2, -0.34f,0.10f, -0.30f,0.06f,
+    2, 0.34f,-0.10f, 0.28f,-0.06f,
+    2, -0.34f,0.10f, -0.42f,0.22f, 0 };
+static const float offic__lab_jun[] = {   // haymaking: the scythe
+    4, -0.30f,-0.44f, -0.10f,0, 0.02f,0.30f, 0,0.44f,
+    2, -0.10f,0, -0.24f,0.06f,
+    4, 0,0.44f, 0.16f,0.38f, 0.30f,0.24f, 0.38f,0.06f, 0 };
+static const float offic__lab_jul[] = {   // harvest: the sickle
+    5, -0.05f,0.05f, 0.08f,0.18f, 0.26f,0.20f, 0.40f,0.08f,
+       0.44f,-0.08f,
+    2, -0.05f,0.05f, -0.16f,-0.10f,
+    2, -0.34f,-0.44f, -0.30f,-0.06f,
+    2, -0.30f,-0.06f, -0.38f,0.06f,
+    2, -0.30f,-0.06f, -0.24f,0.08f,
+    2, -0.31f,-0.16f, -0.39f,-0.06f, 0 };
+static const float offic__lab_aug[] = {   // threshing: the flail
+    2, -0.24f,-0.44f, -0.06f,0.06f,
+    2, -0.06f,0.06f, 0.02f,0.14f,
+    2, 0.02f,0.14f, 0.32f,0.32f, 0 };
+static const float offic__lab_sep[] = {   // vintage: the cluster
+    7, 0,0.02f, -0.06f,0.10f, -0.14f,0.06f, -0.14f,-0.02f, -0.06f,-0.06f,
+       0.02f,-0.02f, 0,0.02f,
+    7, 0.12f,0.06f, 0.06f,0.14f, -0.02f,0.12f, 0,0.04f, 0.08f,0,
+       0.14f,0.02f, 0.12f,0.06f,
+    7, -0.02f,-0.10f, -0.08f,-0.02f, -0.16f,-0.06f, -0.16f,-0.14f,
+       -0.08f,-0.18f, -0.02f,-0.14f, -0.02f,-0.10f,
+    7, 0.10f,-0.08f, 0.04f,-0.02f, -0.02f,-0.08f, 0,-0.16f, 0.08f,-0.18f,
+       0.12f,-0.14f, 0.10f,-0.08f,
+    7, 0.04f,-0.22f, -0.02f,-0.18f, -0.08f,-0.24f, -0.04f,-0.32f,
+       0.04f,-0.32f, 0.08f,-0.26f, 0.04f,-0.22f,
+    2, 0,0.30f, 0,0.10f,
+    4, 0,0.24f, 0.14f,0.32f, 0.10f,0.20f, 0,0.24f, 0 };
+static const float offic__lab_oct[] = {   // sowing: pouch and seed
+    6, -0.30f,0.10f, -0.26f,-0.12f, -0.12f,-0.22f, 0.02f,-0.14f,
+       0.06f,0.06f, -0.30f,0.10f,
+    3, -0.28f,0.08f, -0.10f,0.30f, 0.04f,0.06f,
+    2, 0.20f,-0.02f, 0.23f,-0.02f,
+    2, 0.30f,-0.14f, 0.33f,-0.14f,
+    2, 0.22f,-0.26f, 0.25f,-0.26f,
+    2, 0.34f,-0.32f, 0.37f,-0.32f,
+    2, 0.14f,-0.38f, 0.17f,-0.38f, 0 };
+static const float offic__lab_nov[] = {   // pannage: the acorn
+    3, -0.16f,0.16f, -0.02f,0.24f, 0.12f,0.16f,
+    2, -0.16f,0.16f, 0.12f,0.16f,
+    5, -0.14f,0.16f, -0.14f,-0.06f, -0.02f,-0.20f, 0.10f,-0.06f,
+       0.10f,0.16f,
+    2, -0.02f,0.24f, -0.02f,0.34f,
+    2, 0.26f,-0.30f, 0.29f,-0.30f, 0 };
+static const float offic__lab_dec[] = {   // slaughter: the axe
+    2, -0.30f,-0.44f, 0.14f,0.20f,
+    5, 0.06f,0.10f, 0.30f,0.28f, 0.44f,0.06f, 0.20f,-0.06f,
+       0.06f,0.10f, 0 };
+static const float *offic__labors[12] = {
+    offic__lab_jan, offic__lab_feb, offic__lab_mar, offic__lab_apr,
+    offic__lab_may, offic__lab_jun, offic__lab_jul, offic__lab_aug,
+    offic__lab_sep, offic__lab_oct, offic__lab_nov, offic__lab_dec,
+};
+
 static void offic_init(void *buf, const Tempus *t, const RenderStyle *s) {
     OfficViewState *st = (OfficViewState *)buf;
     st->opacity = 1.0;
@@ -267,6 +359,27 @@ static void offic_render(const void *buf, DrawCtx *d, const Tempus *t,
                             d->white_u, d->white_v);
             draw__tri(d, vb, vb + 1, vb + 2);
             draw__tri(d, vb, vb + 2, vb + 3);
+        }
+    }
+
+    // ---- The labors of the months ----
+    // Twelve emblems riding just outside the calendar wheel at each
+    // month's middle — the book of hours' arch over its calendar. The
+    // current month's labor stands forward; the rest wait their turn.
+    {
+        float lr2 = 450.0f + 55.0f;   // the slot between the wheel's
+                                      // tick band and the month
+                                      // lettering (~555 out)
+        for (int m = 0; m < 12; m++) {
+            double midjd = (t->jd_months[m] + t->jd_months[m + 1]) * 0.5;
+            float pct = (float)tempus_jd_to_wheel_pct(t, midjd);
+            float a = pct * 2.0f * (float)M_PI;
+            float ux = sinf(a), uy = -cosf(a);
+            bool cur_m = (m == tv->month - 1);
+            draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
+                                  cur_m ? 0.85f : 0.32f));
+            orr__strokes(d, offic__labors[m], ux * lr2, uy * lr2,
+                         ux, uy, cur_m ? 36.0f : 30.0f, 1.1f);
         }
     }
 
