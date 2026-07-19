@@ -988,18 +988,9 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
 
     // ================= OVER THE GLOBE =================
 
-    // Dial furniture: outer ring, anchored at the dial. (The old daylight
-    // arc is retired — the observer-latitude ring on the globe now shows
-    // day length directly, thick in daylight and hairline in night.)
-    if (geo_a > 0.001f) {
-        d->alpha = base_alpha * geo_a;
-        draw_set_color(d, dc_scale(s->sunrise_lit, 0.8f));
-        draw_circle_stroked(d, 0, dial_y, dial_r + 12.0f, 1.0f);
-
-        // Moon aperture rim at 6 o'clock
-        draw_set_color(d, dca(0.45f, 0.44f, 0.42f, 0.5f));
-        draw_circle_stroked(d, 0, -dial_y, 62.0f, 1.0f);
-    }
+    // (The dial's outer ring and the moon aperture rim moved DOWN to
+    // VIEW_CLOCKBACK — dial furniture belongs under the globes, not
+    // painted over their limbs.)
 
     // Helio furniture: axis pin + 24h bezel, riding the globe
     if (helio_a > 0.001f) {

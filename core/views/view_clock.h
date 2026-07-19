@@ -102,6 +102,16 @@ static void clockback_render(const void *buf, DrawCtx *d, const Tempus *t, const
     // morphs between the 6 o'clock aperture and its heliocentric orbit.
     // This view only reserves the aperture space: numeral 6 skipped and
     // ticks clipped above.)
+
+    // The dial's hairlines — the outer ring around the 12-o'clock
+    // globe and the moon aperture rim — live down here with the rest
+    // of the furniture, UNDER the globes (they used to ride over the
+    // limbs from the orrery's furniture pass)
+    draw_set_color(d, dc_scale(s->sunrise_lit, 0.8f));
+    draw_circle_stroked(d, 0, s->sunrise_dial_offset,
+                        s->sunrise_dial_radius + 12.0f, 1.0f);
+    draw_set_color(d, dca(0.45f, 0.44f, 0.42f, 0.5f));
+    draw_circle_stroked(d, 0, -s->sunrise_dial_offset, 62.0f, 1.0f);
 }
 
 static void clock_render(const void *buf, DrawCtx *d, const Tempus *t, const RenderStyle *s) {
