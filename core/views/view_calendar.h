@@ -184,6 +184,16 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
                                               st->sys, st->skyb, st->orbb);
     float radius = base_r + (float)(blend * s->zoom_in_radius);
 
+    // ORBIS asks for a finer wheel: the ring keeps its radius but the
+    // FURNITURE shrinks — a global scale with the radius compensated,
+    // so marks, text, band, pointer, and glyphs all fine down together
+    float cal_s = 1.0f - 0.15f * (float)st->orbb;
+    float save_sx = d->sx, save_sy = d->sy;
+    d->sx *= cal_s;
+    d->sy *= cal_s;
+    base_r /= cal_s;
+    radius /= cal_s;
+
     float offx, offy;
     cal__fc(year_pct, radius - base_r, &offx, &offy);
 
@@ -366,6 +376,9 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_line(d, b1x, b1y, b2x, b2y, 2.2f);
         draw_line(d, b2x, b2y, ax, ay, 2.2f);
     }
+
+    d->sx = save_sx;
+    d->sy = save_sy;
 }
 
 static const ViewVtable calendar_vtable = {
