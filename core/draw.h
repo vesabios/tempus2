@@ -45,8 +45,11 @@ typedef struct {
 
 // ---- Batch limits ----
 
-#define DRAW_MAX_VERTS   (64 * 1024)
-#define DRAW_MAX_INDICES (128 * 1024)
+// 32-bit indices: the machina<->caelum morph renders both worlds at
+// once and blew straight through the old 64k/uint16 budget — the
+// silent drop ate whatever drew last (the menu text, famously)
+#define DRAW_MAX_VERTS   (128 * 1024)
+#define DRAW_MAX_INDICES (256 * 1024)
 #define DRAW_CIRCLE_SEGS 48
 
 // ---- Draw state ----
@@ -83,7 +86,7 @@ typedef struct {
 
 typedef struct {
     DrawVertex  verts[DRAW_MAX_VERTS];
-    uint16_t    indices[DRAW_MAX_INDICES];
+    uint32_t    indices[DRAW_MAX_INDICES];
     int         num_verts;
     int         num_indices;
 
@@ -184,15 +187,15 @@ static inline int draw__push_vert(DrawCtx *d, float x, float y, float u, float v
     return d->num_verts++;
 }
 
-static inline void draw__push_idx(DrawCtx *d, uint16_t i) {
+static inline void draw__push_idx(DrawCtx *d, uint32_t i) {
     if (d->num_indices < DRAW_MAX_INDICES)
         d->indices[d->num_indices++] = i;
 }
 
 static inline void draw__tri(DrawCtx *d, int a, int b, int c) {
-    draw__push_idx(d, (uint16_t)a);
-    draw__push_idx(d, (uint16_t)b);
-    draw__push_idx(d, (uint16_t)c);
+    draw__push_idx(d, (uint32_t)a);
+    draw__push_idx(d, (uint32_t)b);
+    draw__push_idx(d, (uint32_t)c);
 }
 
 // ---- Primitives (untextured, using white_u/white_v) ----

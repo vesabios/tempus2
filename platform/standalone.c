@@ -730,7 +730,7 @@ static void init(void) {
         .usage.stream_update = true,
     });
     g_ibuf = sg_make_buffer(&(sg_buffer_desc){
-        .size = sizeof(uint16_t) * DRAW_MAX_INDICES,
+        .size = sizeof(uint32_t) * DRAW_MAX_INDICES,
         .usage.index_buffer = true,
         .usage.stream_update = true,
     });
@@ -764,7 +764,7 @@ static void init(void) {
 
     g_pip = sg_make_pipeline(&(sg_pipeline_desc){
         .shader = shd,
-        .index_type = SG_INDEXTYPE_UINT16,
+        .index_type = SG_INDEXTYPE_UINT32,
         .layout.attrs = {
             [0] = { .format = SG_VERTEXFORMAT_FLOAT2, .offset = offsetof(DrawVertex, x) },
             [1] = { .format = SG_VERTEXFORMAT_FLOAT2, .offset = offsetof(DrawVertex, u) },
@@ -1113,7 +1113,7 @@ static void frame(void) {
             });
             sg_update_buffer(g_ibuf, &(sg_range){
                 .ptr = g_draw.indices,
-                .size = (size_t)g_draw.num_indices * sizeof(uint16_t),
+                .size = (size_t)g_draw.num_indices * sizeof(uint32_t),
             });
         }
     }
