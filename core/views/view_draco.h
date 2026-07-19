@@ -344,16 +344,22 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
             gm->tex_id = 1;
             gm->grid_boost = 0.0f;
             gm->obs_lat = 999.0f;
-            // The blood moon: entering Earth's shadow, the disc
-            // reddens to the umbral copper of refracted sunset light
+            // EARTHSHINE first (the same recipe VIEW_LVMEN wears, so
+            // the coincidence handoff stays seamless), then the blood
+            // moon on top: entering Earth's shadow, the disc reddens
+            // to the umbral copper of refracted sunset light
+            float es = 0.5f * (1.0f + cosf(bb));
+            float nr = 0.10f + 0.17f * es;
+            float ng = 0.105f + 0.175f * es;
+            float nb2 = 0.23f + 0.12f * es;
             float bl = glow_lun;
             gm->day_col[0] = 0.58f - 0.08f * bl;
             gm->day_col[1] = 0.55f - 0.33f * bl;
             gm->day_col[2] = 0.49f - 0.38f * bl;
             gm->day_col[3] = 1.0f;
-            gm->night_col[0] = 0.10f + 0.32f * bl;
-            gm->night_col[1] = 0.105f + 0.035f * bl;
-            gm->night_col[2] = 0.23f - 0.16f * bl;
+            gm->night_col[0] = nr + (0.42f - nr) * bl;
+            gm->night_col[1] = ng + (0.14f - ng) * bl;
+            gm->night_col[2] = nb2 + (0.07f - nb2) * bl;
             gm->night_col[3] = 1.0f;
         }
 

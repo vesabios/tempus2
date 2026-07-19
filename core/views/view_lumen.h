@@ -108,10 +108,23 @@ static void lumen_render(const void *buf, DrawCtx *d, const Tempus *t,
             gm->obs_lat = 999.0f;
             gm->day_col[0] = 0.58f; gm->day_col[1] = 0.55f;
             gm->day_col[2] = 0.49f; gm->day_col[3] = 1.0f;
-            // Dark indigo night side — the full disc stays legible, and
-            // the albedo ghosting through reads as earthshine
-            gm->night_col[0] = 0.10f; gm->night_col[1] = 0.105f;
-            gm->night_col[2] = 0.23f; gm->night_col[3] = 1.0f;
+            // EARTHSHINE on the indigo night side: sunlight bounced
+            // off the Earth lifts the dark limb toward ashen grey,
+            // strongest at new moon (a full Earth lights the lunar
+            // night) and gone by full — the old moon in the new
+            // moon's arms, at every station, because this is the one
+            // moon there is
+            {
+                double phe = globe_moon_phase(st->tv.jd_current
+                                              + st->tv.percent_of_day
+                                              - 0.5);
+                float es = 0.5f * (1.0f
+                         + cosf((float)(phe * 2.0 * M_PI)));
+                gm->night_col[0] = 0.10f + 0.17f * es;
+                gm->night_col[1] = 0.105f + 0.175f * es;
+                gm->night_col[2] = 0.23f + 0.12f * es;
+                gm->night_col[3] = 1.0f;
+            }
         }
     }
 
