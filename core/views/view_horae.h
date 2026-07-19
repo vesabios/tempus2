@@ -632,9 +632,15 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         char db[24];
         snprintf(db, sizeof(db), "DIES %s", horae__dies[w]);
         float nsz = _font_compat[FONT_month].size;
-        float rn = 346.0f - nsz * 0.5f + nsz * (lflip ? 0.51f : 0.37f);
+        // Baseline arc CONCENTRIC WITH THE WEEK DISC, not the clock:
+        // the words ride the wheel they name. Same contact point —
+        // the ring center sits ECC behind the origin along the hand,
+        // so the radius about it grows by ECC at the same bearing.
+        float rn = (346.0f + HORAE_ECC) - nsz * 0.5f
+                 + nsz * (lflip ? 0.51f : 0.37f);
         draw_set_color(d, dca(0.80f, 0.77f, 0.70f, 0.95f));
-        draw_text_curved(d, FONT_month, 0, 0, rn, ah, db, 1.2f, 1.0f);
+        draw_text_curved(d, FONT_month, rcx, rcy, rn, ah, db,
+                         1.2f, 1.0f);
 
         // The ruler's pip sits directly ON the week ring's outer rim
         // at the contact, a bead threaded on the line — hand, pip,
