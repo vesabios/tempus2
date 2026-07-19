@@ -488,10 +488,9 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             float y1 = ry1 * ORR_WEB_R * mw + sy1 * (1 - mw);
             // The astrolabe's exact ring: same gold, same weight,
             // same uniform ink above and below the horizon (Seren)
-            float a = (0.22f * mw + 0.50f * sw) * asup;
-            draw_set_color(d, dca(0.70f, 0.54f, 0.24f, 0.85f * a
-                                  / (a > 0 ? 1.0f : 1.0f)));
-            d->alpha = base_alpha * a;
+            float a = (0.44f * mw + 1.0f * sw) * asup;
+            draw_set_color(d, dca(0.70f, 0.54f, 0.24f, 0.85f));
+            d->alpha = base_alpha * a * 0.50f;
             draw_line(d, x0, y0, x1, y1, 1.0f + 0.3f * sw);
         }
         // Sign cusps ride the same lerp
