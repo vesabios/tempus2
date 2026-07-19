@@ -1173,23 +1173,25 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float wS = (st->skyv && skw > 0.001f) ? skw : 0.0f;
         float wD = (st->drav && dw > 0.001f) ? dw : 0.0f;
         if (wS > 0.0f || wD > 0.0f) {
+            // MEMBER ROWS (Stage 2): seat 0 is the machine's own
+            // composed seat (its internal morph over helio/system/
+            // orbis); seats 1..2 are the chart stations' published
+            // members. Cross-frame outputs, so seat_mix_pos (rule 3).
             float wB = 1.0f - wS - wD;
             if (wB < 0.0f) wB = 0.0f;
-            float wT = wB + wS + wD;
-            float kx = px * wB, ky = py * wB, ks = sz * wB;
-            if (wS > 0.0f) {
-                kx += st->skyv->lum_sun_x * wS;
-                ky += st->skyv->lum_sun_y * wS;
-                ks += st->skyv->lum_sun_r * wS;
-            }
-            if (wD > 0.0f) {
-                kx += st->drav->lum_sun_x * wD;
-                ky += st->drav->lum_sun_y * wD;
-                ks += 28.0f * wD;
-            }
-            px = kx / wT; py = ky / wT; sz = ks / wT;
+            double wT = wB + wS + wD;
+            double w[3] = { wB / wT, wS / wT, wD / wT };
+            float mx[3] = { px, wS > 0 ? st->skyv->lum_sun_x : 0,
+                            wD > 0 ? st->drav->lum_sun_x : 0 };
+            float my[3] = { py, wS > 0 ? st->skyv->lum_sun_y : 0,
+                            wD > 0 ? st->drav->lum_sun_y : 0 };
+            seat_mix_pos(mx, my, w, 3, &px, &py);
+            float mr[3] = { sz, wS > 0 ? st->skyv->lum_sun_r : 0,
+                            28.0f };
+            sz = mr[0] * (float)w[0] + mr[1] * (float)w[1]
+               + mr[2] * (float)w[2];
             // the dragon's gold rides its share of the mix
-            float gd = wD / wT;
+            float gd = (float)w[2];
             sun_c.r += (0.85f - sun_c.r) * gd;
             sun_c.g += (0.62f - sun_c.g) * gd;
             sun_c.b += (0.18f - sun_c.b) * gd;
