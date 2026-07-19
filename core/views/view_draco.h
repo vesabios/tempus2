@@ -69,6 +69,47 @@ static const char *draco__sign_abl[12] = {
     "PISCIBVS",
 };
 
+// The feeding fire: a radial gradient fan, furnace-white at the core
+// falling through gold and ember to nothing — per-vertex color over
+// three shells. k scales the whole flame.
+static void draco__glow(DrawCtx *d, float cx, float cy, float r,
+                        float k) {
+    const int SEG = 48;
+    static const float shell_r[4] = { 0.0f, 0.30f, 0.62f, 1.0f };
+    static const float shell_c[4][4] = {
+        { 1.00f, 0.97f, 0.88f, 0.95f },
+        { 1.00f, 0.80f, 0.38f, 0.60f },
+        { 0.92f, 0.50f, 0.12f, 0.24f },
+        { 0.80f, 0.35f, 0.05f, 0.00f },
+    };
+    int base[4];
+    for (int sh = 0; sh < 4; sh++) {
+        draw_set_color(d, dca(shell_c[sh][0], shell_c[sh][1],
+                              shell_c[sh][2], shell_c[sh][3] * k));
+        if (sh == 0) {
+            base[0] = draw__push_vert(d, cx, cy,
+                                      d->white_u, d->white_v);
+        } else {
+            base[sh] = d->num_verts;
+            for (int i = 0; i < SEG; i++) {
+                float a = (float)i / SEG * 2.0f * (float)M_PI;
+                draw__push_vert(d, cx + cosf(a) * r * shell_r[sh],
+                                cy + sinf(a) * r * shell_r[sh],
+                                d->white_u, d->white_v);
+            }
+        }
+    }
+    for (int i = 0; i < SEG; i++) {
+        int j = (i + 1) % SEG;
+        draw__tri(d, base[0], base[1] + i, base[1] + j);
+        for (int sh = 1; sh < 3; sh++) {
+            draw__tri(d, base[sh] + i, base[sh + 1] + i,
+                      base[sh + 1] + j);
+            draw__tri(d, base[sh] + i, base[sh + 1] + j, base[sh] + j);
+        }
+    }
+}
+
 static void draco_init(void *buf, const Tempus *t, const RenderStyle *s) {
     DracoViewState *st = (DracoViewState *)buf;
     st->opacity = 1.0;
@@ -134,7 +175,10 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
     float glow = solar ? glow_sol : glow_lun;
 
     // ---- The ecliptic: the sun's road, and the zodiac around it ----
-    draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.30f));
+    // Deliberately fainter than the dragon — the road is reference,
+    // the serpent is the actor; two identical hairlines read as "two
+    // tracks"
+    draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.20f));
     draw_circle_stroked(d, 0, 0, DRACO_R, 1.0f);
     for (int i = 0; i < 12; i++) {
         float dx, dy;
@@ -154,25 +198,34 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
     // round, outside the other half, crossing AT the nodes. Two edges
     // give the serpent a body; it thins toward the crossings where
     // the head and tail take over.
+    // A FILLED ribbon between two edges, in warmer ink than the road:
+    // a body, not a second track.
     {
         const int N = 288;
-        for (int e = 0; e < 2; e++) {
-            float side = e ? -1.0f : 1.0f;
-            float lx = 0, ly = 0;
-            for (int i = 0; i <= N; i++) {
-                float lam = (float)i / N * 360.0f;
-                float ph = (lam - (float)st->node_lon) * d2r;
-                float body = 4.0f * fabsf(sinf(ph));   // girth
-                float rr = DRACO_R + DRACO_AMP * sinf(ph) + side * body;
-                float dx, dy;
-                orr__ecl_dir(lam, &dx, &dy);
-                float px = dx * rr, py = dy * rr;
-                if (i) {
-                    draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.50f));
-                    draw_line(d, lx, ly, px, py, 1.2f);
-                }
-                lx = px; ly = py;
+        float pox = 0, poy = 0, pix = 0, piy = 0;
+        for (int i = 0; i <= N; i++) {
+            float lam = (float)i / N * 360.0f;
+            float ph = (lam - (float)st->node_lon) * d2r;
+            float body = 4.0f * fabsf(sinf(ph));   // girth
+            float rbase = DRACO_R + DRACO_AMP * sinf(ph);
+            float dx, dy;
+            orr__ecl_dir(lam, &dx, &dy);
+            float ox = dx * (rbase + body), oy = dy * (rbase + body);
+            float ix = dx * (rbase - body), iy = dy * (rbase - body);
+            if (i) {
+                draw_set_color(d, dca(0.58f, 0.52f, 0.40f, 0.12f));
+                int vb = d->num_verts;
+                draw__push_vert(d, pox, poy, d->white_u, d->white_v);
+                draw__push_vert(d, ox, oy, d->white_u, d->white_v);
+                draw__push_vert(d, ix, iy, d->white_u, d->white_v);
+                draw__push_vert(d, pix, piy, d->white_u, d->white_v);
+                draw__tri(d, vb, vb + 1, vb + 2);
+                draw__tri(d, vb, vb + 2, vb + 3);
+                draw_set_color(d, dca(0.68f, 0.63f, 0.50f, 0.55f));
+                draw_line(d, pox, poy, ox, oy, 1.2f);
+                draw_line(d, pix, piy, ix, iy, 1.2f);
             }
+            pox = ox; poy = oy; pix = ix; piy = iy;
         }
     }
 
@@ -206,21 +259,20 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         float mr = DRACO_R + DRACO_AMP / 5.145f * (float)st->moon_lat;
         float mpx = mx * mr, mpy = my * mr;
 
-        // The feeding halo rides the MEAL, not the jaw sigil — an
+        // The feeding fire rides the MEAL, not the jaw sigil — an
         // eclipse can strike up to ~18 degrees from the crossing
-        // (the ecliptic limit), so the glow wraps the body being
+        // (the ecliptic limit), so the furnace wraps the body being
         // eaten: the sun at a solar eclipse, the moon at a lunar.
-        // Under the beads, a swelling gold ground.
-        if (glow > 0.01f) {
-            DrawColor g = dc_scale(s->sunrise_handle, 1.0f);
-            g.a = 0.30f * glow;
-            draw_set_color(d, g);
-            draw_circle_filled(d, solar ? spx : mpx,
-                               solar ? spy : mpy,
-                               34.0f + 14.0f * glow);
-        }
+        // Under the beads, blazing white at the heart.
+        if (glow > 0.01f)
+            draco__glow(d, solar ? spx : mpx, solar ? spy : mpy,
+                        70.0f + 50.0f * glow, glow);
 
-        draw_set_color(d, dca(0.85f, 0.62f, 0.18f, 0.95f));
+        // The sun itself heats with the closing eclipse — gold to
+        // near-white at the moment of the meal
+        draw_set_color(d, dca(0.85f + 0.15f * glow,
+                              0.62f + 0.33f * glow,
+                              0.18f + 0.60f * glow, 0.95f));
         draw_circle_filled(d, spx, spy, 28.0f);
         draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
         draw_circle_stroked(d, spx, spy, 34.0f, 1.0f);
