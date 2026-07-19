@@ -314,14 +314,13 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                     atmo_dir(180.0f, 25.0f, rb);
                     atmo_scatter(ra, sd2, ca);
                     atmo_scatter(rb, sd2, cb);
-                    for (int cch = 0; cch < 3; cch++) {
-                        float mixv = ca[cch] * 0.62f + cb[cch] * 0.38f;
-                        float c = 1.0f - expf(-mixv);
-                        float base = cch == 0 ? 0.030f
-                                   : cch == 1 ? 0.036f : 0.075f;
-                        float v = base + c * 0.92f;
-                        stw->band_col[i][cch] = v > 1.0f ? 1.0f : v;
-                    }
+                    float mixv[3];
+                    static const float band_base[3] = { 0.030f, 0.036f,
+                                                        0.075f };
+                    for (int cch = 0; cch < 3; cch++)
+                        mixv[cch] = ca[cch] * 0.62f + cb[cch] * 0.38f;
+                    atmo_tone(mixv, 1.0f, band_base,
+                              stw->band_col[i]);
                 }
             }
             int pi = -1, po = -1;

@@ -87,6 +87,24 @@ static inline void atmo_scatter(const float rd[3], const float sd[3],
                            + pM * kM * totM[cch]);
 }
 
+// Shared display transform: exposure BEFORE the tonemap (so the red
+// channel is not clipped white at twilight and the deep reds and
+// golds survive), then a saturation lift and a mild gamma, onto a
+// night floor. One look for every sky.
+static inline void atmo_tone(const float col[3], float scale,
+                             const float base[3], float out[3]) {
+    float c[3];
+    for (int i = 0; i < 3; i++)
+        c[i] = 1.0f - expf(-0.55f * col[i]);
+    float luma = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
+    for (int i = 0; i < 3; i++) {
+        float v = luma + (c[i] - luma) * 1.35f;
+        if (v < 0.0f) v = 0.0f;
+        v = powf(v, 0.9f) * scale + base[i];
+        out[i] = v > 1.0f ? 1.0f : v;
+    }
+}
+
 // az/alt (degrees) to the scattering frame's unit vector (y up)
 static inline void atmo_dir(float az_deg, float alt_deg, float v[3]) {
     float a = az_deg * (float)M_PI / 180.0f;

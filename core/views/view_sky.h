@@ -217,15 +217,11 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
                 altv = sky__dome_alts[ri];
             }
             float rd[3], col[3];
+            static const float dome_base[3] = { 0.020f, 0.022f,
+                                                0.035f };
             atmo_dir(az, altv, rd);
             atmo_scatter(rd, sd, col);
-            for (int cch = 0; cch < 3; cch++) {
-                float c = 1.0f - expf(-col[cch]);
-                float base = cch == 0 ? 0.020f
-                           : cch == 1 ? 0.022f : 0.035f;
-                float v = base + c * 0.78f;
-                st->dome[vi2][cch] = v > 1.0f ? 1.0f : v;
-            }
+            atmo_tone(col, 0.95f, dome_base, st->dome[vi2]);
         }
     }
 
