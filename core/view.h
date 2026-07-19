@@ -140,6 +140,20 @@ static inline RenderStyle style_default(void) {
     return s;
 }
 
+// Horizon calendar: the sun's rising azimuth (degrees from north,
+// toward east) at declination delta seen from latitude lat — the
+// oldest instrument of all: cos(az) = sin(delta) / cos(lat). The
+// setting azimuth is its mirror, 360 - az. False when the sun never
+// crosses the horizon there (polar day or night at that declination).
+static inline bool tempus_rise_azimuth(double delta_deg, double lat_deg,
+                                       float *az_rise) {
+    double c = sin(delta_deg * M_PI / 180.0)
+             / cos(lat_deg * M_PI / 180.0);
+    if (c < -1.0 || c > 1.0) return false;
+    *az_rise = (float)(acos(c) * 180.0 / M_PI);
+    return true;
+}
+
 // The calendar wheel gives up 20% of its radius at the full-system
 // stage — Mercury and Venus are its only tenants there, and the space
 // buys a tighter planetary band and a wider moat. Keyed off

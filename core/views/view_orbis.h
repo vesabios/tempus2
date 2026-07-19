@@ -152,6 +152,45 @@ static void orbis_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
         draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.9f));
         draw_circle_filled(d, rx, ry, 2.0f);
+
+        // ---- The horizon calendar at the home point ----
+        // The eight days' sunrise/sunset bearings radiating from
+        // where you stand — the neolithic instrument, live: drag the
+        // globe north and the solstice fan flings apart, because at
+        // 60N midsummer rises nearly northeast and midwinter nearly
+        // southeast. The SPREAD of the fan is your latitude. Above
+        // the arctic circle the solstice rays vanish — midsummer
+        // never rises there, and the instrument says so by silence.
+        {
+            int cur = 0;
+            double bd = 1.0e9;
+            for (int i = 0; i < 8; i++) {
+                double dd = fabs(st->tv.jd_current - t->jd_events[i]);
+                if (dd < bd) { bd = dd; cur = i; }
+            }
+            for (int ev = 0; ev < 8; ev++) {
+                double dec = sunset__sun_declination(
+                    sunset__time_julian_cent(t->jd_events[ev]));
+                float azr;
+                if (!tempus_rise_azimuth(dec, t->config.latitude, &azr))
+                    continue;
+                bool sol = (ev == 3 || ev == 7);   // Litha, Yule
+                float em = (ev == cur) ? 0.9f : (sol ? 0.55f : 0.32f);
+                float r1 = sol ? 64.0f : 52.0f;
+                for (int side = 0; side < 2; side++) {
+                    float az = side ? 360.0f - azr : azr;
+                    // Observer-face-on globe: north up, east right
+                    float ux = sinf(az * (float)M_PI / 180.0f);
+                    float uy = -cosf(az * (float)M_PI / 180.0f);
+                    d->alpha = base_alpha * em;
+                    draw_set_color(d, dca(0.72f, 0.55f, 0.25f, 0.85f));
+                    draw_line(d, rx + ux * 34.0f, ry + uy * 34.0f,
+                              rx + ux * r1, ry + uy * r1,
+                              sol ? 1.5f : 1.0f);
+                }
+            }
+            d->alpha = base_alpha;
+        }
     }
 
     // ---- Readout: the configured coordinates, live under the drag ----
