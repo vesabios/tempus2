@@ -95,13 +95,19 @@ static double g_clock = 0;      // the instrument's own elapsed seconds
 static BOOL g_booted = NO;
 static __weak id g_activeView = nil;
 
+// The tour belongs to the INSTRUMENT, not to a view. As per-view
+// ivars these were only ever set by the first view to boot, so the
+// full-size view ran with tour off and a zero dwell — no touring at
+// all (Seren). Same for the observer: read live, so the Options sheet
+// reaches a running saver instead of only the next launch.
+static BOOL   g_tourOn = YES;
+static double g_dwell = 12.0;
+static int    g_tourIdx = 0;
+static double g_tourTimer = 0;
+static double g_prefsTimer = 1e9;   // force a read on the first frame
+
 @interface TempusSaverView : ScreenSaverView {
-    BOOL   _unused;
     double _last;
-    int    _tourIdx;
-    double _tourTimer;
-    double _dwell;
-    BOOL   _tourOn;
     NSWindow *_sheet;
     NSPopUpButton *_cityPop;
     NSTextField *_latField, *_lonField;
@@ -153,22 +159,39 @@ static __weak id g_activeView = nil;
     [g_ctx update];
 }
 
-// The observer: the Options sheet's location, or Greenwich if unset.
-- (TempusConfig)configFromDefaults {
-    ScreenSaverDefaults *d = [TempusSaverView prefs];
-    [d registerDefaults:@{
++ (void)registerDefaults {
+    [[TempusSaverView prefs] registerDefaults:@{
         @"latitude":  @51.4779,
         @"longitude": @(-0.0015),
         @"tour":      @YES,
         @"dwell":     @12.0,
     }];
+}
+
+// Read the Options sheet's settings and apply them to a LIVE
+// instrument. The sheet runs in another process, so the running saver
+// has to re-read rather than be told.
+- (void)applyDefaults {
+    [TempusSaverView registerDefaults];
+    ScreenSaverDefaults *d = [TempusSaverView prefs];
+    [d synchronize];
+    g_tourOn = [d boolForKey:@"tour"];
+    g_dwell  = [d doubleForKey:@"dwell"];
+    if (g_dwell < 3.0) g_dwell = 3.0;
+    double la = [d doubleForKey:@"latitude"];
+    double lo = [d doubleForKey:@"longitude"];
+    if (g_booted && (la != g_tempus.config.latitude
+                     || lo != g_tempus.config.longitude))
+        tempus_set_location(&g_tempus, la, lo);
+}
+
+- (TempusConfig)configFromDefaults {
+    [TempusSaverView registerDefaults];
+    ScreenSaverDefaults *d = [TempusSaverView prefs];
     TempusConfig cfg = tempus_default_config();
     cfg.latitude  = [d doubleForKey:@"latitude"];
     cfg.longitude = [d doubleForKey:@"longitude"];
     cfg.timezone_auto = true;
-    _tourOn = [d boolForKey:@"tour"];
-    _dwell  = [d doubleForKey:@"dwell"];
-    if (_dwell < 3.0) _dwell = 3.0;
     return cfg;
 }
 
@@ -217,7 +240,8 @@ static __weak id g_activeView = nil;
     tempus_gfx_init();
 
     saver_set_station(&g_scene, g_tour[0], 0.0);
-    _tourIdx = 0;
+    g_tourIdx = 0;
+    g_tourTimer = 0;
     g_booted = YES;
 }
 
@@ -225,6 +249,7 @@ static __weak id g_activeView = nil;
     [super startAnimation];
     g_activeView = self;
     [self claimContext];
+    [self applyDefaults];
     _last = 0;
 }
 
@@ -252,19 +277,23 @@ static __weak id g_activeView = nil;
     _last = now;
     g_clock += dt;
 
+    // Options may have changed in another process; look now and then
+    g_prefsTimer += dt;
+    if (g_prefsTimer > 2.0) { g_prefsTimer = 0; [self applyDefaults]; }
+
     // The tour: fly, dwell, fly on
-    if (_tourOn) {
-        _tourTimer += dt;
-        if (_tourTimer >= _dwell) {
-            _tourTimer = 0;
-            _tourIdx = (_tourIdx + 1) % TOUR_N;
-            saver_set_station(&g_scene, g_tour[_tourIdx], 3.5);
+    if (g_tourOn) {
+        g_tourTimer += dt;
+        if (g_tourTimer >= g_dwell) {
+            g_tourTimer = 0;
+            g_tourIdx = (g_tourIdx + 1) % TOUR_N;
+            saver_set_station(&g_scene, g_tour[g_tourIdx], 3.5);
         }
     }
 
     tempus_update(&g_tempus, g_clock);
     scene_update(&g_scene, &g_tempus, dt);
-    tempus_stage_views(&g_scene, g_tour[_tourIdx]);
+    tempus_stage_views(&g_scene, g_tour[g_tourIdx]);
 
     draw_begin(&g_draw, w, h);
     scene_render(&g_scene, &g_draw, &g_tempus);
@@ -396,12 +425,7 @@ static __weak id g_activeView = nil;
     [d setBool:([_tourCheck state] == NSControlStateValueOn) forKey:@"tour"];
     [d setDouble:[_dwellSlider doubleValue] forKey:@"dwell"];
     [d synchronize];
-    if (g_booted) {
-        tempus_set_location(&g_tempus,
-                            [_latField doubleValue], [_lonField doubleValue]);
-        _tourOn = ([_tourCheck state] == NSControlStateValueOn);
-        _dwell = [_dwellSlider doubleValue];
-    }
+    g_prefsTimer = 1e9;   // apply on the next frame
     [[NSApplication sharedApplication] endSheet:_sheet];
 }
 
