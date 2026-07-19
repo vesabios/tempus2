@@ -217,14 +217,14 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         float mpx = mx * mr, mpy = my * mr;
         GlobeCmd *gm = draw_globe_slot(d, mpx, mpy, 22.0f);
         if (gm) {
+            // The clock aperture's own dress: PHASE-FRAME light, the
+            // canonical pure lune (bright limb to screen-right), not
+            // a 3D reading aimed at the sun
             double phb = globe_moon_phase(st->cache_jd);
             float bb = (float)(phb * 2.0 * M_PI);
-            float ux = spx - mpx, uy = spy - mpy;
-            float un = sqrtf(ux * ux + uy * uy);
-            if (un > 1.0e-4f) { ux /= un; uy /= un; }
             globe_rotation(0, 0, gm->rot);
-            gm->light[0] = ux * sinf(bb);
-            gm->light[1] = uy * sinf(bb);
+            gm->light[0] = sinf(bb);
+            gm->light[1] = 0.0f;
             gm->light[2] = -cosf(bb);
             gm->land = true;
             gm->tex_id = 1;
