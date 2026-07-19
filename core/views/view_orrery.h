@@ -62,6 +62,8 @@ struct OrreryViewState {
     const SkyViewState *skyv;
     const DracoViewState *drav;
     double drab;        // mirrored scene draco_blend (DRACO handoff)
+    double w_dial;      // station-weight sum of the dial family
+    double w_globe;     // station-weight sum of the globe family
     bool  dragging;
     bool  drag_earth;       // system view: dragging Earth around its orbit
 
@@ -358,6 +360,13 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->skyv = &sc->sky_state;
     st->drav = &sc->draco_state;
     st->drab = sc->draco_blend;
+    // The station weight vector, folded into the two families the
+    // machine's own seats know: dial furniture vs globe attachment
+    st->w_dial  = sc->stw[ST_HOROLOGIVM] + sc->stw[ST_HORAE]
+                + sc->stw[ST_ROTAE] + sc->stw[ST_SAECVLVM]
+                + sc->stw[ST_OFFICIVM];
+    st->w_globe = sc->stw[ST_TELLVS] + sc->stw[ST_MACHINA]
+                + sc->stw[ST_ORBIS];
     st->geo_azimuth = sc->solar_state.azimuth;
     st->geo_zenith = sc->solar_state.zenith;
     st->solar = &sc->solar_state;
@@ -1293,10 +1302,17 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // units away), zero for the rest of every flight, so neither
         // clock->MUNDI spirals nor MUNDI->ORBIS ever feels its pull.
         float ring_fac = 1.55f + (1.22f - 1.55f) * obf;
-        float m4 = m * 4.0f > 1.0f ? 1.0f : m * 4.0f;
-        float w_ap = (1.0f - m4) * (1.0f - obf);
+        // THE APERTURE'S CLAIM rides the station weight vector: dial
+        // family against globe family, normalized within the machine's
+        // own seat (the charts blend downstream). The claim spans the
+        // WHOLE flight — the moon GLIDES from dial furniture into
+        // globe attachment instead of welding on at the first quarter
+        // (Seren: the hard handoff into MVNDI). The parked closeup
+        // still silences it, so overlay departures fade in place.
+        double wdg = st->w_dial + st->w_globe;
+        float w_ap = wdg > 1.0e-6
+                   ? (float)(st->w_dial / wdg) * (1.0f - obf) : 0.0f;
         float morb = 1.0f - w_ap;    // the orbital form's claim
-        float tgt_ang = atan2f(mdy, mdx);
         float sdx = mdx * (1.0f - obf) + mpx * obf;
         float sdy = mdy * (1.0f - obf) + mpy * obf;
         float seat_x = ex + sdx * earth_r * ring_fac;
@@ -1356,34 +1372,30 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             float wS = (st->skyv && skw > 0.001f) ? skw : 0.0f;
             float wD = (st->drav && dw2 > 0.001f) ? dw2 : 0.0f;
             if (wS > 0.0f || wD > 0.0f) {
+                // MEMBER ROWS (Stage 2): seat 0 = the machine's composed
+                // moon; seats 1..2 = the chart stations' published
+                // members. Cross-frame outputs, so seat_mix_pos (rule 3);
+                // the phase light is a live-frame dir3 (never nlerp'd).
                 float wB = 1.0f - wS - wD;
                 if (wB < 0.0f) wB = 0.0f;
-                float wT = wB + wS + wD;
-                float kx = mmx * wB, ky = mmy * wB, kr = mmr * wB;
-                float kl[3] = { ml[0] * wB, ml[1] * wB, ml[2] * wB };
-                if (wS > 0.0f) {
-                    kx += st->skyv->lum_moon_x * wS;
-                    ky += st->skyv->lum_moon_y * wS;
-                    kr += st->skyv->lum_moon_r * wS;
-                    for (int i = 0; i < 3; i++)
-                        kl[i] += st->skyv->lum_moon_light[i] * wS;
-                }
-                if (wD > 0.0f) {
-                    kx += st->drav->lum_moon_x * wD;
-                    ky += st->drav->lum_moon_y * wD;
-                    kr += 28.0f * wD;
-                    for (int i = 0; i < 3; i++)
-                        kl[i] += st->drav->lum_light[i] * wD;
-                }
-                mmx = kx / wT; mmy = ky / wT; mmr = kr / wT;
-                float mn3 = 0;
+                double wT = wB + wS + wD;
+                double w[3] = { wB / wT, wS / wT, wD / wT };
+                float mx[3] = { mmx, wS > 0 ? st->skyv->lum_moon_x : 0,
+                                wD > 0 ? st->drav->lum_moon_x : 0 };
+                float my[3] = { mmy, wS > 0 ? st->skyv->lum_moon_y : 0,
+                                wD > 0 ? st->drav->lum_moon_y : 0 };
+                seat_mix_pos(mx, my, w, 3, &mmx, &mmy);
+                float mr[3] = { mmr, wS > 0 ? st->skyv->lum_moon_r : 0,
+                                28.0f };
+                mmr = mr[0] * (float)w[0] + mr[1] * (float)w[1]
+                    + mr[2] * (float)w[2];
+                float lv[3][3];
+                memcpy(lv[0], ml, sizeof(lv[0]));
                 for (int i = 0; i < 3; i++) {
-                    ml[i] = kl[i] / wT;
-                    mn3 += ml[i] * ml[i];
+                    lv[1][i] = wS > 0 ? st->skyv->lum_moon_light[i] : 0;
+                    lv[2][i] = wD > 0 ? st->drav->lum_light[i] : 0;
                 }
-                mn3 = sqrtf(mn3);
-                if (mn3 > 1.0e-3f)
-                    for (int i = 0; i < 3; i++) ml[i] /= mn3;
+                seat_mix_dir3((const float (*)[3])lv, w, 3, ml);
             }
         }
         // Publish for VIEW_LVMEN (and the pointer code's exclusions)
