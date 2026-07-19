@@ -94,6 +94,51 @@ static const uint8_t horae__metal_col[7][3] = {
     { 224, 221, 212 },   // LVNA — argentum
 };
 
+// The seven rulers' sigils, stroke tables in the instrument's engraved
+// idiom (point count then x,y pairs, unit box y-up, 0 ends) — Chaldean
+// order to match horae__metal_col: Saturn, Jupiter, Mars, Sun, Venus,
+// Mercury, Moon
+static const float horae__sg_saturn[] = {
+    2, -0.34f,0.24f, -0.10f,0.24f,
+    8, -0.22f,0.38f, -0.22f,0, -0.16f,0.10f, -0.04f,0.14f,
+       0.08f,0.08f, 0.12f,-0.06f, 0.08f,-0.24f, 0.16f,-0.36f, 0 };
+static const float horae__sg_jupiter[] = {
+    6, -0.30f,0.16f, -0.24f,0.30f, -0.10f,0.34f, 0.02f,0.26f,
+       0.02f,0.10f, -0.26f,-0.14f,
+    2, -0.32f,-0.14f, 0.28f,-0.14f,
+    2, 0.12f,0.02f, 0.12f,-0.36f, 0 };
+static const float horae__sg_mars[] = {
+    9, 0.09f,-0.12f, 0.04f,0, -0.08f,0.05f, -0.20f,0, -0.25f,-0.12f,
+       -0.20f,-0.24f, -0.08f,-0.29f, 0.04f,-0.24f, 0.09f,-0.12f,
+    2, 0.04f,0, 0.26f,0.24f,
+    2, 0.26f,0.24f, 0.08f,0.22f,
+    2, 0.26f,0.24f, 0.24f,0.06f, 0 };
+static const float horae__sg_sun[] = {
+    13, 0.24f,0, 0.208f,0.12f, 0.12f,0.208f, 0,0.24f, -0.12f,0.208f,
+        -0.208f,0.12f, -0.24f,0, -0.208f,-0.12f, -0.12f,-0.208f,
+        0,-0.24f, 0.12f,-0.208f, 0.208f,-0.12f, 0.24f,0,
+    2, -0.03f,0, 0.03f,0, 0 };
+static const float horae__sg_venus[] = {
+    9, 0.17f,0.14f, 0.12f,0.26f, 0,0.31f, -0.12f,0.26f, -0.17f,0.14f,
+       -0.12f,0.02f, 0,-0.03f, 0.12f,0.02f, 0.17f,0.14f,
+    2, 0,-0.03f, 0,-0.36f,
+    2, -0.12f,-0.22f, 0.12f,-0.22f, 0 };
+static const float horae__sg_mercury[] = {
+    9, 0.15f,0.04f, 0.106f,0.146f, 0,0.19f, -0.106f,0.146f,
+       -0.15f,0.04f, -0.106f,-0.066f, 0,-0.11f, 0.106f,-0.066f,
+       0.15f,0.04f,
+    5, -0.14f,0.34f, -0.07f,0.24f, 0,0.21f, 0.07f,0.24f, 0.14f,0.34f,
+    2, 0,-0.11f, 0,-0.36f,
+    2, -0.11f,-0.25f, 0.11f,-0.25f, 0 };
+static const float horae__sg_moon[] = {
+    11, 0.10f,0.30f, -0.06f,0.26f, -0.17f,0.12f, -0.20f,0,
+        -0.17f,-0.12f, -0.06f,-0.26f, 0.10f,-0.30f, -0.02f,-0.20f,
+        -0.08f,0, -0.02f,0.20f, 0.10f,0.30f, 0 };
+static const float *horae__sigil[7] = {
+    horae__sg_saturn, horae__sg_jupiter, horae__sg_mars, horae__sg_sun,
+    horae__sg_venus, horae__sg_mercury, horae__sg_moon,
+};
+
 // Weekday names in dial order Sunday..Saturday (dies Solis..Saturni)
 static const char *horae__dies[7] = {
     "SOLIS", "LVNAE", "MARTIS", "MERCVRII",
@@ -506,6 +551,41 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
         draw_circle_stroked(d, rcx, rcy, HORAE_RING_IN, 1.0f);
         draw_circle_stroked(d, rcx, rcy, HORAE_RING_OUT, 1.0f);
+    }
+
+    // ---- The rulers' pinion ----
+    // The tangent idea carried inward: the seven Chaldean rulers as a
+    // small wheel meshing the INSIDE of the sky wheel at the same
+    // contact the week ring touches outside. The radius is the honest
+    // gear ratio — 7 cells against the dial's 24 gives rp = Rn*7/24,
+    // equal tooth pitch at the mesh — so it rolls 24/7 turns a day,
+    // the ruler of the hour always pressed to the touch, wearing its
+    // alchemical metal and sigil.
+    {
+        float Rn = HORAE_CLOCK_R - HORAE_CLOCK_W;
+        float rp = Rn * 7.0f / 24.0f;
+        float pcx2 = hdx * (Rn - rp), pcy2 = hdy * (Rn - rp);
+        float hfrac = (u_now - u[hcur])
+                    / (u[hcur + 1] - u[hcur] + 1.0e-6f);
+        float phi = m_now / 7.0f - ((float)ridx + hfrac) / 7.0f;
+        for (int c = 0; c < 7; c++) {
+            const uint8_t *mc = horae__metal_col[c];
+            bool curp = (c == ridx);
+            draw_set_color(d, dca(mc[0] / 255.0f, mc[1] / 255.0f,
+                                  mc[2] / 255.0f,
+                                  curp ? 0.85f : 0.30f));
+            horae__cell(d, pcx2, pcy2, rp - 15.0f, rp,
+                        c / 7.0f + phi, (c + 1) / 7.0f + phi);
+            float sa = ((c + 0.5f) / 7.0f + phi) * 2.0f * (float)M_PI;
+            float sux = sinf(sa), suy = -cosf(sa);
+            draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
+                                  curp ? 0.95f : 0.45f));
+            orr__strokes(d, horae__sigil[c], pcx2 + sux * 26.0f,
+                         pcy2 + suy * 26.0f, sux, suy, 18.0f, 1.0f);
+        }
+        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
+        draw_circle_stroked(d, pcx2, pcy2, rp, 1.0f);
+        draw_circle_stroked(d, pcx2, pcy2, rp - 15.0f, 1.0f);
     }
 
     // ---- The hands, over everything: this is a clock ----
