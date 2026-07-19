@@ -121,6 +121,24 @@ static const char *g_worldview_names[WV_COUNT] = {
 
 static Worldview g_worldview = WV_HOROLOGIVM;
 
+// ---- The tour: an idle attractor through the stations ----
+// Loops until any CLICK (or key) ends it; sixty idle seconds — no
+// click, no mouse motion — start it again from the top. Four seconds
+// of dwell after each flight lands.
+static const Worldview g_tour[] = {
+    WV_HOROLOGIVM, WV_HORAE, WV_HOROLOGIVM, WV_ORBIS,
+    WV_TELLVS, WV_MACHINA, WV_CAELVM, WV_DRACO,
+};
+#define TOUR_LEN    ((int)(sizeof(g_tour) / sizeof(g_tour[0])))
+#define TOUR_FLIGHT 3.5     /* matches the station tween */
+#define TOUR_DWELL  4.0
+#define TOUR_RESUME 60.0
+static bool   g_tour_active = true;
+static int    g_tour_idx = 0;
+static double g_tour_timer = 0;
+static double g_idle_secs = 0;
+
+
 // Annunciator hit rects (chrome space: 1280-tall world units, no camera
 // zoom), published by the frame that draws them
 static float g_wv_btn[WV_COUNT][4];   // x0, y0, x1, y1
@@ -984,6 +1002,10 @@ static void init(void) {
     }
 
     // Dev: pin the clock to a fraction of the day/year for screenshots
+    // Dev harness: pinned stations and screenshot runs do not tour
+    if (g_worldview != WV_HOROLOGIVM || getenv("TEMPUS_SHOT"))
+        g_tour_active = false;
+
     const char *daypct = getenv("TEMPUS_DAYPCT");
     if (daypct) {
         g_tempus.time_override = true;
@@ -998,6 +1020,23 @@ static void frame(void) {
     float h = sapp_heightf();
     double dt = sapp_frame_duration();
     g_time += dt;
+
+    // Tour clock: advance stations while it runs; wake it after a
+    // minute of stillness
+    g_idle_secs += dt;
+    if (g_tour_active) {
+        g_tour_timer += dt;
+        if (g_tour_timer >= TOUR_FLIGHT + TOUR_DWELL) {
+            g_tour_timer = 0;
+            g_tour_idx = (g_tour_idx + 1) % TOUR_LEN;
+            set_worldview(g_tour[g_tour_idx]);
+        }
+    } else if (g_idle_secs >= TOUR_RESUME) {
+        g_tour_active = true;
+        g_tour_idx = 0;
+        g_tour_timer = 0;
+        set_worldview(g_tour[0]);
+    }
 
     g_desired_fps = scene_desired_fps(&g_scene);
     if (g_show_debug || g_time < g_boost_until)
@@ -1279,6 +1318,13 @@ static void frame(void) {
 static void event(const sapp_event *e) {
     // Any input: briefly return to full rate so interaction feels live
     g_boost_until = g_time + 1.0;
+
+    // The tour: a click (or key) ends it; any motion defers its return
+    g_idle_secs = 0;
+    if (e->type == SAPP_EVENTTYPE_MOUSE_DOWN
+        || e->type == SAPP_EVENTTYPE_KEY_DOWN
+        || e->type == SAPP_EVENTTYPE_TOUCHES_BEGAN)
+        g_tour_active = false;
 
     // Pass events to nuklear first
     if (snk_handle_event(e))
