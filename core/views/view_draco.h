@@ -73,15 +73,25 @@ static const char *draco__sign_abl[12] = {
 // falling through gold and ember to nothing — per-vertex color over
 // three shells. k scales the whole flame.
 static void draco__glow(DrawCtx *d, float cx, float cy, float r,
-                        float k) {
+                        float k, bool ember) {
     const int SEG = 48;
     static const float shell_r[4] = { 0.0f, 0.30f, 0.62f, 1.0f };
-    static const float shell_c[4][4] = {
+    // Gold furnace for the sun's meal; for the moon's, the umbral
+    // blood-copper — Earth's shadow is lit only by sunlight refracted
+    // through our atmosphere, every sunset at once
+    static const float shell_sun[4][4] = {
         { 1.00f, 0.97f, 0.88f, 0.95f },
         { 1.00f, 0.80f, 0.38f, 0.60f },
         { 0.92f, 0.50f, 0.12f, 0.24f },
         { 0.80f, 0.35f, 0.05f, 0.00f },
     };
+    static const float shell_moon[4][4] = {
+        { 0.92f, 0.50f, 0.34f, 0.80f },
+        { 0.74f, 0.24f, 0.10f, 0.50f },
+        { 0.48f, 0.10f, 0.04f, 0.20f },
+        { 0.30f, 0.04f, 0.02f, 0.00f },
+    };
+    const float (*shell_c)[4] = ember ? shell_moon : shell_sun;
     int base[4];
     for (int sh = 0; sh < 4; sh++) {
         draw_set_color(d, dca(shell_c[sh][0], shell_c[sh][1],
@@ -266,13 +276,14 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         // Under the beads, blazing white at the heart.
         if (glow > 0.01f)
             draco__glow(d, solar ? spx : mpx, solar ? spy : mpy,
-                        70.0f + 50.0f * glow, glow);
+                        70.0f + 50.0f * glow, glow, !solar);
 
-        // The sun itself heats with the closing eclipse — gold to
-        // near-white at the moment of the meal
-        draw_set_color(d, dca(0.85f + 0.15f * glow,
-                              0.62f + 0.33f * glow,
-                              0.18f + 0.60f * glow, 0.95f));
+        // The sun itself heats only at ITS OWN meal — gold to
+        // near-white as the solar eclipse closes (a lunar eclipse
+        // dims the moon; the sun just stands there, opposite)
+        draw_set_color(d, dca(0.85f + 0.15f * glow_sol,
+                              0.62f + 0.33f * glow_sol,
+                              0.18f + 0.60f * glow_sol, 0.95f));
         draw_circle_filled(d, spx, spy, 28.0f);
         draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
         draw_circle_stroked(d, spx, spy, 34.0f, 1.0f);
@@ -292,10 +303,17 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
             gm->tex_id = 1;
             gm->grid_boost = 0.0f;
             gm->obs_lat = 999.0f;
-            gm->day_col[0] = 0.58f; gm->day_col[1] = 0.55f;
-            gm->day_col[2] = 0.49f; gm->day_col[3] = 1.0f;
-            gm->night_col[0] = 0.10f; gm->night_col[1] = 0.105f;
-            gm->night_col[2] = 0.23f; gm->night_col[3] = 1.0f;
+            // The blood moon: entering Earth's shadow, the disc
+            // reddens to the umbral copper of refracted sunset light
+            float bl = glow_lun;
+            gm->day_col[0] = 0.58f - 0.08f * bl;
+            gm->day_col[1] = 0.55f - 0.33f * bl;
+            gm->day_col[2] = 0.49f - 0.38f * bl;
+            gm->day_col[3] = 1.0f;
+            gm->night_col[0] = 0.10f + 0.32f * bl;
+            gm->night_col[1] = 0.105f + 0.035f * bl;
+            gm->night_col[2] = 0.23f - 0.16f * bl;
+            gm->night_col[3] = 1.0f;
         }
     }
 
