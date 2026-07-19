@@ -590,18 +590,21 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         float hfrac = (u_now - u[hcur])
                     / (u[hcur + 1] - u[hcur] + 1.0e-6f);
         float phi = m_now / 7.0f - ((float)ridx + hfrac) / 7.0f;
-        // The pinion wears the RAILROAD'S OWN DRESS: the same light
-        // band, and the ruling hour as the one dark filled box on it
+        // The pinion wears the RAILROAD'S OWN DRESS, inverted: a dark
+        // band, and the ruling hour as the one LIGHT filled box on it
         // (full angular width, inset only radially — the chemin de
         // fer idiom exactly). No metals, no second visual language.
+        // The plate is solid — it occludes the numerals it rolls over.
+        draw_set_color(d, dca(0.02f, 0.02f, 0.02f, 1.0f));
+        draw_circle_filled(d, pcx2, pcy2, rp);
         float pr0 = rp - 10.0f;
         for (int c = 0; c < 7; c++) {
             bool curp = (c == ridx);
-            draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
+            draw_set_color(d, dca(0.03f, 0.03f, 0.03f, 0.95f));
             horae__cell(d, pcx2, pcy2, pr0, rp,
                         c / 7.0f + phi, (c + 1) / 7.0f + phi);
             if (curp) {
-                draw_set_color(d, dca(0.03f, 0.03f, 0.03f, 0.95f));
+                draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
                 horae__cell(d, pcx2, pcy2, pr0 + 1.1f, rp - 1.1f,
                             c / 7.0f + phi, (c + 1) / 7.0f + phi);
             }
@@ -612,6 +615,9 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             orr__strokes(d, horae__sigil[c], pcx2 + sux * 26.0f,
                          pcy2 + suy * 26.0f, sux, suy, 18.0f, 1.0f);
         }
+        // The meshing edge, so the dark wheel holds its shape
+        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
+        draw_circle_stroked(d, pcx2, pcy2, rp, 1.0f);
     }
 
     // ---- The reading, written outside the ring at the contact ----
