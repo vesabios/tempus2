@@ -91,22 +91,28 @@ struct OrreryViewState {
 #define VIEW_ORRERY_IMPL
 
 // ---- Full-system layout ----
-// Not to scale: orbit radii in calendar-wheel units, spaced like the
-// concentric rings of an astronomical clock face. Earth's orbit IS the
-// calendar wheel (1.0); Mercury and Venus sit inside it, Mars through
-// Pluto outside, and the zodiac dial is the outermost ring.
-
-// Inner planets scale with the wheel; outer rings sit at ABSOLUTE
-// offsets beyond it — the month text needs ~130 units of clearance no
-// matter how far the wheel shrinks at system stage. The gap from
-// Pluto's ring to the zodiac dial is deliberate negative space — the
-// moat between the heliocentric machine and the geocentric dial,
-// crossed only by the sight-lines.
-static const float orr__inner_frac[2] = { 0.36f, 0.64f };
+// Not distance-scale — TEMPO-scale. This machine is a clock, so its
+// rings are laid out by time: a planet's radius is linear in the LOG
+// OF ITS ORBITAL PERIOD, the slow wanderers ringed farther out by how
+// much slower they run. (By Kepler's third law this is log-distance
+// too, up to a constant — but the period is what the instrument
+// actually shows.) Earth's orbit IS the calendar wheel (1.0), which
+// splits the rule into two registers with their own step-per-decade:
+//   inner: Mercury (88d) anchors at 0.36 of the wheel (clear of the
+//          moon's ring), Venus (225d) falls at 0.782 by the rule;
+//   outer: Mars (1.9y) anchors at wheel+150 (the month text needs
+//          ~130 units whatever the wheel does), Pluto (248y) at
+//          wheel+300 (the moat edge), and Jupiter through Neptune
+//          fall at +207/+235/+267/+287 by the rule — the rings
+//          crowding toward Pluto as each decade of period compresses.
+// The gap from Pluto's ring to the zodiac dial stays deliberate
+// negative space — the moat between the heliocentric machine and the
+// geocentric dial, crossed only by the sight-lines.
+static const float orr__inner_frac[2] = { 0.36f, 0.782f };
 
 static inline float orr__orbit_r(int p, float wheel_R) {
     static const float outer_off[6] = {
-        150.0f, 180.0f, 210.0f, 240.0f, 270.0f, 300.0f };
+        150.0f, 207.0f, 235.0f, 267.0f, 287.0f, 300.0f };
     if (p < PL_EARTH) return wheel_R * orr__inner_frac[p];
     if (p == PL_EARTH) return wheel_R;
     return wheel_R + outer_off[p - PL_MARS];
@@ -559,9 +565,25 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             for (int b = BODY_MERCURY; b < BODY_COUNT; b++) {
                 int p = planets_body_pl(b);
                 float bx2 = ppx[p], by2 = ppy[p];
-                // Control point puts the curve through the bead at t=0.5
-                float p1x = 2.0f * bx2 - 0.5f * (ex + mpx[b]);
-                float p1y = 2.0f * by2 - 0.5f * (ey + mpy[b]);
+                // Control point puts the curve through the bead at its
+                // TRUE fractional position along Earth->bead->marker.
+                // Forcing t=0.5 slings the control point past Earth
+                // whenever the bead hangs close to us (Venus on the
+                // tempo rings) — the line left on the wrong side and
+                // hairpinned back. Clamped off the ends: a bead at the
+                // extremes would launch the control point instead.
+                float d0 = sqrtf((bx2 - ex) * (bx2 - ex)
+                               + (by2 - ey) * (by2 - ey));
+                float d1 = sqrtf((mpx[b] - bx2) * (mpx[b] - bx2)
+                               + (mpy[b] - by2) * (mpy[b] - by2));
+                float ts = d0 / (d0 + d1 + 1.0e-6f);
+                if (ts < 0.12f) ts = 0.12f;
+                if (ts > 0.88f) ts = 0.88f;
+                float tw = 2.0f * ts * (1.0f - ts);
+                float p1x = (bx2 - (1.0f - ts) * (1.0f - ts) * ex
+                                 - ts * ts * mpx[b]) / tw;
+                float p1y = (by2 - (1.0f - ts) * (1.0f - ts) * ey
+                                 - ts * ts * mpy[b]) / tw;
                 draw_set_color(d, dca(orr__body_col[b][0] / 255.0f,
                                       orr__body_col[b][1] / 255.0f,
                                       orr__body_col[b][2] / 255.0f, 0.62f));
