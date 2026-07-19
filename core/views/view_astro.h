@@ -442,12 +442,38 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
                 draw_circle_filled(d, x, y, 3.0f);
                 d->alpha = base_alpha * 0.7f;
                 draw_line(d, x, y, x - ux * 16.0f, y - uy * 16.0f, 1.2f);
-                // Risen names in bright warm ink — they must read on
-                // the daylight blue as well as the night ink
+                // Risen names in bright warm ink, ENGRAVED along the
+                // plate's own arcs like MVNDI's ring names: baseline
+                // curved about the center, set clockwise of the star,
+                // flip-compensated so both halves center on the arc
                 d->alpha = base_alpha * 0.9f;
                 draw_set_color(d, dca(0.90f, 0.87f, 0.76f, 0.95f));
-                draw_text_ex(d, fw, 13.0f, x + 7.0f, y + 4.5f,
-                             astro__stars[i].name);
+                float rr = sqrtf(x * x + y * y);
+                if (rr > 60.0f) {
+                    float lscale = 0.85f;
+                    float ltrack = 0.5f;
+                    int lw2 = _font_compat[FONT_date].weight;
+                    float lsz = _font_compat[FONT_date].size * lscale;
+                    float tw = (sdf_measure_width(lw2,
+                                    astro__stars[i].name)
+                                + ltrack
+                                  * (float)strlen(astro__stars[i].name))
+                             * lsz;
+                    float sa2 = atan2f(x, -y);
+                    float ang_off = (14.0f + tw * 0.5f) / rr;
+                    float lth = sa2 + ang_off;
+                    float na = fmodf(lth, 2.0f * (float)M_PI);
+                    if (na < 0) na += 2.0f * (float)M_PI;
+                    bool lflip = (na > (float)M_PI * 0.5f
+                                  && na < (float)M_PI * 1.5f);
+                    float lr = rr + lsz * (lflip ? 0.51f : 0.37f);
+                    draw_text_curved(d, FONT_date, 0, 0, lr, lth,
+                                     astro__stars[i].name, ltrack,
+                                     lscale);
+                } else {
+                    draw_text_ex(d, fw, 13.0f, x + 7.0f, y + 4.5f,
+                                 astro__stars[i].name);
+                }
             } else {
                 d->alpha = base_alpha * 0.28f;
                 draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.7f));
