@@ -807,10 +807,17 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
 
         // Planet beads + engraved radial labels; the sky view owns
-        // them during the CAELVM morph
-        if (a_planet > 0.001f && !sky_owns) {
+        // the BEADS during the CAELVM morph (it flies live copies),
+        // but it has no counterpart for the ring names — so the names
+        // keep their own weight, easing in from black over the tail
+        // of the sky's departure instead of popping at the handoff
+        float a_name = a_planet
+                     * (st->skyb > 0.25 ? 0.0f
+                                        : 1.0f - (float)st->skyb / 0.25f);
+        if (a_planet > 0.001f && (!sky_owns || a_name > 0.001f)) {
             for (int p = 0; p < PL_COUNT; p++) {
                 if (p == PL_EARTH) continue;
+                if (!sky_owns) {
                 d->alpha = base_alpha * a_planet;
                 draw_set_color(d, dc_u8(orr__planet[p].r, orr__planet[p].g,
                                         orr__planet[p].b));
@@ -822,6 +829,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                     draw_circle_stroked(d, ppx[p], ppy[p],
                                         orr__planet[p].size * 1.75f, 1.0f);
                 }
+                }
+                if (a_name < 0.001f) continue;
                 float orbr = orr__orbit_r(p, wheel_R);
                 float th = (float)((0.75 + pn->helio_lon[p] / 360.0)
                                    * 2.0 * M_PI);
@@ -848,7 +857,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 bool lflip = (na > (float)M_PI * 0.5f
                               && na < (float)M_PI * 1.5f);
                 float lr = orbr + lsz * (lflip ? 0.51f : 0.37f);
-                d->alpha = base_alpha * a_planet * 0.85f;
+                d->alpha = base_alpha * a_name * 0.85f;
                 draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.85f));
                 draw_text_curved(d, FONT_date, 0, 0, lr, lth,
                                  orr__planet[p].name, ltrack, lscale);
