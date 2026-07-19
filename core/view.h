@@ -7,6 +7,7 @@
 #include "tempus.h"
 #include "station.h"
 #include "seat.h"
+#include "ink.h"
 #include "atmo.h"
 #include "draw.h"
 #include "globe.h"

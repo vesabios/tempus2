@@ -549,7 +549,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // celestial geometry — the globe keeps only its lit-ness (terminator).
     // Everything painted ON it (continents, latitude ring, city marker,
     // sky-dome, surface clock, axis pin, marker tether) fades with sysf.
-    float sysf = 1.0f - (float)tempus_smoothstep(0.15, 0.60, ss);
+    float sysf = ink_out(INK_SYS_DIAL, ss);
     // ONE OBJECT, ONE OWNER: the moment the CAELVM morph begins, the
     // sky view owns every morphing body (planets, sun, moon, orbit
     // rings) as single lerped objects starting from these exact
@@ -562,11 +562,11 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     if (skw > 1) skw = 1;
     if (ss > 0.001f && machine_vis) {
         const PlanetsNow *pn = &st->planets;
-        float a_ring   = (float)tempus_smoothstep(0.05, 0.45, ss);
-        float a_planet = (float)tempus_smoothstep(0.20, 0.60, ss);
-        float a_zod    = (float)tempus_smoothstep(0.40, 0.80, ss);
-        float a_sight  = (float)tempus_smoothstep(0.60, 0.95, ss);
-        float a_web    = (float)tempus_smoothstep(0.70, 1.00, ss);
+        float a_ring   = ink_in(INK_RING, ss);
+        float a_planet = ink_in(INK_PLANET, ss);
+        float a_zod    = ink_in(INK_ZODIAC, ss);
+        float a_sight  = ink_in(INK_SIGHT, ss);
+        float a_web    = ink_in(INK_WEB, ss);
         float wheel_R  = base_w;   // Earth's orbit, system-stage size
 
         // Bead positions: true heliocentric longitudes on stylized rings.
@@ -1118,8 +1118,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         OrreryViewState *wpl = (OrreryViewState *)(uintptr_t)buf;
         const PlanetsNow *pn3 = &st->planets;
         bool chart3 = st->skyv && skw > 0.001f;
-        float fin3 = (float)tempus_smoothstep(0.10, 0.75, skw);
-        float a_pl3 = (float)tempus_smoothstep(0.20, 0.60, ss);
+        float fin3 = ink_in(INK_BORN, skw);
+        float a_pl3 = ink_in(INK_PLANET, ss);
         for (int p = 0; p < PL_COUNT; p++) {
             wpl->pl_ring_a[p] = 0;
             wpl->pl_stroke[p] = 0;
@@ -1359,7 +1359,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
         // At system scale the moon shrinks toward a bead beside its planet
         float hr2 = 22.0f * (1.0f - 0.55f
-                             * (float)tempus_smoothstep(0.2, 0.7, ss));
+                             * ink_in(INK_MOON_SHRINK, ss));
         float hl2[3] = { helio_light[0], helio_light[1], helio_light[2] };
         float edx = -mdx, edy = -mdy;   // direction moon -> earth, screen
 

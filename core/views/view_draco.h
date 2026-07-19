@@ -260,7 +260,7 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
     // the first breath of departure and lights only at the very end
     // of arrival. Everything downstream inherits — furnace, umbra,
     // blood tint, jaw brightening, the season line.
-    float stage = (float)tempus_smoothstep(0.90, 0.995, st->blend);
+    float stage = ink_in(INK_DRACO_STAGE, st->blend);
     season *= stage;
     glow_sol *= stage;
     glow_lun *= stage;

@@ -312,17 +312,17 @@ static void set_view_opacities(void) {
     double orbis = g_scene.orbis_blend;
     double offic = g_scene.offic_blend;
     double draco = g_scene.draco_blend;
-    double fade = (1.0 - tempus_smoothstep(0.0, 0.55, sky))
-                * (1.0 - tempus_smoothstep(0.0, 0.55, horae))
-                * (1.0 - tempus_smoothstep(0.0, 0.55, rotae))
-                * (1.0 - tempus_smoothstep(0.0, 0.55, saec))
-                * (1.0 - tempus_smoothstep(0.0, 0.55, offic))
-                * (1.0 - tempus_smoothstep(0.0, 0.55, draco));
+    double fade = (double)ink_out(INK_MACHINE_EXIT, sky)
+                * (double)ink_out(INK_MACHINE_EXIT, horae)
+                * (double)ink_out(INK_MACHINE_EXIT, rotae)
+                * (double)ink_out(INK_MACHINE_EXIT, saec)
+                * (double)ink_out(INK_MACHINE_EXIT, offic)
+                * (double)ink_out(INK_MACHINE_EXIT, draco);
     // ORBIS keeps the orrery: the globe IS the station (it grows to the
     // closeup inside the orrery itself). Only the clock chrome bows out
     // — and it bows out FAST (gone by a fifth of the flight): the dial
     // furniture has no business hanging over the growing planet.
-    double orbis_fade = 1.0 - tempus_smoothstep(0.0, 0.20, orbis);
+    double orbis_fade = (double)ink_out(INK_ORBIS_CHROME, orbis);
     // The calendar wheel survives into the sky as its bezel — the time
     // control rides along to every worldview
     g_scene.views[VIEW_CALENDAR].opacity = 1.0;
@@ -372,8 +372,8 @@ static void set_view_opacities(void) {
     // stage. This is what makes the sun and moon SINGLE objects: one
     // renderer, always on top, parameters composed continuously.
     {
-        double lum = 1.0 - tempus_smoothstep(0.0, 0.15, sky);
-        double skyvis = tempus_smoothstep(0.0, 0.15, sky);
+        double lum = (double)ink_out(INK_LUM_SKYVIS, sky);
+        double skyvis = (double)ink_in(INK_LUM_SKYVIS, sky);
         lum = fade > skyvis ? fade : skyvis;
         // DRACO flights keep the luminaries with VIEW_LVMEN the whole
         // way (the orrery composes toward draco's published targets);
@@ -381,7 +381,7 @@ static void set_view_opacities(void) {
         // its own furnace-under, umbra-over sandwich needs the beads
         // in its own layer
         if (draco < 0.999) {
-            double dvis = tempus_smoothstep(0.0, 0.10, draco);
+            double dvis = (double)ink_in(INK_DRACO_VIS, draco);
             if (dvis > lum) lum = dvis;
         }
         g_scene.views[VIEW_LVMEN].opacity = lum;

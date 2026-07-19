@@ -382,7 +382,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // the year becomes the ground. Chart furniture without a machine
     // counterpart fades in late.
     float mb = (float)st->blend;               // morph position
-    float fb = (float)tempus_smoothstep(0.25, 0.95, st->blend);
+    float fb = ink_in(INK_CHART_LATE, st->blend);
     sky__set_center(st->view_az, st->view_alt);
     // Machine-counterpart weight: only MACHINA has zodiac/rings/beads
     // to hand off. Parked there (system stage 1) every element takes
@@ -394,7 +394,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     float ms = st->orr ? (float)st->orr->sys : 1.0f;
     if (ms < 0) ms = 0;
     if (ms > 1) ms = 1;
-    float fin = (float)tempus_smoothstep(0.10, 0.75, st->blend);
+    float fin = ink_in(INK_BORN, st->blend);
     float mw = ms * (1.0f - mb);
     float sw = ms * mb + (1.0f - ms) * fin;
     float wheel_R = s->calendar_base_radius
@@ -591,8 +591,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     {
         float rim_r = bez_R + (SKY_HOR - bez_R) * mb;
         float mk = rim_r / SKY_HOR;
-        d->alpha = base_alpha * (float)tempus_smoothstep(0.05, 0.5,
-                                                         st->blend);
+        d->alpha = base_alpha * ink_in(INK_HORIZON, st->blend);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.55f));
         float px2 = 0, py2 = 0;
         for (int i = 0; i <= 144; i++) {

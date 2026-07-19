@@ -118,9 +118,16 @@ never need to be.
   beads draw above the sky's compass/labels instead of under —
   review at-rest CAELVM diffs for real overlaps. Ring NAMES stay in
   the orrery (a_name tail), sky NAME labels stay in the sky (fb).
-- **Stage 4**: ink staging table — the ~27 scattered smoothstep
-  windows become one declarative per-element table; entrance
-  choreography tuned globally.
+- **Stage 4 — done**: ink staging table (`core/ink.h`) — every
+  flight-choreography smoothstep window (machine furniture staggers,
+  machine-exit fades, chart born-in-place/late-furniture ramps, the
+  luminaries' surface claims, the eclipse stage gate) is one
+  declarative table, double-precision, same constants — verified
+  bit-exact by spot shots. Deliberately NOT in the table: the clock
+  hands' linear first-quarter exit (1 - 4*helio), the calendar's
+  zoom-radius visibility windows, and DRACO's ephemeris-driven
+  season/syzygy gates — those are driven by zoom or sky geometry,
+  not flight blends.
 
 Baseline protection: tag `pre-refactor`, bundle at
 `~/claude/tempus2-pre-refactor.bundle`, private remote
