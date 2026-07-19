@@ -332,10 +332,12 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
     // the observable. Almucantars recede; the twilights are dashed
     // whispers under the night side.
     {
-        float alts[11] = { 10, 20, 30, 40, 50, 60, 70, 80, -18, -6, 0 };
-        for (int L = 0; L < 11; L++) {
+        // (No alt-0 row: the horizon line is the shared sky circle's
+        // own rim — one geometry, drawn by the one drawer.)
+        float alts[10] = { 10, 20, 30, 40, 50, 60, 70, 80, -18, -6 };
+        for (int L = 0; L < 10; L++) {
             float alt = alts[L];
-            bool horizon = (alt == 0);
+            bool horizon = false;
             bool twil = (alt < 0);
             float la = horizon ? 0.85f
                      : (twil ? 0.26f * (1.0f - dayk) + 0.06f : 0.15f);
