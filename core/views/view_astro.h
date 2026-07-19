@@ -36,6 +36,11 @@ struct AstroViewState {
     float  sky_lat;
     float  sky_cols[1 + ASTRO_SKY_RINGS * (ASTRO_SKY_SEC + 1)][3];
 
+    // The hour ring between the limb and the band: the rendering-
+    // time control, one revolution one day (CAELVM's control, here)
+    bool  hour_dragging;
+    float last_wx, last_wy;
+
     // Luminary chart targets, published for the orrery's composition
     // (the ONE OBJECT law): the sun and moon fly onto the plate as
     // the same objects they are everywhere else.
@@ -224,7 +229,6 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
     const AstroViewState *st = (const AstroViewState *)buf;
     const TimeView *tv = &st->tv;
     float base_alpha = d->alpha;
-    (void)s;
     if (base_alpha < 0.004f) return;
 
     float d2r = (float)M_PI / 180.0f;
@@ -522,6 +526,34 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
                              "LVNA");
             }
         }
+    }
+
+    // ---- The hour ring: the rendering-time control ----
+    // CAELVM's 24-hour dial, seated between the limb and the band:
+    // midnight at top, noon at bottom. Drag it and the rete wheels
+    // while the tympan holds still — the astrolabe worked, not shown.
+    {
+        float r0 = 414.0f, r1 = 430.0f;
+        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.22f));
+        d->alpha = base_alpha;
+        draw_circle_stroked(d, 0, 0, r0, 1.0f);
+        draw_circle_stroked(d, 0, 0, r1, 1.0f);
+        for (int h = 0; h < 24; h++) {
+            float a = (float)h / 24.0f * 2.0f * (float)M_PI;
+            float hx = sinf(a), hy = -cosf(a);
+            bool major = (h % 6) == 0;
+            draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
+                                  major ? 0.55f : 0.28f));
+            float t0 = major ? r0 : r0 + 4.0f;
+            draw_line(d, hx * t0, hy * t0, hx * r1, hy * r1, 1.0f);
+        }
+        float a = (float)tv->percent_of_day * 2.0f * (float)M_PI;
+        float hx = sinf(a), hy = -cosf(a);
+        draw_set_color(d, dc_scale(s->sunrise_handle, 1.05f));
+        draw_line(d, hx * (r0 - 3.0f), hy * (r0 - 3.0f),
+                  hx * (r1 + 3.0f), hy * (r1 + 3.0f), 1.8f);
+        draw_circle_filled(d, hx * (r0 + (r1 - r0) * 0.5f),
+                           hy * (r0 + (r1 - r0) * 0.5f), 4.5f);
     }
 
     // ---- The name ----
