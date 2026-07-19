@@ -556,7 +556,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         {
             float base_w = (float)tempus_wheel_radius(
                 sc->style.calendar_base_radius, sc->system_blend,
-                sc->sky_blend);
+                sc->sky_blend, sc->orbis_blend);
             float R = base_w + (float)c->zoom * sc->style.zoom_in_radius;
             double ypct = tempus_year_pct(t);
             float ox = sinf((float)(ypct * 2.0 * M_PI)) * (R - base_w);
@@ -599,7 +599,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         // 2*pi*(R - base) per year, which is what the finger fights.
         float base_w = (float)tempus_wheel_radius(
             sc->style.calendar_base_radius, sc->system_blend,
-            sc->sky_blend);
+            sc->sky_blend, sc->orbis_blend);
         float R = base_w + (float)c->zoom * sc->style.zoom_in_radius;
         double ypct = tempus_year_pct(t);
         float th = (float)(ypct * 2.0 * M_PI);

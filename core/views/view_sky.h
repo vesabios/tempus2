@@ -384,7 +384,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // unfurls from wherever it actually is
     float bez_R = (float)tempus_wheel_radius(
         s->calendar_base_radius, st->orr ? st->orr->sys : 1.0,
-        st->blend);
+        st->blend, st->orr ? st->orr->orbisb : 0.0);
 
     // ---- The bowl: the true sky at the rendering instant ----
     // Single-scattering atmosphere, evaluated per dome vertex in
