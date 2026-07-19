@@ -22,6 +22,7 @@
 
 #include "../core/scene.h"
 #include "../core/stage.h"
+#include "../core/chrome.h"
 #include "../core/globe.h"
 #include "../shaders/tempus.glsl.h"
 
@@ -159,10 +160,41 @@ static double g_prefsTimer = 1e9;   // force a read on the first frame
     [g_ctx update];
 }
 
+// The system time zone names a city — "Europe/Berlin",
+// "Australia/Sydney" — and the instrument already carries 1251 of
+// them. Match the two and the saver knows where it stands, with no
+// permission prompt (CoreLocation can't meaningfully ask from inside
+// a screensaver). Falls back to the zone's offset for longitude,
+// which at least puts the sun in the right quarter of the sky.
+static BOOL tempus_auto_place(double *lat, double *lon) {
+    NSString *zone = [[NSTimeZone systemTimeZone] name];
+    NSArray *parts = [zone componentsSeparatedByString:@"/"];
+    NSString *city = [[parts lastObject]
+                      stringByReplacingOccurrencesOfString:@"_"
+                                               withString:@" "];
+    const char *want = [city UTF8String];
+    if (want) {
+        for (int i = 0; i < CITY_NUM; i++) {
+            if (strcasecmp(city_pts[i].name, want) == 0) {
+                *lat = city_pts[i].lat * 0.01;
+                *lon = city_pts[i].lon * 0.01;
+                return YES;
+            }
+        }
+    }
+    double off = [[NSTimeZone systemTimeZone] secondsFromGMT] / 3600.0;
+    *lon = off * 15.0;
+    *lat = 0.0;
+    return NO;
+}
+
 + (void)registerDefaults {
+    double la = 51.4779, lo = -0.0015;
+    tempus_auto_place(&la, &lo);
     [[TempusSaverView prefs] registerDefaults:@{
-        @"latitude":  @51.4779,
-        @"longitude": @(-0.0015),
+        @"latitude":  @(la),
+        @"longitude": @(lo),
+        @"auto":      @YES,
         @"tour":      @YES,
         @"dwell":     @12.0,
     }];
@@ -180,6 +212,7 @@ static double g_prefsTimer = 1e9;   // force a read on the first frame
     if (g_dwell < 3.0) g_dwell = 3.0;
     double la = [d doubleForKey:@"latitude"];
     double lo = [d doubleForKey:@"longitude"];
+    if ([d boolForKey:@"auto"]) tempus_auto_place(&la, &lo);
     if (g_booted && (la != g_tempus.config.latitude
                      || lo != g_tempus.config.longitude))
         tempus_set_location(&g_tempus, la, lo);
@@ -191,6 +224,8 @@ static double g_prefsTimer = 1e9;   // force a read on the first frame
     TempusConfig cfg = tempus_default_config();
     cfg.latitude  = [d doubleForKey:@"latitude"];
     cfg.longitude = [d doubleForKey:@"longitude"];
+    if ([d boolForKey:@"auto"])
+        tempus_auto_place(&cfg.latitude, &cfg.longitude);
     cfg.timezone_auto = true;
     return cfg;
 }
@@ -302,6 +337,12 @@ static double g_prefsTimer = 1e9;   // force a read on the first frame
     g_draw.sy = scale;
     scene_render(&g_scene, &g_draw, &g_tempus);
 
+    // The register rides chrome space: no camera pull, so it holds
+    // still while the instrument flies
+    g_draw.sx = g_draw.sy = h / 1280.0f;
+    g_draw.tx = g_draw.ty = 0;
+    tempus_chrome_readout(&g_draw, &g_tempus, w, h);
+
     if (g_draw.num_verts > 0) {
         sg_update_buffer(g_vbuf, &(sg_range){
             .ptr = g_draw.verts,
@@ -363,6 +404,7 @@ static double g_prefsTimer = 1e9;   // force a read on the first frame
     [v addSubview:cl];
     _cityPop = [[NSPopUpButton alloc]
                 initWithFrame:NSMakeRect(90, 146, 250, 26) pullsDown:NO];
+    [_cityPop addItemWithTitle:@"Automatic (from time zone)"];
     [_cityPop addItemWithTitle:@"Custom…"];
     for (int i = 0; i < CITY_NUM; i++)
         [_cityPop addItemWithTitle:
@@ -416,7 +458,15 @@ static double g_prefsTimer = 1e9;   // force a read on the first frame
 }
 
 - (void)cityPicked:(id)sender {
-    NSInteger i = [_cityPop indexOfSelectedItem] - 1;   // 0 = Custom
+    NSInteger sel = [_cityPop indexOfSelectedItem];
+    if (sel == 0) {                     // Automatic
+        double la, lo;
+        tempus_auto_place(&la, &lo);
+        [_latField setDoubleValue:la];
+        [_lonField setDoubleValue:lo];
+        return;
+    }
+    NSInteger i = sel - 2;              // 0 = Automatic, 1 = Custom
     if (i < 0 || i >= CITY_NUM) return;
     [_latField setDoubleValue:city_pts[i].lat * 0.01];
     [_lonField setDoubleValue:city_pts[i].lon * 0.01];
@@ -424,6 +474,7 @@ static double g_prefsTimer = 1e9;   // force a read on the first frame
 
 - (void)sheetDone:(id)sender {
     ScreenSaverDefaults *d = [TempusSaverView prefs];
+    [d setBool:([_cityPop indexOfSelectedItem] == 0) forKey:@"auto"];
     [d setDouble:[_latField doubleValue] forKey:@"latitude"];
     [d setDouble:[_lonField doubleValue] forKey:@"longitude"];
     [d setBool:([_tourCheck state] == NSControlStateValueOn) forKey:@"tour"];
