@@ -184,6 +184,7 @@ typedef enum {
     VIEW_LVMEN,
     VIEW_OFFIC,
     VIEW_DRACO,
+    VIEW_CLOCKBACK,   // the clock's face furniture, under the globes
     VIEW_COUNT,
 } ViewId;
 

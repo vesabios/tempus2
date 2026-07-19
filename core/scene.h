@@ -227,6 +227,7 @@ static inline void scene_init(Scene *sc, const Tempus *t) {
     sc->views[VIEW_LVMEN].state    = &sc->lumen_state;
     sc->views[VIEW_OFFIC].state    = &sc->offic_state;
     sc->views[VIEW_DRACO].state    = &sc->draco_state;
+    sc->views[VIEW_CLOCKBACK].state = &sc->clock_state;   // shared
 }
 
 static inline void scene_register_view(Scene *sc, ViewId id, const ViewVtable *vt) {

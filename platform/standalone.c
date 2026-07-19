@@ -233,6 +233,10 @@ static void apply_view_mode(void) {
     // The orrery renders the entire earth instrument at every morph
     // state; the clock draws its hands on top.
     scene_add_layer(&g_scene, VIEW_SOLAR);
+    // The clock's face furniture sits UNDER the orrery: the globes
+    // (and the ORBIS closeup especially) cover the ticks and
+    // numerals; only the hands ride above (VIEW_CLOCK, later).
+    scene_add_layer(&g_scene, VIEW_CLOCKBACK);
     scene_add_layer(&g_scene, VIEW_ORRERY);
     // The sky renders under the luminaries; the clock's hands render
     // over them (the moon lives in the dial's aperture at HOROLOGIVM).
@@ -291,6 +295,8 @@ static void set_view_opacities(void) {
     double clock_vis = 1.0 - hb * 4.0;
     if (clock_vis < 0) clock_vis = 0.0;
     g_scene.views[VIEW_CLOCK].opacity = clock_vis * fade * orbis_fade;
+    g_scene.views[VIEW_CLOCKBACK].opacity =
+        g_scene.views[VIEW_CLOCK].opacity;
     g_scene.views[VIEW_SKY].opacity = sky > 0.001 ? 1.0 : 0.0;
     g_scene.views[VIEW_HORAE].opacity = horae;
     g_scene.views[VIEW_ROTAE].opacity = rotae;
@@ -665,6 +671,7 @@ static void init(void) {
     scene_register_view(&g_scene, VIEW_LVMEN,     &lumen_vtable);
     scene_register_view(&g_scene, VIEW_OFFIC,     &offic_vtable);
     scene_register_view(&g_scene, VIEW_DRACO,     &draco_vtable);
+    scene_register_view(&g_scene, VIEW_CLOCKBACK, &clockback_vtable);
     scene_init_views(&g_scene, &g_tempus);
 
     if (g_cfg_sweep_override >= 0)

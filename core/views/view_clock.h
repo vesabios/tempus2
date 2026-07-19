@@ -39,13 +39,12 @@ static void clock_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     (void)buf; (void)t; (void)dt; (void)sc;
 }
 
-static void clock_render(const void *buf, DrawCtx *d, const Tempus *t, const RenderStyle *s) {
-    const ClockViewState *st = (const ClockViewState *)buf;
-    (void)t;
-    const TimeView *tv = &st->tv;
-    double real_secs = s->sweep_seconds
-        ? ((double)tv->secs + tv->frac_secs) / 60.0
-        : (double)tv->secs / 60.0;
+// The face furniture — logo, numerals, ticks — renders in its own
+// pass (VIEW_CLOCKBACK) so it layers BENEATH the orrery's globes:
+// the growing ORBIS planet covers the markings, while the hands
+// (VIEW_CLOCK, below) stay above everything.
+static void clockback_render(const void *buf, DrawCtx *d, const Tempus *t, const RenderStyle *s) {
+    (void)buf; (void)t;
 
     // Logo
     draw_set_color(d, s->logo_text);
@@ -103,6 +102,15 @@ static void clock_render(const void *buf, DrawCtx *d, const Tempus *t, const Ren
     // morphs between the 6 o'clock aperture and its heliocentric orbit.
     // This view only reserves the aperture space: numeral 6 skipped and
     // ticks clipped above.)
+}
+
+static void clock_render(const void *buf, DrawCtx *d, const Tempus *t, const RenderStyle *s) {
+    const ClockViewState *st = (const ClockViewState *)buf;
+    (void)t;
+    const TimeView *tv = &st->tv;
+    double real_secs = s->sweep_seconds
+        ? ((double)tv->secs + tv->frac_secs) / 60.0
+        : (double)tv->secs / 60.0;
 
     // Hour hand
     {
@@ -161,6 +169,12 @@ static const ViewVtable clock_vtable = {
     .exit   = clock_exit,
     .update = clock_update,
     .render = clock_render,
+};
+
+// The under-layer: render only (state, lifecycle, and update belong
+// to VIEW_CLOCK; this shares its state buffer)
+static const ViewVtable clockback_vtable = {
+    .render = clockback_render,
 };
 
 #endif // SCENE_DEFINED && !VIEW_CLOCK_IMPL
