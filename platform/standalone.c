@@ -92,6 +92,17 @@ typedef struct {
 static const char     *g_shot_path = NULL;
 static int             g_shot_countdown = 0;
 
+// Flight-matrix harness (Stage 0 of the transition refactor):
+// TEMPUS_FLY="FROM,TO" + TEMPUS_FLYT=<sec> + TEMPUS_SHOT=<png> snaps
+// to station FROM, fires the real flight to TO, and captures the
+// frame FLYT seconds into it — on a fixed 60Hz timestep so the same
+// flight always lands on the same pixels. The regression net for
+// every transition.
+static int    g_fly_from = -1, g_fly_to = -1;
+static double g_fly_t = 1.75;
+static int    g_fly_settle = 0;
+static double g_fly_clock = -1.0;
+
 // View mode: geocentric (calendar + solar dial + clock) vs heliocentric
 // (calendar wheel as orbit + orrery earth). The scene's helio_blend
 // morphs between them; layer opacities derive from it every frame.
@@ -175,6 +186,33 @@ static void fly_worldview(double m, double z, double s, double dur,
 }
 
 static void config_save(const TempusConfig *cfg);
+
+// Instantly BE at a station: every blend snapped to its resting
+// value, no tweens. The flight harness's launch pad.
+static void snap_station(Worldview wv) {
+    g_worldview = wv;
+    g_scene.helio_blend  = (wv == WV_TELLVS || wv == WV_MACHINA) ? 1.0 : 0.0;
+    g_scene.system_blend = (wv == WV_MACHINA) ? 1.0 : 0.0;
+    g_scene.sky_blend    = (wv == WV_CAELVM) ? 1.0 : 0.0;
+    g_scene.horae_blend  = (wv == WV_HORAE) ? 1.0 : 0.0;
+    g_scene.rotae_blend  = (wv == WV_ROTAE) ? 1.0 : 0.0;
+    g_scene.saec_blend   = (wv == WV_SAECVLVM) ? 1.0 : 0.0;
+    g_scene.orbis_blend  = (wv == WV_ORBIS) ? 1.0 : 0.0;
+    g_scene.offic_blend  = (wv == WV_OFFICIVM) ? 1.0 : 0.0;
+    g_scene.draco_blend  = (wv == WV_DRACO) ? 1.0 : 0.0;
+    g_scene.calendar_state.zoom = (wv == WV_TELLVS) ? 1.0 : 0.0;
+    g_scene.calendar_state.target_zoom = g_scene.calendar_state.zoom;
+}
+
+// Station by case-insensitive prefix ("MACHINA" matches "MACHINA MVNDI")
+static int station_by_name(const char *name, size_t len) {
+    for (int i = 0; i < WV_COUNT; i++) {
+        size_t n = strlen(g_worldview_names[i]);
+        if (len <= n && strncasecmp(name, g_worldview_names[i], len) == 0)
+            return i;
+    }
+    return -1;
+}
 
 static void set_worldview(Worldview wv) {
     if (wv == g_worldview) return;
@@ -1000,6 +1038,27 @@ static void init(void) {
         g_shot_countdown = 30;  // let animations settle
         g_show_debug = false;
     }
+    const char *fly = getenv("TEMPUS_FLY");
+    if (fly && g_shot_path) {
+        const char *comma = strchr(fly, ',');
+        if (comma) {
+            int a = station_by_name(fly, (size_t)(comma - fly));
+            int b = station_by_name(comma + 1, strlen(comma + 1));
+            if (a >= 0 && b >= 0 && a != b) {
+                g_fly_from = a;
+                g_fly_to = b;
+                const char *ft = getenv("TEMPUS_FLYT");
+                if (ft) g_fly_t = atof(ft);
+                snap_station((Worldview)a);
+                g_fly_settle = 5;   // frames to settle before takeoff
+                fprintf(stderr, "fly: %s -> %s @ %.2fs\n",
+                        g_worldview_names[a], g_worldview_names[b],
+                        g_fly_t);
+            }
+        }
+        if (g_fly_from < 0)
+            fprintf(stderr, "TEMPUS_FLY: bad spec '%s'\n", fly);
+    }
     g_pace_log = getenv("TEMPUS_PACE_LOG") != NULL;
     if (g_pace_log)
         g_show_debug = false;  // the debug panel forces full rate
@@ -1036,7 +1095,25 @@ static void frame(void) {
     float w = sapp_widthf();
     float h = sapp_heightf();
     double dt = sapp_frame_duration();
+    if (g_fly_from >= 0)
+        dt = 1.0 / 60.0;   // determinism: same flight, same pixels
     g_time += dt;
+
+    // Flight harness: settle, take off, capture at the appointed second
+    if (g_fly_from >= 0) {
+        if (g_fly_settle > 0) {
+            if (--g_fly_settle == 0) {
+                set_worldview((Worldview)g_fly_to);
+                g_fly_clock = 0.0;
+            }
+        } else if (g_fly_clock >= 0.0) {
+            g_fly_clock += dt;
+            if (g_fly_clock >= g_fly_t) {
+                save_shot(g_shot_path);
+                sapp_request_quit();
+            }
+        }
+    }
 
     // Tour clock: advance stations while it runs; wake it after a
     // minute of stillness
@@ -1326,7 +1403,7 @@ static void frame(void) {
         }
     }
 
-    if (g_shot_path && --g_shot_countdown == 0) {
+    if (g_shot_path && g_fly_from < 0 && --g_shot_countdown == 0) {
         save_shot(g_shot_path);
         sapp_request_quit();
     }
