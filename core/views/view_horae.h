@@ -524,15 +524,10 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                 float q1 = m1 / 7.0f;
 
                 bool is_day = h < 12;
-                bool cur = (dd == pd && h == hcur);
                 float r0 = HORAE_RING_IN + 2.0f;
                 float r1 = HORAE_RING_IN + (is_day ? 12.0f : 8.0f);
-                if (cur) {
-                    draw_set_color(d, dc_scale(s->sunrise_handle, 1.15f));
-                    horae__cell(d, rcx, rcy, r0, HORAE_RING_IN + 15.0f,
-                                q0, q1);
-                    continue;
-                }
+                // (No gold override on the current tooth — the sky
+                // wheel's marker points at it; the band stays pure.)
                 // The whole band lays down in the light; dark hours
                 // are filled ON it at FULL angular width, inset only
                 // radially. Cells share their boundaries exactly, so
@@ -553,24 +548,28 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_circle_stroked(d, rcx, rcy, HORAE_RING_OUT, 1.0f);
     }
 
-    // ---- The hand, UNDER the gear train ----
-    // One revolution per week, aimed at the contact. Warm bone, not
-    // white — the same voice as the reading — and it slides BENEATH
-    // the pinion: the wheel meshes over it, and the gold tooth beyond
-    // reads as the hand's continuation through the works.
+    // ---- The marker: a double-pointed lozenge on the sky wheel ----
+    // No hand. A rhombus centered in the sky band at the contact
+    // bearing, its points aiming outward at the week ring's tooth and
+    // inward at the pinion's mesh simultaneously — the whole gear
+    // train named by one shape that lives ON the wheel it reads.
     {
         float px2 = -hdy, py2 = hdx;
-        float hw = 3.4f;
-        float h0 = 46.0f, h1 = HORAE_CLOCK_R - HORAE_CLOCK_W - 12.0f;
-        draw_set_color(d, dca(0.82f, 0.79f, 0.71f, 0.92f));
+        float rmid = HORAE_CLOCK_R - HORAE_CLOCK_W * 0.5f;
+        float rout = HORAE_CLOCK_R + 5.0f;
+        float rin  = HORAE_CLOCK_R - HORAE_CLOCK_W - 5.0f;
+        float half = 5.5f;
+        draw_set_color(d, dca(0.82f, 0.79f, 0.71f, 0.95f));
         int vb = d->num_verts;
-        draw__push_vert(d, hdx * h0 - px2 * hw, hdy * h0 - py2 * hw,
+        draw__push_vert(d, hdx * rout, hdy * rout,
                         d->white_u, d->white_v);
-        draw__push_vert(d, hdx * h0 + px2 * hw, hdy * h0 + py2 * hw,
+        draw__push_vert(d, hdx * rmid + px2 * half,
+                        hdy * rmid + py2 * half,
                         d->white_u, d->white_v);
-        draw__push_vert(d, hdx * h1 + px2 * hw, hdy * h1 + py2 * hw,
+        draw__push_vert(d, hdx * rin, hdy * rin,
                         d->white_u, d->white_v);
-        draw__push_vert(d, hdx * h1 - px2 * hw, hdy * h1 - py2 * hw,
+        draw__push_vert(d, hdx * rmid - px2 * half,
+                        hdy * rmid - py2 * half,
                         d->white_u, d->white_v);
         draw__tri(d, vb, vb + 1, vb + 2);
         draw__tri(d, vb, vb + 2, vb + 3);
@@ -591,20 +590,21 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         float hfrac = (u_now - u[hcur])
                     / (u[hcur + 1] - u[hcur] + 1.0e-6f);
         float phi = m_now / 7.0f - ((float)ridx + hfrac) / 7.0f;
+        // The pinion wears the RAILROAD'S OWN DRESS: the same light
+        // band, and the ruling hour as the one dark filled box on it
+        // (full angular width, inset only radially — the chemin de
+        // fer idiom exactly). No metals, no second visual language.
+        float pr0 = rp - 10.0f;
         for (int c = 0; c < 7; c++) {
-            const uint8_t *mc = horae__metal_col[c];
             bool curp = (c == ridx);
-            // A quiet wheel: six cells in the instrument's engraved
-            // neutral, only the hour's own ruler wearing its metal —
-            // the alchemical color lives at the reading point, not
-            // as a rainbow around the pinion
-            if (curp)
-                draw_set_color(d, dca(mc[0] / 255.0f, mc[1] / 255.0f,
-                                      mc[2] / 255.0f, 0.60f));
-            else
-                draw_set_color(d, dca(0.30f, 0.29f, 0.27f, 0.22f));
-            horae__cell(d, pcx2, pcy2, rp - 15.0f, rp,
+            draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
+            horae__cell(d, pcx2, pcy2, pr0, rp,
                         c / 7.0f + phi, (c + 1) / 7.0f + phi);
+            if (curp) {
+                draw_set_color(d, dca(0.03f, 0.03f, 0.03f, 0.95f));
+                horae__cell(d, pcx2, pcy2, pr0 + 1.1f, rp - 1.1f,
+                            c / 7.0f + phi, (c + 1) / 7.0f + phi);
+            }
             float sa = ((c + 0.5f) / 7.0f + phi) * 2.0f * (float)M_PI;
             float sux = sinf(sa), suy = -cosf(sa);
             draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
@@ -612,9 +612,6 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             orr__strokes(d, horae__sigil[c], pcx2 + sux * 26.0f,
                          pcy2 + suy * 26.0f, sux, suy, 18.0f, 1.0f);
         }
-        // One rim only — the meshing edge
-        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
-        draw_circle_stroked(d, pcx2, pcy2, rp, 1.0f);
     }
 
     // ---- The reading, written outside the ring at the contact ----
