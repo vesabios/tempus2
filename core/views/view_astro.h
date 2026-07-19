@@ -394,20 +394,33 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
                 draw_set_color(d, dca(0.66f, 0.63f, 0.55f, 0.9f));
                 draw_line(d, x - dxh * 5.0f, y - dyh * 5.0f,
                           x + dxh * 5.0f, y + dyh * 5.0f, 1.4f);
-                // The name, curved along the horizon just inside,
-                // flip-compensated like every engraved arc
+                // The name, curved along the horizon just inside and
+                // set BESIDE the tick toward the north point — the
+                // horizon's southern reach dives off the plate at
+                // this latitude, and a word straddling the cardinal
+                // would follow it into the dark
                 float ca = atan2f(x, -(y - hyc));
                 float lsz = _font_compat[FONT_date].size * 0.78f;
+                float ltrack = 0.5f;
+                int lw2 = _font_compat[FONT_date].weight;
+                float wpx = (sdf_measure_width(lw2, card[i].name)
+                             + ltrack * (float)strlen(card[i].name))
+                          * lsz;
                 float na = fmodf(ca, 2.0f * (float)M_PI);
                 if (na < 0) na += 2.0f * (float)M_PI;
-                bool lflip = (na > (float)M_PI * 0.5f
-                              && na < (float)M_PI * 1.5f);
+                float side = (na < (float)M_PI) ? 1.0f : -1.0f;
+                float ca2 = ca + side * (wpx * 0.5f + 10.0f)
+                                 / (hr - 13.0f);
+                float na2 = fmodf(ca2, 2.0f * (float)M_PI);
+                if (na2 < 0) na2 += 2.0f * (float)M_PI;
+                bool lflip = (na2 > (float)M_PI * 0.5f
+                              && na2 < (float)M_PI * 1.5f);
                 float lr = (hr - 13.0f)
                          + lsz * (lflip ? 0.51f : 0.37f);
                 d->alpha = base_alpha * 0.55f;
                 draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.85f));
-                draw_text_curved(d, FONT_date, 0, hyc, lr, ca,
-                                 card[i].name, 0.5f, 0.78f);
+                draw_text_curved(d, FONT_date, 0, hyc, lr, ca2,
+                                 card[i].name, ltrack, 0.78f);
             }
         }
     }
