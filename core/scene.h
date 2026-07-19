@@ -514,8 +514,9 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
             float rcy = cosf(ha) * HORAE_ECC;
             float dxr = wx - rcx, dyr = wy - rcy;
             float rr = sqrtf(dxr * dxr + dyr * dyr);
-            if (rr > HORAE_RING_IN - 24.0f
-                && rr < HORAE_RING_OUT + 40.0f) {
+            // The whole disc turns the week: grab anywhere inside the
+            // ring's outer edge, inner dial included
+            if (rr < HORAE_RING_OUT + 40.0f) {
                 ho->ring_dragging = true;
                 ho->last_wx = wx;
                 ho->last_wy = wy;

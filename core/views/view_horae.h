@@ -493,19 +493,19 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                     draw_set_color(d, dc_scale(s->sunrise_handle, 1.15f));
                     horae__cell(d, rcx, rcy, r0, HORAE_RING_IN + 15.0f,
                                 q0, q1);
-                } else if (((dd * 24 + h) & 1) == 0) {
-                    draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
-                    horae__cell(d, rcx, rcy, r0, r1, q0, q1);
-                } else {
-                    // Black cells outline in the light so they read
-                    // against the black ground: light underlay, dark
-                    // fill inset a hairline
-                    const float eps = 0.0007f;   // ~1.3 units at r 300
-                    draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
-                    horae__cell(d, rcx, rcy, r0, r1, q0, q1);
+                    continue;
+                }
+                // The whole band lays down in the light; dark hours
+                // are filled ON it at FULL angular width, inset only
+                // radially. Cells share their boundaries exactly, so
+                // the black boxes read their true width (the old
+                // per-side light outline visibly shrank them).
+                draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
+                horae__cell(d, rcx, rcy, r0, r1, q0, q1);
+                if (((dd * 24 + h) & 1) != 0) {
                     draw_set_color(d, dca(0.03f, 0.03f, 0.03f, 0.95f));
                     horae__cell(d, rcx, rcy, r0 + 1.1f, r1 - 1.1f,
-                                q0 + eps, q1 - eps);
+                                q0, q1);
                 }
             }
         }
