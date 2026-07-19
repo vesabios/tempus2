@@ -30,6 +30,12 @@ struct CalendarViewState {
     double  skyb;         // mirrored scene sky_blend (wheel -> sky bezel)
     double  orbb;         // mirrored scene orbis_blend (wheel breathes out)
 
+    // The 24-hour ring, ONE OBJECT across the stations that declare
+    // it (station_table hour_r/hour_w): presence and radius blended
+    // over the station weight vector, so a CAELVM -> ASTROLABIVM
+    // flight GLIDES the ring between its two seats
+    float   hr_a, hr_r, hr_w;
+
     // Wheel dragging (see scene_pointer): film-strip time scrubbing,
     // incremental (finger deltas projected onto the band tangent), with
     // flywheel inertia — release mid-motion and the machine keeps
@@ -168,9 +174,24 @@ static void calendar_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->sys = sc->system_blend;
     st->skyb = sc->sky_blend;
     st->orbb = sc->orbis_wheel;
+    {
+        double a = 0, r = 0, w = 0;
+        for (int i = 0; i < ST_COUNT; i++) {
+            if (station_table[i].hour_r <= 0) continue;
+            a += sc->stw[i];
+            r += sc->stw[i] * station_table[i].hour_r;
+            w += sc->stw[i] * station_table[i].hour_w;
+        }
+        st->hr_a = (float)a;
+        st->hr_r = a > 1.0e-6 ? (float)(r / a) : 0.0f;
+        st->hr_w = a > 1.0e-6 ? (float)(w / a) : 0.0f;
+    }
     if (st->cached_day != st->tv.day || st->cached_year != st->tv.year)
         cal__rebuild_ticks(st, t, &sc->style);
 }
+
+static void cal__hour_ring(const CalendarViewState *st, DrawCtx *d,
+                           const RenderStyle *s);
 
 static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
                             const RenderStyle *s) {
@@ -379,6 +400,42 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
 
     d->sx = save_sx;
     d->sy = save_sy;
+
+    cal__hour_ring(st, d, s);
+}
+
+// ---- The 24-hour ring: the rendering-time control, one object ----
+// CAELVM's dial and the astrolabe's share one body: hairlines, 24
+// ticks, the gold mark at the rendering instant. Radius and width
+// ride the station weight vector; presence stages in late (the ink
+// law), so the ring forms as its station arrives.
+static void cal__hour_ring(const CalendarViewState *st, DrawCtx *d,
+                           const RenderStyle *s) {
+    float a = ink_in(INK_CHART_LATE, st->hr_a);
+    if (a < 0.004f || st->hr_r <= 0) return;
+    float base_alpha = d->alpha;
+    float r0 = st->hr_r, r1 = st->hr_r + st->hr_w;
+    d->alpha = base_alpha * a;
+    draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.22f));
+    draw_circle_stroked(d, 0, 0, r0, 1.0f);
+    draw_circle_stroked(d, 0, 0, r1, 1.0f);
+    for (int h = 0; h < 24; h++) {
+        float an = (float)h / 24.0f * 2.0f * (float)M_PI;
+        float sx = sinf(an), sy = -cosf(an);
+        bool major = (h % 6) == 0;
+        draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
+                              major ? 0.55f : 0.28f));
+        float t0 = major ? r0 : r0 + st->hr_w * 0.25f;
+        draw_line(d, sx * t0, sy * t0, sx * r1, sy * r1, 1.0f);
+    }
+    float an = (float)st->tv.percent_of_day * 2.0f * (float)M_PI;
+    float sx = sinf(an), sy = -cosf(an);
+    draw_set_color(d, dc_scale(s->sunrise_handle, 1.05f));
+    draw_line(d, sx * (r0 - 3.0f), sy * (r0 - 3.0f),
+              sx * (r1 + 3.0f), sy * (r1 + 3.0f), 1.8f);
+    draw_circle_filled(d, sx * (r0 + st->hr_w * 0.5f),
+                       sy * (r0 + st->hr_w * 0.5f), 4.5f);
+    d->alpha = base_alpha;
 }
 
 static const ViewVtable calendar_vtable = {

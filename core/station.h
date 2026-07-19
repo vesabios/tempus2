@@ -42,21 +42,26 @@ typedef struct {
     // Band input policy
     bool  band_keep_time;    // band scrubs whole days, time held
     bool  band_week_clicks;  // band steps whole weeks (HORAE)
+
+    // The 24-hour ring — ONE OBJECT that glides between the stations
+    // that declare it (0 = the station carries no ring)
+    float hour_r;            // inner radius
+    float hour_w;            // ring width
 } StationDesc;
 
 static const StationDesc station_table[ST_COUNT] = {
     //                 name            helio zoom sys  park   wheel furn  keep  week
-    [ST_HOROLOGIVM] = { "HOROLOGIVM",    0,   0,   0,  false,  450, 1.0f, true,  false },
-    [ST_HORAE]      = { "HORAE",         0,   0,   0,  false,  450, 1.0f, true,  true  },
-    [ST_ROTAE]      = { "ROTAE",         0,   0,   0,  false,  450, 1.0f, false, false },
-    [ST_SAECVLVM]   = { "SAECVLVM",      0,   0,   0,  false,  450, 1.0f, false, false },
-    [ST_TELLVS]     = { "TELLVS",        1,   1,   0,  false,  450, 1.0f, false, false },
-    [ST_MACHINA]    = { "MACHINA MVNDI", 1,   0,   1,  false,  762, 1.0f, false, false },
-    [ST_CAELVM]     = { "CAELVM",        0,   0,   0,  true,   610, 1.0f, true,  false },
-    [ST_ORBIS]      = { "ORBIS",         0,   0,   0,  false,  505, 0.85f, true, false },
-    [ST_OFFICIVM]   = { "OFFICIVM",      0,   0,   0,  false,  450, 1.0f, true,  false },
-    [ST_DRACO]      = { "DRACO",         0,   0,   0,  false,  450, 1.0f, false, false },
-    [ST_ASTROLAB]   = { "ASTROLABIVM",   0,   0,   0,  false,  450, 1.0f, true,  false },
+    [ST_HOROLOGIVM] = { "HOROLOGIVM",    0,   0,   0,  false,  450, 1.0f, true,  false, 0,0 },
+    [ST_HORAE]      = { "HORAE",         0,   0,   0,  false,  450, 1.0f, true,  true , 0,0 },
+    [ST_ROTAE]      = { "ROTAE",         0,   0,   0,  false,  450, 1.0f, false, false, 0,0 },
+    [ST_SAECVLVM]   = { "SAECVLVM",      0,   0,   0,  false,  450, 1.0f, false, false, 0,0 },
+    [ST_TELLVS]     = { "TELLVS",        1,   1,   0,  false,  450, 1.0f, false, false, 0,0 },
+    [ST_MACHINA]    = { "MACHINA MVNDI", 1,   0,   1,  false,  762, 1.0f, false, false, 0,0 },
+    [ST_CAELVM]     = { "CAELVM",        0,   0,   0,  true,   610, 1.0f, true,  false, 564, 20 },
+    [ST_ORBIS]      = { "ORBIS",         0,   0,   0,  false,  505, 0.85f, true, false, 0,0 },
+    [ST_OFFICIVM]   = { "OFFICIVM",      0,   0,   0,  false,  450, 1.0f, true,  false, 0,0 },
+    [ST_DRACO]      = { "DRACO",         0,   0,   0,  false,  450, 1.0f, false, false, 0,0 },
+    [ST_ASTROLAB]   = { "ASTROLABIVM",   0,   0,   0,  false,  450, 1.0f, true,  false, 414, 16 },
 };
 
 // The station weight vector: normalized, barycentric, derived from

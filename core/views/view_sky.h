@@ -109,9 +109,12 @@ static void sky__set_center(float az0_deg, float alt0_deg) {
     sky__vd[0] = sinf(a) * sinf(l);
     sky__vd[1] = cosf(a) * sinf(l);
     sky__vd[2] = -cosf(l);
-    sky__vr[0] = sky__vd[1] * sky__vc[2] - sky__vd[2] * sky__vc[1];
-    sky__vr[1] = sky__vd[2] * sky__vc[0] - sky__vd[0] * sky__vc[2];
-    sky__vr[2] = sky__vd[0] * sky__vc[1] - sky__vd[1] * sky__vc[0];
+    // EAST LEFT (Seren): this is a sky seen looking UP facing north,
+    // not a map looked down upon — the right-hand basis is negated,
+    // matching the astrolabe's plate and every planisphere
+    sky__vr[0] = -(sky__vd[1] * sky__vc[2] - sky__vd[2] * sky__vc[1]);
+    sky__vr[1] = -(sky__vd[2] * sky__vc[0] - sky__vd[0] * sky__vc[2]);
+    sky__vr[2] = -(sky__vd[0] * sky__vc[1] - sky__vd[1] * sky__vc[0]);
 }
 
 // Azimuthal-equidistant about the LIVE view center: angular distance
@@ -719,40 +722,9 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
     }
 
-    // ---- The hour ring: the rendering-time control ----
-    // A 24-hour dial between the chart and the calendar bezel,
-    // midnight at the top and noon at the bottom like every day dial
-    // on the instrument. Drag it and the chart's rendering instant
-    // turns — the bodies wheel along their arcs while the horizon,
-    // compass, and bowl hold perfectly still.
-    if (fb > 0.001f) {
-        d->alpha = base_alpha * fb;
-        float r0 = 564.0f, r1 = 584.0f;
-        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.22f));
-        draw_circle_stroked(d, 0, 0, r0, 1.0f);
-        draw_circle_stroked(d, 0, 0, r1, 1.0f);
-        for (int h = 0; h < 24; h++) {
-            float a = (float)h / 24.0f * 2.0f * (float)M_PI;
-            float sx = sinf(a), sy = -cosf(a);
-            bool major = (h % 6) == 0;
-            draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
-                                  major ? 0.55f : 0.28f));
-            float t0 = major ? r0 : r0 + 5.0f;
-            draw_line(d, sx * t0, sy * t0, sx * r1, sy * r1, 1.0f);
-        }
-        // The rendering instant, gold on the ring
-        {
-            float a = (float)st->tv.percent_of_day * 2.0f
-                    * (float)M_PI;
-            float sx = sinf(a), sy = -cosf(a);
-            draw_set_color(d, dc_scale(s->sunrise_handle, 1.05f));
-            draw_line(d, sx * (r0 - 3.0f), sy * (r0 - 3.0f),
-                      sx * (r1 + 3.0f), sy * (r1 + 3.0f), 1.8f);
-            draw_circle_filled(d, sx * (r0 + (r1 - r0) * 0.5f),
-                               sy * (r0 + (r1 - r0) * 0.5f), 4.5f);
-        }
-        d->alpha = base_alpha;
-    }
+    // (The 24-hour ring is ONE OBJECT now — the calendar view
+    // draws it at the station-blended radius for every station
+    // that declares one.)
 
     d->alpha = base_alpha;
 }

@@ -291,8 +291,7 @@ static inline void scene_update(Scene *sc, Tempus *t, double dt) {
         CalendarViewState *c = &sc->calendar_state;
         bool grabbing = c->wheel_dragging
                      || sc->horae_state.ring_dragging
-                     || sc->sky_state.hour_dragging
-                     || sc->astro_state.hour_dragging;   // all feed inertia
+                     || sc->sky_state.hour_dragging;     // all feed inertia
         if (grabbing && dt > 1e-4) {
             double inst = c->drag_accum / dt;
             c->drag_accum = 0;
@@ -477,7 +476,6 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
     HoraeViewState *ho = &sc->horae_state;
     OrbisViewState *ob = &sc->orbis_state;
     SkyViewState *sk = &sc->sky_state;
-    AstroViewState *ast = &sc->astro_state;
 
     bool sys = sc->system_blend > 0.5;
     // In the sky view the machine is parked invisible underneath: the
@@ -498,33 +496,25 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 sk->last_wy = wy;
                 return;
             }
-            if (rp0 > 556.0f && rp0 < 596.0f) {
-                sk->hour_dragging = true;
-                sk->last_wx = wx;
-                sk->last_wy = wy;
-                c->fling_vel = 0;
-                c->drag_accum = 0;
-                c->fling_keep_time = false;
-                c->fling_week = false;
-                scene__begin_override(t);
-                return;
-            }
         }
-
-        // ASTROLABIVM: the hour ring between the limb and the band
-        // scrubs the rendering time, same gesture as CAELVM's
-        if (sc->astro_blend > 0.5) {
-            float rp0 = sqrtf(wx * wx + wy * wy);
-            if (rp0 > 406.0f && rp0 < 438.0f) {
-                ast->hour_dragging = true;
-                ast->last_wx = wx;
-                ast->last_wy = wy;
-                c->fling_vel = 0;
-                c->drag_accum = 0;
-                c->fling_keep_time = false;
-                c->fling_week = false;
-                scene__begin_override(t);
-                return;
+        // THE HOUR RING, one object wherever a station declares it:
+        // hit-tested at its LIVE blended radius (the calendar view
+        // mirrors it from the station weights each frame)
+        {
+            if (c->hr_a > 0.5f) {
+                float rp0 = sqrtf(wx * wx + wy * wy);
+                if (rp0 > c->hr_r - 8.0f
+                    && rp0 < c->hr_r + c->hr_w + 12.0f) {
+                    sk->hour_dragging = true;
+                    sk->last_wx = wx;
+                    sk->last_wy = wy;
+                    c->fling_vel = 0;
+                    c->drag_accum = 0;
+                    c->fling_keep_time = false;
+                    c->fling_week = false;
+                    scene__begin_override(t);
+                    return;
+                }
             }
         }
 
@@ -700,17 +690,6 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         sky_view_pan(sk, wx - sk->last_wx, wy - sk->last_wy);
         sk->last_wx = wx;
         sk->last_wy = wy;
-    } else if (phase == 1 && ast->hour_dragging) {
-        float a0 = atan2f(ast->last_wx, -ast->last_wy);
-        float a1 = atan2f(wx, -wy);
-        float da = a1 - a0;
-        while (da > (float)M_PI) da -= 2.0f * (float)M_PI;
-        while (da < -(float)M_PI) da += 2.0f * (float)M_PI;
-        double dv = (double)da / (2.0 * M_PI);
-        scene__advance_override_days(t, dv, false);
-        c->drag_accum += dv;
-        ast->last_wx = wx;
-        ast->last_wy = wy;
     } else if (phase == 1 && sk->hour_dragging) {
         // Incremental angle about center, clockwise = forward; one
         // revolution of the ring is one day
@@ -774,7 +753,6 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         ob->dragging = false;
         sk->hour_dragging = false;
         sk->chart_dragging = false;
-        ast->hour_dragging = false;
     }
 }
 

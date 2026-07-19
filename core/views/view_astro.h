@@ -428,33 +428,21 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
                 draw_set_color(d, dca(0.66f, 0.63f, 0.55f, 0.9f));
                 draw_line(d, x - dxh * 5.0f, y - dyh * 5.0f,
                           x + dxh * 5.0f, y + dyh * 5.0f, 1.4f);
-                // The name, curved along the horizon just inside and
-                // set BESIDE the tick toward the north point — the
-                // horizon's southern reach dives off the plate at
-                // this latitude, and a word straddling the cardinal
-                // would follow it into the dark
+                // The name, curved along the horizon just INSIDE the
+                // lens, centered on its tick
                 float ca = atan2f(x, -(y - hyc));
                 float lsz = _font_compat[FONT_date].size * 0.78f;
-                float ltrack = 0.5f;
-                int lw2 = _font_compat[FONT_date].weight;
-                float wpx = (sdf_measure_width(lw2, card[i].name)
-                             + ltrack * (float)strlen(card[i].name))
-                          * lsz;
                 float na = fmodf(ca, 2.0f * (float)M_PI);
                 if (na < 0) na += 2.0f * (float)M_PI;
-                float side = (na < (float)M_PI) ? 1.0f : -1.0f;
-                float ca2 = ca + side * (wpx * 0.5f + 10.0f)
-                                 / (hr - 13.0f);
-                float na2 = fmodf(ca2, 2.0f * (float)M_PI);
-                if (na2 < 0) na2 += 2.0f * (float)M_PI;
-                bool lflip = (na2 > (float)M_PI * 0.5f
-                              && na2 < (float)M_PI * 1.5f);
-                float lr = (hr - 13.0f)
-                         + lsz * (lflip ? 0.51f : 0.37f);
+                bool lflip = (na > (float)M_PI * 0.5f
+                              && na < (float)M_PI * 1.5f);
+                float lr = hr - 14.0f
+                         + lsz * (lflip ? 0.51f : 0.37f)
+                         - lsz * 0.44f;
                 d->alpha = base_alpha * 0.55f;
                 draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.85f));
-                draw_text_curved(d, FONT_date, 0, hyc, lr, ca2,
-                                 card[i].name, ltrack, 0.78f);
+                draw_text_curved(d, FONT_date, 0, hyc, lr, ca,
+                                 card[i].name, 0.5f, 0.78f);
             }
         }
     }
@@ -604,34 +592,6 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
                              "LVNA");
             }
         }
-    }
-
-    // ---- The hour ring: the rendering-time control ----
-    // CAELVM's 24-hour dial, seated between the limb and the band:
-    // midnight at top, noon at bottom. Drag it and the rete wheels
-    // while the tympan holds still — the astrolabe worked, not shown.
-    {
-        float r0 = 414.0f, r1 = 430.0f;
-        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.22f));
-        d->alpha = base_alpha;
-        draw_circle_stroked(d, 0, 0, r0, 1.0f);
-        draw_circle_stroked(d, 0, 0, r1, 1.0f);
-        for (int h = 0; h < 24; h++) {
-            float a = (float)h / 24.0f * 2.0f * (float)M_PI;
-            float hx = sinf(a), hy = -cosf(a);
-            bool major = (h % 6) == 0;
-            draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
-                                  major ? 0.55f : 0.28f));
-            float t0 = major ? r0 : r0 + 4.0f;
-            draw_line(d, hx * t0, hy * t0, hx * r1, hy * r1, 1.0f);
-        }
-        float a = (float)tv->percent_of_day * 2.0f * (float)M_PI;
-        float hx = sinf(a), hy = -cosf(a);
-        draw_set_color(d, dc_scale(s->sunrise_handle, 1.05f));
-        draw_line(d, hx * (r0 - 3.0f), hy * (r0 - 3.0f),
-                  hx * (r1 + 3.0f), hy * (r1 + 3.0f), 1.8f);
-        draw_circle_filled(d, hx * (r0 + (r1 - r0) * 0.5f),
-                           hy * (r0 + (r1 - r0) * 0.5f), 4.5f);
     }
 
     // ---- The name ----
