@@ -559,7 +559,10 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     {
         float Rn = HORAE_CLOCK_R - HORAE_CLOCK_W;
         float rp = Rn * 7.0f / 24.0f;
-        float pcx2 = hdx * (Rn - rp), pcy2 = hdy * (Rn - rp);
+        // Held 2 off the band's inner edge — the same breath of
+        // gutter the railroad keeps, uniform between all the wheels
+        float pcx2 = hdx * (Rn - rp - 2.0f);
+        float pcy2 = hdy * (Rn - rp - 2.0f);
         float hfrac = (u_now - u[hcur])
                     / (u[hcur + 1] - u[hcur] + 1.0e-6f);
         float phi = m_now / 7.0f - ((float)ridx + hfrac) / 7.0f;
