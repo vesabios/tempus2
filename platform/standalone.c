@@ -150,6 +150,10 @@ static double g_idle_secs = 0;
 // Annunciator hit rects (chrome space: 1280-tall world units, no camera
 // zoom), published by the frame that draws them
 static float g_wv_btn[WV_COUNT][4];   // x0, y0, x1, y1
+// Time controls: NVNC (return to the living present) and the two
+// fast-forward rates, in minutes of instrument time per real second
+static double g_ffwd = 0.0;
+static float g_tc_btn[3][4];
 
 #define SYS_CAMERA_ZOOM    0.62f
 #define CAELVM_CAMERA_ZOOM 0.85f
@@ -1158,6 +1162,18 @@ static void frame(void) {
         g_last_update = g_time;
         g_updates_this_sec++;
 
+        // Any hands-on time control stops the fast-forward (Seren)
+        if (g_ffwd > 0.0
+            && (g_scene.calendar_state.wheel_dragging
+                || g_scene.sky_state.hour_dragging
+                || g_scene.horae_state.ring_dragging))
+            g_ffwd = 0.0;
+        // Fast-forward: the override river runs at LX or DC
+        if (g_ffwd > 0.0) {
+            scene__begin_override(&g_tempus);
+            scene__advance_override_days(&g_tempus,
+                                         g_ffwd * dt / 1440.0, false);
+        }
         tempus_update(&g_tempus, g_time);
         scene_update(&g_scene, &g_tempus, upd_dt);
         set_view_opacities();
@@ -1305,6 +1321,32 @@ static void frame(void) {
             draw_set_color(&g_draw, dca(0.62f, 0.60f, 0.55f, 0.62f));
             chrome_text_tracked(&g_draw, SDF_WEIGHT_MEDIUM, 20.0f,
                                 x0 + tw + 12.0f, mer_y, 0.20f, meridiem);
+
+            // Time controls: NVNC returns to the living present;
+            // LX and DC pour the override forward at 60x and 600x
+            {
+                const char *lbl[3] = { "NVNC", "LX", "DC" };
+                bool lit[3] = {
+                    !g_tempus.time_override && g_ffwd == 0.0,
+                    g_ffwd == 1.0,
+                    g_ffwd == 10.0,
+                };
+                float bx = x0;
+                float by = -444.0f;
+                for (int i = 0; i < 3; i++) {
+                    draw_set_color(&g_draw, lit[i]
+                        ? dca(0.78f, 0.75f, 0.68f, 0.95f)
+                        : dca(0.50f, 0.49f, 0.46f, 0.38f));
+                    float tw2 = chrome_text_tracked(&g_draw,
+                        SDF_WEIGHT_MEDIUM, 16.0f, bx, by, 0.30f,
+                        lbl[i]);
+                    g_tc_btn[i][0] = bx - 8.0f;
+                    g_tc_btn[i][1] = by - 6.0f;
+                    g_tc_btn[i][2] = bx + tw2 + 8.0f;
+                    g_tc_btn[i][3] = by + 24.0f;
+                    bx += tw2 + 34.0f;
+                }
+            }
         }
 
         // Build nuklear GUI
@@ -1469,6 +1511,21 @@ static void event(const sapp_event *e) {
             if (cx >= g_wv_btn[i][0] && cx <= g_wv_btn[i][2]
                 && cy >= g_wv_btn[i][1] && cy <= g_wv_btn[i][3]) {
                 set_worldview((Worldview)i);
+                return;
+            }
+        }
+        for (int i = 0; i < 3; i++) {
+            if (cx >= g_tc_btn[i][0] && cx <= g_tc_btn[i][2]
+                && cy >= g_tc_btn[i][1] && cy <= g_tc_btn[i][3]) {
+                g_scene.calendar_state.fling_vel = 0;
+                if (i == 0) {
+                    // NVNC: drop the override, rejoin the present
+                    g_ffwd = 0.0;
+                    g_tempus.time_override = false;
+                } else {
+                    g_ffwd = (i == 1) ? 1.0 : 10.0;
+                    scene__begin_override(&g_tempus);
+                }
                 return;
             }
         }
