@@ -95,7 +95,7 @@ static inline void atmo_tone(const float col[3], float scale,
                              const float base[3], float out[3]) {
     float c[3];
     for (int i = 0; i < 3; i++)
-        c[i] = 1.0f - expf(-0.55f * col[i]);
+        c[i] = 1.0f - expf(-1.0f * col[i]);
     float luma = 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2];
     for (int i = 0; i < 3; i++) {
         float v = luma + (c[i] - luma) * 1.35f;
