@@ -262,7 +262,8 @@ static inline void scene_update(Scene *sc, Tempus *t, double dt) {
     {
         CalendarViewState *c = &sc->calendar_state;
         bool grabbing = c->wheel_dragging
-                     || sc->horae_state.ring_dragging;   // both feed inertia
+                     || sc->horae_state.ring_dragging
+                     || sc->sky_state.hour_dragging;     // all feed inertia
         if (grabbing && dt > 1e-4) {
             double inst = c->drag_accum / dt;
             c->drag_accum = 0;
@@ -431,6 +432,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
     CalendarViewState *c = &sc->calendar_state;
     HoraeViewState *ho = &sc->horae_state;
     OrbisViewState *ob = &sc->orbis_state;
+    SkyViewState *sk = &sc->sky_state;
 
     bool sys = sc->system_blend > 0.5;
     // In the sky view the machine is parked invisible underneath: the
@@ -440,6 +442,23 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
     bool in_sky = sc->sky_blend > 0.5;
 
     if (phase == 0) {
+        // CAELVM: the hour ring between the chart and the bezel is
+        // the rendering-time control — one turn, one day
+        if (sc->sky_blend > 0.5) {
+            float rp0 = sqrtf(wx * wx + wy * wy);
+            if (rp0 > 556.0f && rp0 < 596.0f) {
+                sk->hour_dragging = true;
+                sk->last_wx = wx;
+                sk->last_wy = wy;
+                c->fling_vel = 0;
+                c->drag_accum = 0;
+                c->fling_keep_time = false;
+                c->fling_week = false;
+                scene__begin_override(t);
+                return;
+            }
+        }
+
         // ORBIS: grab the planet and turn it under the reticle — the
         // location picker, plain and direct. Hit-tests the orrery's
         // LIVE published globe, honest mid-flight too.
@@ -531,6 +550,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 c->fling_keep_time = sc->horae_blend > 0.5
                                   || sc->orbis_blend > 0.5
                                   || sc->offic_blend > 0.5
+                                  || sc->sky_blend > 0.5
                                   || (sc->helio_blend <= 0.5
                                       && sc->system_blend <= 0.5
                                       && sc->sky_blend <= 0.5
@@ -604,6 +624,19 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         tempus_set_location(t, lat, lon);
         ob->last_wx = wx;
         ob->last_wy = wy;
+    } else if (phase == 1 && sk->hour_dragging) {
+        // Incremental angle about center, clockwise = forward; one
+        // revolution of the ring is one day
+        float a0 = atan2f(sk->last_wx, -sk->last_wy);
+        float a1 = atan2f(wx, -wy);
+        float da = a1 - a0;
+        while (da > (float)M_PI) da -= 2.0f * (float)M_PI;
+        while (da < -(float)M_PI) da += 2.0f * (float)M_PI;
+        double dv = (double)da / (2.0 * M_PI);
+        scene__advance_override_days(t, dv, false);
+        c->drag_accum += dv;
+        sk->last_wx = wx;
+        sk->last_wy = wy;
     } else if (phase == 1 && ho->ring_dragging) {
         // Incremental angle about the LIVE ring center (it orbits once
         // a week, tracking the WEEK hand); clockwise = forward. One
@@ -652,6 +685,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         c->wheel_dragging = false;
         ho->ring_dragging = false;
         ob->dragging = false;
+        sk->hour_dragging = false;
     }
 }
 

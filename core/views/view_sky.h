@@ -31,8 +31,19 @@ struct SkyViewState {
     double     cache_jd;
 
     // Sunrise/sunset hours (config-tz clock), mirrored from the solar
-    // view — they place the dusk and dawn visibility windows
+    // view
     float rise_hr, set_hr;
+
+    // The bowl's tint anchor: sun altitude at the DATE's solar
+    // midnight — the sky stays an instrument night under any hour
+    // scrub, no day/night strobing
+    float bowl_sun_alt;
+
+    // The hour ring (between the chart and the calendar bezel) is the
+    // rendering-time control: drag it and the bodies wheel along
+    // their arcs
+    bool  hour_dragging;
+    float last_wx, last_wy;
 
     // Luminary chart targets, published for the orrery's composition:
     // the sun and moon are SINGLE objects — the orrery composes their
@@ -149,26 +160,13 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->rise_hr = (float)sc->solar_state.sunrise_hr;
     st->set_hr = (float)sc->solar_state.sunset_hr;
 
-    // CAELVM pins the FRAME to the date's local mean solar midnight:
-    // the sky's orientation holds still and the running hour lives in
-    // the VISIBLE WINDOW (see render). The bodies' ORBITAL positions,
-    // though, run on the true fractional instant — the moon glides
-    // its half degree an hour along the fixed ecliptic as the hour
-    // scrubs, instead of freezing all day and lurching at the date
-    // tick. Position at the true instant, frame at midnight.
-    double jd_mid = st->tv.jd_current + 0.5
-                  - t->config.longitude / (15.0 * 24.0);
+    // CAELVM shows the sky AT THE RENDERING INSTANT: the horizon is
+    // the fixed circle, and the hour ring scrubs the display time —
+    // bodies wheel along their diurnal arcs across the chart. Only
+    // the BOWL's tint stays anchored to the date's solar midnight,
+    // so no scrub ever strobes day and night.
     double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
                  - t->config.timezone / 24.0;
-    // CONTINUOUS frame: re-pinning to each date's midnight steps the
-    // orientation by the sidereal surplus (~0.986 deg) at every date
-    // tick — a once-a-day jerk of the whole chart. Instead the frame
-    // time slides so its sidereal angle advances smoothly through the
-    // day, still coinciding exactly with every midnight's canonical
-    // frame. (This also makes the window angle exactly 360 deg per
-    // solar day — see render.)
-    double jd_frame = jd_ut
-                    - (jd_ut - jd_mid) * (360.0 / 360.985647);
     if (fabs(jd_ut - st->cache_jd) <= 1.0 / 1440.0) return;
     st->cache_jd = jd_ut;
 
@@ -176,10 +174,20 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     planets_compute(&st->now, jd_ut);
     planets_sky_compute(&st->sky, &st->now, lat, lon);
 
+    // Tint anchor: the sun's altitude at the date's solar midnight
+    {
+        double jd_mid = st->tv.jd_current + 0.5
+                      - t->config.longitude / (15.0 * 24.0);
+        double blon, blat, az, alt;
+        planets__body_lonlat(BODY_SUN, jd_mid, &blon, &blat);
+        planets_sky_azalt(blon, blat, jd_mid, lat, lon, &az, &alt);
+        st->bowl_sun_alt = (float)alt;
+    }
+
     for (int b = 0; b < BODY_COUNT; b++) {
         double blon, blat, az, alt;
         planets__body_lonlat(b, jd_ut, &blon, &blat);
-        planets_sky_azalt(blon, blat, jd_frame, lat, lon, &az, &alt);
+        planets_sky_azalt(blon, blat, jd_ut, lat, lon, &az, &alt);
         st->body_az[b] = (float)az;
         st->body_alt[b] = (float)alt;
 
@@ -199,14 +207,14 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     // The ecliptic's current lie across the sky + the sign cusps
     for (int i = 0; i < SKY_ECL_N; i++) {
         double az, alt;
-        planets_sky_azalt(i * 360.0 / SKY_ECL_N, 0.0, jd_frame, lat, lon,
+        planets_sky_azalt(i * 360.0 / SKY_ECL_N, 0.0, jd_ut, lat, lon,
                           &az, &alt);
         st->ecl_az[i] = (float)az;
         st->ecl_alt[i] = (float)alt;
     }
     for (int i = 0; i < 12; i++) {
         double az, alt;
-        planets_sky_azalt(i * 30.0, 0.0, jd_frame, lat, lon, &az, &alt);
+        planets_sky_azalt(i * 30.0, 0.0, jd_ut, lat, lon, &az, &alt);
         st->sign_az[i] = (float)az;
         st->sign_alt[i] = (float)alt;
     }
@@ -273,119 +281,26 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     float wheel_R = s->calendar_base_radius
                   * (float)tempus_wheel_scale(1.0);   // Earth-orbit const
                                                       // (machine endpoints)
-    // The BEZEL is the visible calendar wheel — it lives in the moat at
-    // the full system and glides to 610 as the sky's rim; the window
+    // The BEZEL is the visible calendar wheel — the horizon circle
     // unfurls from wherever it actually is
     float bez_R = (float)tempus_wheel_radius(
         s->calendar_base_radius, st->orr ? st->orr->sys : 1.0,
         st->blend);
 
-    // ---- The night's windows: dusk, midnight, dawn ----
-    // No animation: three FIXED views answer the night's questions.
-    // The midnight window is the canonical half-radius circle; the
-    // dusk and dawn windows are the horizon at sunset and sunrise,
-    // rotated about the celestial pole, drawn as soft fills with no
-    // hairline. Together they read as the AREA of the night's
-    // visibility: the solid core is visible at midnight, the lobes
-    // show where the sky extends at dusk and dawn.
-    float dzv[2][3];                       // dusk/dawn zenith vectors
-    float dwx[2][SKY_WIN_N + 1], dwy[2][SKY_WIN_N + 1];
-    // Window instants relative to solar midnight, in solar-day turns:
-    // NOT sunset and sunrise themselves (still-lit times) but the
-    // midway points between them and midnight — the lobes cover the
-    // properly dark span of the night
-    float win_e[2] = { ((st->set_hr / 24.0f) - 1.0f) * 0.5f,
-                       (st->rise_hr / 24.0f) * 0.5f };
-    {
-        float *edges = win_e;
-        double phi = t->config.latitude * M_PI / 180.0;
-        float px = 0.0f, py = (float)cos(phi), pz = (float)sin(phi);
-        for (int w = 0; w < 2; w++) {
-            float A = edges[w] * 2.0f * (float)M_PI;
-            float ca = cosf(A), sa = sinf(A), oc = 1.0f - ca;
-            float M[9] = {
-                ca + px * px * oc,      px * py * oc - pz * sa,
-                px * pz * oc + py * sa,
-                py * px * oc + pz * sa, ca + py * py * oc,
-                py * pz * oc - px * sa,
-                pz * px * oc - py * sa, pz * py * oc + px * sa,
-                ca + pz * pz * oc,
-            };
-            dzv[w][0] = M[2]; dzv[w][1] = M[5]; dzv[w][2] = M[8];
-            for (int k = 0; k <= SKY_WIN_N; k++) {
-                float th = (float)k / SKY_WIN_N * 2.0f * (float)M_PI;
-                float v0[3] = { sinf(th), cosf(th), 0.0f };
-                float v[3] = {
-                    M[0] * v0[0] + M[1] * v0[1] + M[2] * v0[2],
-                    M[3] * v0[0] + M[4] * v0[1] + M[5] * v0[2],
-                    M[6] * v0[0] + M[7] * v0[1] + M[8] * v0[2],
-                };
-                sky__vec_project(v, &dwx[w][k], &dwy[w][k]);
-            }
-        }
-    }
-
     // ---- The bowl: sky tint riding the (midnight) sun ----
     {
-        float sa = st->body_alt[BODY_SUN];
+        float sa = st->bowl_sun_alt;
         float day = (float)tempus_smoothstep(-18.0, 8.0, sa);
         d->alpha = base_alpha * mb;
         // Under the earth: the whole chart, a dark warm ground
         draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
         draw_circle_filled(d, 0, 0, SKY_R);
-
-        // Dusk and dawn lobes: soft, no hairline, arriving late in
-        // the morph with the rest of the chart furniture
-        d->alpha = base_alpha * mb * fb * 0.4f;
+        // The visible sky: the circle inside the horizon, unfurling
+        // from the calendar wheel on the entry morph
         draw_set_color(d, dca(0.020f + 0.055f * day,
                               0.022f + 0.075f * day,
                               0.035f + 0.130f * day, 1.0f));
-        for (int w = 0; w < 2; w++) {
-            float zpx, zpy;
-            if (dzv[w][2] >= 0.0f) {
-                sky__vec_project(dzv[w], &zpx, &zpy);
-                int c0 = draw__push_vert(d, zpx, zpy,
-                                         d->white_u, d->white_v);
-                int prev = draw__push_vert(d, dwx[w][0], dwy[w][0],
-                                           d->white_u, d->white_v);
-                for (int k = 1; k <= SKY_WIN_N; k++) {
-                    int vi = draw__push_vert(d, dwx[w][k], dwy[w][k],
-                                             d->white_u, d->white_v);
-                    draw__tri(d, c0, prev, vi);
-                    prev = vi;
-                }
-            } else {
-                // Polar edge case: window swallowed the rim — fill the
-                // chart and carve the unseen blob back out
-                draw_circle_filled(d, 0, 0, SKY_R);
-                draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
-                float nv[3] = { -dzv[w][0], -dzv[w][1], -dzv[w][2] };
-                float nwx2, nwy2;
-                sky__vec_project(nv, &nwx2, &nwy2);
-                int c0 = draw__push_vert(d, nwx2, nwy2,
-                                         d->white_u, d->white_v);
-                int prev = draw__push_vert(d, dwx[w][0], dwy[w][0],
-                                           d->white_u, d->white_v);
-                for (int k = 1; k <= SKY_WIN_N; k++) {
-                    int vi = draw__push_vert(d, dwx[w][k], dwy[w][k],
-                                             d->white_u, d->white_v);
-                    draw__tri(d, c0, prev, vi);
-                    prev = vi;
-                }
-                draw_set_color(d, dca(0.020f + 0.055f * day,
-                                      0.022f + 0.075f * day,
-                                      0.035f + 0.130f * day, 1.0f));
-            }
-        }
-
-        // The midnight sky: the canonical circle, unfurling from the
-        // calendar wheel on the entry morph
-        d->alpha = base_alpha * mb;
-        draw_set_color(d, dca(0.020f + 0.055f * day,
-                              0.022f + 0.075f * day,
-                              0.035f + 0.130f * day, 1.0f));
-        draw_circle_filled(d, 0, 0,
-                           wheel_R + (SKY_HOR - wheel_R) * mb);
+        draw_circle_filled(d, 0, 0, bez_R + (SKY_HOR - bez_R) * mb);
         d->alpha = base_alpha;
     }
 
@@ -428,10 +343,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             float y0 = ry0 * ORR_WEB_R * mw + sy0 * (1 - mw);
             float x1 = rx1 * ORR_WEB_R * mw + sx1 * (1 - mw);
             float y1 = ry1 * ORR_WEB_R * mw + sy1 * (1 - mw);
-            bool vis = sky__in_night(st->ecl_az[i], st->ecl_alt[i],
-                                     dzv[0], dzv[1])
-                    && sky__in_night(st->ecl_az[j], st->ecl_alt[j],
-                                     dzv[0], dzv[1]);
+            bool vis = st->ecl_alt[i] > 0.0f && st->ecl_alt[j] > 0.0f;
             float a = 0.22f * mw + (vis ? 0.30f : 0.13f) * sw;
             draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
             draw_line(d, x0, y0, x1, y1, 1.0f);
@@ -443,8 +355,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             sky__project_clamped(st->sign_az[i], st->sign_alt[i], &sx, &sy);
             float x = rx * ORR_WEB_R * mw + sx * (1 - mw);
             float y = ry * ORR_WEB_R * mw + sy * (1 - mw);
-            bool vis = sky__in_night(st->sign_az[i], st->sign_alt[i],
-                                      dzv[0], dzv[1]);
+            bool vis = st->sign_alt[i] > 0.0f;
             float a = 0.30f * mw + (vis ? 0.45f : 0.22f) * sw;
             draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
             draw_line(d, x - 4.0f, y - 4.0f, x + 4.0f, y + 4.0f, 1.0f);
@@ -502,11 +413,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                 *out_x = rx * mw + sx * (1 - mw);
                 *out_y = ry * mw + sy * (1 - mw);
             }
-            bool vis = sky__in_night(st->path[b][i][0],
-                                     st->path[b][i][1], dzv[0], dzv[1])
-                    && sky__in_night(st->path[b][i + 1][0],
-                                     st->path[b][i + 1][1],
-                                     dzv[0], dzv[1]);
+            bool vis = st->path[b][i][1] > 0.0f
+                    && st->path[b][i + 1][1] > 0.0f;
             float a = ra * mw + (vis ? pa : pa * 0.45f) * sw;
             if (a < 0.004f) continue;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
@@ -516,62 +424,12 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     }
 
     // ---- The horizon: Earth's orbit becomes Earth's ground ----
-    // The calendar wheel settles into the midnight horizon circle at
-    // half radius; the dusk and dawn lobes carry no hairline.
     {
         float rim_r = bez_R + (SKY_HOR - bez_R) * mb;
         d->alpha = base_alpha * (float)tempus_smoothstep(0.05, 0.5,
                                                          st->blend);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.55f));
         draw_circle_stroked(d, 0, 0, rim_r, 1.0f);
-        d->alpha = base_alpha;
-    }
-
-    // ---- Culmination meridians: what stands highest, when ----
-    // Three north-south arcs — the meridian at the dusk-side window,
-    // at midnight, and at the dawn-side window, each drawn only over
-    // its own visible half. A body near an arc culminates at that
-    // hour: the visibility area becomes a "what is best, when" grid.
-    if (fb > 0.001f) {
-        d->alpha = base_alpha * fb;
-        double phi = t->config.latitude * M_PI / 180.0;
-        float px = 0.0f, py = (float)cos(phi), pz = (float)sin(phi);
-        for (int w = 0; w < 3; w++) {
-            float A = (w == 1) ? 0.0f
-                    : win_e[w > 1 ? 1 : 0] * 2.0f * (float)M_PI;
-            const float *zw = (w == 1) ? (const float[3]){ 0, 0, 1 }
-                            : dzv[w > 1 ? 1 : 0];
-            float ca = cosf(A), sa = sinf(A), oc = 1.0f - ca;
-            float M[9] = {
-                ca + px * px * oc,      px * py * oc - pz * sa,
-                px * pz * oc + py * sa,
-                py * px * oc + pz * sa, ca + py * py * oc,
-                py * pz * oc - px * sa,
-                pz * px * oc - py * sa, pz * py * oc + px * sa,
-                ca + pz * pz * oc,
-            };
-            draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
-                                  w == 1 ? 0.16f : 0.10f));
-            float px2 = 0, py2 = 0;
-            bool has = false;
-            for (int i = 0; i <= 96; i++) {
-                float tt = (float)i / 96.0f * 2.0f * (float)M_PI;
-                float v0[3] = { 0.0f, sinf(tt), cosf(tt) };
-                float v[3] = {
-                    M[0] * v0[0] + M[1] * v0[1] + M[2] * v0[2],
-                    M[3] * v0[0] + M[4] * v0[1] + M[5] * v0[2],
-                    M[6] * v0[0] + M[7] * v0[1] + M[8] * v0[2],
-                };
-                bool up = v[0] * zw[0] + v[1] * zw[1] + v[2] * zw[2]
-                        > 0.0f;
-                float x, y;
-                sky__vec_project(v, &x, &y);
-                if (has && up)
-                    draw_line(d, px2, py2, x, y, 1.0f);
-                px2 = x; py2 = y;
-                has = up;
-            }
-        }
         d->alpha = base_alpha;
     }
 
@@ -615,12 +473,9 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         float pw = handoff ? (1 - mb) : mw;
         float x = rx * pw + sx * (1 - pw);
         float y = ry * pw + sy * (1 - pw);
-        // Outside the night's visibility is a place on this chart,
-        // not an exit: bodies the night never shows read subdued —
-        // the direct answer to "will it be visible"
-        float ba = sky__in_night(st->body_az[b], st->body_alt[b],
-                                 dzv[0], dzv[1])
-                 ? 1.0f : 0.78f;
+        // Below the horizon is a place on this chart, not an exit:
+        // bodies in the unseen sky just read slightly subdued
+        float ba = st->body_alt[b] > 0.0f ? 1.0f : 0.78f;
         if (b == BODY_SUN || b == BODY_MOON)
             ba = 1.0f + (ba - 1.0f) * mb;   // full strength at the
                                             // machine seam — the owner
@@ -740,6 +595,41 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                              card[i / 9]);
             }
         }
+    }
+
+    // ---- The hour ring: the rendering-time control ----
+    // A 24-hour dial between the chart and the calendar bezel,
+    // midnight at the top and noon at the bottom like every day dial
+    // on the instrument. Drag it and the chart's rendering instant
+    // turns — the bodies wheel along their arcs while the horizon,
+    // compass, and bowl hold perfectly still.
+    if (fb > 0.001f) {
+        d->alpha = base_alpha * fb;
+        float r0 = 564.0f, r1 = 584.0f;
+        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.22f));
+        draw_circle_stroked(d, 0, 0, r0, 1.0f);
+        draw_circle_stroked(d, 0, 0, r1, 1.0f);
+        for (int h = 0; h < 24; h++) {
+            float a = (float)h / 24.0f * 2.0f * (float)M_PI;
+            float sx = sinf(a), sy = -cosf(a);
+            bool major = (h % 6) == 0;
+            draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
+                                  major ? 0.55f : 0.28f));
+            float t0 = major ? r0 : r0 + 5.0f;
+            draw_line(d, sx * t0, sy * t0, sx * r1, sy * r1, 1.0f);
+        }
+        // The rendering instant, gold on the ring
+        {
+            float a = (float)st->tv.percent_of_day * 2.0f
+                    * (float)M_PI;
+            float sx = sinf(a), sy = -cosf(a);
+            draw_set_color(d, dc_scale(s->sunrise_handle, 1.05f));
+            draw_line(d, sx * (r0 - 3.0f), sy * (r0 - 3.0f),
+                      sx * (r1 + 3.0f), sy * (r1 + 3.0f), 1.8f);
+            draw_circle_filled(d, sx * (r0 + (r1 - r0) * 0.5f),
+                               sy * (r0 + (r1 - r0) * 0.5f), 4.5f);
+        }
+        d->alpha = base_alpha;
     }
 
     d->alpha = base_alpha;
