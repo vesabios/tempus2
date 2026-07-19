@@ -167,7 +167,7 @@ static void calendar_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     (void)dt;
     st->sys = sc->system_blend;
     st->skyb = sc->sky_blend;
-    st->orbb = sc->orbis_blend;
+    st->orbb = sc->orbis_wheel;
     if (st->cached_day != st->tv.day || st->cached_year != st->tv.year)
         cal__rebuild_ticks(st, t, &sc->style);
 }

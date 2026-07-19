@@ -33,6 +33,7 @@ struct SkyViewState {
     // Sunrise/sunset hours (config-tz clock), mirrored from the solar
     // view
     float rise_hr, set_hr;
+    double orbw;      // mirrored scene orbis_wheel (bezel radius)
 
     // The hour ring (between the chart and the calendar bezel) is the
     // rendering-time control: drag it and the bodies wheel along
@@ -250,6 +251,7 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->orr = &sc->orrery_state;
     (void)dt;
     st->blend = sc->sky_blend;
+    st->orbw = sc->orbis_wheel;
     if (st->blend < 0.001) return;
     sky__set_center(st->view_az, st->view_alt);
     st->rise_hr = (float)sc->solar_state.sunrise_hr;
@@ -384,7 +386,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // unfurls from wherever it actually is
     float bez_R = (float)tempus_wheel_radius(
         s->calendar_base_radius, st->orr ? st->orr->sys : 1.0,
-        st->blend, st->orr ? st->orr->orbisb : 0.0);
+        st->blend, st->orbw);
 
     // ---- The bowl: the true sky at the rendering instant ----
     // Single-scattering atmosphere, evaluated per dome vertex in

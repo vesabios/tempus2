@@ -194,6 +194,7 @@ static void snap_station(Worldview wv) {
     g_scene.rotae_blend  = (wv == WV_ROTAE) ? 1.0 : 0.0;
     g_scene.saec_blend   = (wv == WV_SAECVLVM) ? 1.0 : 0.0;
     g_scene.orbis_blend  = (wv == WV_ORBIS) ? 1.0 : 0.0;
+    g_scene.orbis_wheel  = g_scene.orbis_blend;
     g_scene.offic_blend  = (wv == WV_OFFICIVM) ? 1.0 : 0.0;
     g_scene.draco_blend  = (wv == WV_DRACO) ? 1.0 : 0.0;
     g_scene.calendar_state.zoom = (wv == WV_TELLVS) ? 1.0 : 0.0;
@@ -251,6 +252,12 @@ static void set_worldview(Worldview wv) {
                             (int)wv == i ? 1.0 : 0.0, dly, dur,
                             EASE_IN_OUT_CUBIC);
     }
+    // The wheel's orbis voice always flies (never parks) — see
+    // Scene.orbis_wheel
+    tween_cancel_target(&g_scene.tweens, &g_scene.orbis_wheel);
+    tween_start_delayed(&g_scene.tweens, &g_scene.orbis_wheel,
+                        g_scene.orbis_wheel, wv == WV_ORBIS ? 1.0 : 0.0,
+                        fly_delay, 3.5, EASE_IN_OUT_CUBIC);
     // The base machine morph flies to the station's declared targets;
     // CAELVM parks the machine WHEREVER IT WAS (park_machine): the
     // sky movers seam to live published positions, so no machine
@@ -350,7 +357,11 @@ static void set_view_opacities(void) {
     g_scene.views[VIEW_HORAE].opacity = horae;
     g_scene.views[VIEW_ROTAE].opacity = rotae;
     g_scene.views[VIEW_SAEC].opacity = saec;
-    g_scene.views[VIEW_ORBIS].opacity = orbis;
+    // The station's own chrome (reticle, readout, city pips) follows
+    // the RELEASED voice, so a parked flight fades it instead of
+    // holding it over the next station until the snap
+    g_scene.views[VIEW_ORBIS].opacity =
+        orbis < g_scene.orbis_wheel ? orbis : g_scene.orbis_wheel;
     g_scene.views[VIEW_OFFIC].opacity = offic;
     g_scene.views[VIEW_DRACO].opacity = draco;
     // The luminaries ride whichever surface is up: the machine's fade
@@ -772,6 +783,7 @@ static void init(void) {
     if (getenv("TEMPUS_ORBIS")) {
         g_worldview = WV_ORBIS;
         g_scene.orbis_blend = 1.0;
+        g_scene.orbis_wheel = 1.0;
     }
     if (getenv("TEMPUS_SKY")) {
         g_worldview = WV_CAELVM;
