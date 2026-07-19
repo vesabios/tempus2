@@ -626,7 +626,10 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
     float mk = r_cael / SKY_HOR;
     if (wc > 0.001f && sv)
         sky__set_center(sv->view_az, sv->view_alt);
-    float clip = 400.0f;
+    // The clip is the PLATE's want, not the sky's: at the astrolabe
+    // the limb (400) eats the circle; at CAELVM it relaxes to the
+    // chart's own rim (560) — effectively no clipping at all
+    float clip = 400.0f + (560.0f - 400.0f) * wc;
     // The dark earth under CAELVM's whole chart, beneath the circle
     if (wc > 0.004f) {
         d->alpha = base_alpha * fam * wc;
