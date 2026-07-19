@@ -5,6 +5,7 @@
 #define VIEW_H
 
 #include "tempus.h"
+#include "atmo.h"
 #include "draw.h"
 #include "globe.h"
 #include "tween.h"

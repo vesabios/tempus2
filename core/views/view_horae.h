@@ -34,6 +34,13 @@ struct HoraeViewState {
     double opacity;
     double blend;     // mirrored scene horae_blend
 
+    // Sky-band colors from the shared scattering atmosphere, cached
+    // per date (the band is a map of the whole day — it changes with
+    // the season, not the minute)
+    float  band_col[193][3];
+    double band_jd;
+    float  band_rise, band_lat;
+
     // The week ring is itself draggable: one revolution is 7/6 of a
     // day — the instrument's fine scrub, feeding the same flywheel
     bool  ring_dragging;
@@ -274,20 +281,47 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     // language, the same numeral voice, because that is what this is —
     // a 24-hour clock.
     {
-        // One continuous gradient around the band: per-vertex color,
-        // sampled from the altitude curve, OKLab between keys — the
-        // sky as the sky actually blends
+        // One continuous gradient around the band, from the SAME
+        // single-scattering atmosphere that lights CAELVM's dome:
+        // each hour's color is the sky seen low toward the sun's
+        // azimuth at that hour — where the color drama lives. Cached
+        // per date; the band is a map of the day, not of the minute.
         {
             const int N = 192;
+            HoraeViewState *stw = (HoraeViewState *)(uintptr_t)buf;
+            if (fabs(stw->band_jd - tv->jd_current) > 1.0e-6
+                || fabsf(stw->band_rise - rise) > 1.0e-4f
+                || fabsf(stw->band_lat
+                         - (float)t->config.latitude) > 1.0e-3f) {
+                stw->band_jd = tv->jd_current;
+                stw->band_rise = rise;
+                stw->band_lat = (float)t->config.latitude;
+                for (int i = 0; i <= N; i++) {
+                    float fp = (float)i / N;
+                    float H = (fp - fnoon) * 2.0f * (float)M_PI;
+                    float salt = sphi * sdec + cphi * cdec * cosf(H);
+                    if (salt > 1.0f) salt = 1.0f;
+                    if (salt < -1.0f) salt = -1.0f;
+                    float sun_alt = asinf(salt) / d2r;
+                    float sd2[3], rd2[3], col[3];
+                    atmo_dir(0.0f, sun_alt, sd2);
+                    atmo_dir(0.0f, 16.0f, rd2);
+                    atmo_scatter(rd2, sd2, col);
+                    for (int cch = 0; cch < 3; cch++) {
+                        float c = 1.0f - expf(-col[cch]);
+                        float base = cch == 0 ? 0.030f
+                                   : cch == 1 ? 0.036f : 0.075f;
+                        float v = base + c * 0.86f;
+                        stw->band_col[i][cch] = v > 1.0f ? 1.0f : v;
+                    }
+                }
+            }
             int pi = -1, po = -1;
             for (int i = 0; i <= N; i++) {
                 float fp = (float)i / N;
-                float H = (fp - fnoon) * 2.0f * (float)M_PI;
-                float salt = sphi * sdec + cphi * cdec * cosf(H);
-                if (salt > 1.0f) salt = 1.0f;
-                if (salt < -1.0f) salt = -1.0f;
-                DrawColor cc = horae__sky(asinf(salt) / d2r);
-                cc.a = 0.92f;
+                DrawColor cc = dca(st->band_col[i][0],
+                                   st->band_col[i][1],
+                                   st->band_col[i][2], 0.92f);
                 draw_set_color(d, cc);
 
                 float a = (fp + rot) * 2.0f * (float)M_PI;
