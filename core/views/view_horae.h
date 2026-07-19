@@ -511,37 +511,8 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             }
         }
 
-        // The 168 hours as an alternating light/dark chapter band on
-        // the meshing edge — the chemin de fer of the week (168 is
-        // even, so the alternation closes seamlessly around the loop).
-        // Day hours stand taller than night hours; the current one
-        // wears gold at the touch.
-        for (int dd = 0; dd < 7; dd++) {
-            for (int h = 0; h < 24; h++) {
-                float m0 = dd + rise + u[h];
-                float m1 = dd + rise + u[h + 1];
-                float q0 = m0 / 7.0f;
-                float q1 = m1 / 7.0f;
-
-                bool is_day = h < 12;
-                float r0 = HORAE_RING_IN + 2.0f;
-                float r1 = HORAE_RING_IN + (is_day ? 12.0f : 8.0f);
-                // (No gold override on the current tooth — the sky
-                // wheel's marker points at it; the band stays pure.)
-                // The whole band lays down in the light; dark hours
-                // are filled ON it at FULL angular width, inset only
-                // radially. Cells share their boundaries exactly, so
-                // the black boxes read their true width (the old
-                // per-side light outline visibly shrank them).
-                draw_set_color(d, dca(0.64f, 0.62f, 0.56f, 0.70f));
-                horae__cell(d, rcx, rcy, r0, r1, q0, q1);
-                if (((dd * 24 + h) & 1) != 0) {
-                    draw_set_color(d, dca(0.03f, 0.03f, 0.03f, 0.95f));
-                    horae__cell(d, rcx, rcy, r0 + 1.1f, r1 - 1.1f,
-                                q0, q1);
-                }
-            }
-        }
+        // (The 168-hour chemin de fer is retired — the ring reads as
+        // its day regions alone, and the drag still speaks in weeks.)
 
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
         draw_circle_stroked(d, rcx, rcy, HORAE_RING_IN, 1.0f);
@@ -637,17 +608,20 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     }
 
     // ---- The reading, written outside the ring at the contact ----
-    // Just the DAY, in full classical dress — DIES LVNAE — steady for
-    // a whole revolution of the inner dial. (The hour-ruler genitive
-    // and HORA line flickered through their changes at every scrub;
-    // the pinion's sigil and the gold tooth already carry the hour.)
+    // Just the DAY, plainly — MONDAY, steady for a whole revolution
+    // of the inner dial. The ring's regions keep the Latin genitives;
+    // the reading answers in the reader's own tongue.
+    static const char *horae__english[7] = {
+        "SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY",
+        "THURSDAY", "FRIDAY", "SATURDAY",
+    };
     {
         float na = fmodf(ah, 2.0f * (float)M_PI);
         if (na < 0) na += 2.0f * (float)M_PI;
         bool lflip = (na > (float)M_PI * 0.5f && na < (float)M_PI * 1.5f);
 
         char db[24];
-        snprintf(db, sizeof(db), "DIES %s", horae__dies[w]);
+        snprintf(db, sizeof(db), "%s", horae__english[w]);
         float nsz = _font_compat[FONT_month].size;
         // Baseline arc CONCENTRIC WITH THE WEEK DISC, not the clock:
         // the words ride the wheel they name. Same contact point —
