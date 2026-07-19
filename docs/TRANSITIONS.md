@@ -97,6 +97,16 @@ never need to be.
   already VIEW_LVMEN's. Layer question to resolve: beads stay in the
   orrery's layer (under the charts' furniture) vs join the luminaries
   above; start with the orrery layer for pixel parity at rest.
+  Parity vocabulary (view_sky.h mover, lines ~366-381 and ~597-727):
+  `mb` = sky_blend (the chart's flight clock), `ms` = the LIVE
+  machine's system stage, `fin` = smoothstep(0.10, 0.75, mb) the
+  born-in-place fade, machine-seat weight `mw = ms*(1-mb)`, chart
+  weight `sw = ms*mb + (1-ms)*fin`. Planet position = ring_seat*mw +
+  chart*(1-mw); alpha = ba (0.78 subdued below horizon, stroked ring
+  when not observable) * (ms + (1-ms)*fin). The orrery's machine-side
+  stagger is a_planet = smoothstep(0.20, 0.60, ss), gated off by
+  sky_owns today — that gate is what Stage 3 deletes. Check how the
+  sky's beads fade at DRACO (drab term) before moving them.
 - **Stage 4**: ink staging table — the ~27 scattered smoothstep
   windows become one declarative per-element table; entrance
   choreography tuned globally.
