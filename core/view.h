@@ -159,7 +159,7 @@ static inline double tempus_wheel_scale(double system_blend) {
 // At ORBIS the wheel breathes outward a little — clearance between
 // the globe closeup (r 355, sun and moon ring floating above it) and
 // the band.
-#define TEMPUS_ORBIS_WHEEL_R 515.0
+#define TEMPUS_ORBIS_WHEEL_R 505.0
 static inline double tempus_wheel_radius(double base, double system_blend,
                                          double sky_blend,
                                          double orbis_blend) {
