@@ -8,6 +8,8 @@
 struct ClockViewState {
     TimeView tv;  // must be first field
     double opacity;
+    const OrreryViewState *orr;   // live globe/moon centers (the rims
+                                  // TRAVEL with their tenants)
 };
 
 #endif // VIEW_CLOCK_H
@@ -36,7 +38,9 @@ static void clock_exit(void *buf, const Tempus *t, Scene *sc) {
 }
 
 static void clock_update(void *buf, const Tempus *t, double dt, Scene *sc) {
-    (void)buf; (void)t; (void)dt; (void)sc;
+    ClockViewState *st = (ClockViewState *)buf;
+    (void)t; (void)dt;
+    st->orr = &sc->orrery_state;
 }
 
 // The face furniture — logo, numerals, ticks — renders in its own
@@ -44,7 +48,8 @@ static void clock_update(void *buf, const Tempus *t, double dt, Scene *sc) {
 // the growing ORBIS planet covers the markings, while the hands
 // (VIEW_CLOCK, below) stay above everything.
 static void clockback_render(const void *buf, DrawCtx *d, const Tempus *t, const RenderStyle *s) {
-    (void)buf; (void)t;
+    const ClockViewState *st = (const ClockViewState *)buf;
+    (void)t;
 
     // Logo
     draw_set_color(d, s->logo_text);
@@ -103,15 +108,28 @@ static void clockback_render(const void *buf, DrawCtx *d, const Tempus *t, const
     // This view only reserves the aperture space: numeral 6 skipped and
     // ticks clipped above.)
 
-    // The dial's hairlines — the outer ring around the 12-o'clock
-    // globe and the moon aperture rim — live down here with the rest
-    // of the furniture, UNDER the globes (they used to ride over the
-    // limbs from the orrery's furniture pass)
-    draw_set_color(d, dc_scale(s->sunrise_lit, 0.8f));
-    draw_circle_stroked(d, 0, s->sunrise_dial_offset,
-                        s->sunrise_dial_radius + 12.0f, 1.0f);
-    draw_set_color(d, dca(0.45f, 0.44f, 0.42f, 0.5f));
-    draw_circle_stroked(d, 0, -s->sunrise_dial_offset, 62.0f, 1.0f);
+    // The dial's hairlines — the outer ring around the globe and the
+    // moon's rim — live down here with the rest of the furniture,
+    // UNDER the globes, but they TRAVEL with their tenants (Seren:
+    // rings that ride along, not fixtures the bodies land in): each
+    // rim follows the orrery's live published center and radius.
+    {
+        const OrreryViewState *o = st->orr;
+        float gx = 0, gy = s->sunrise_dial_offset;
+        float gr = s->sunrise_dial_radius + 12.0f;
+        float mx = 0, my = -s->sunrise_dial_offset, mr = 62.0f;
+        if (o && o->glob_r > 1.0f) {
+            gx = o->glob_x; gy = o->glob_y; gr = o->glob_r + 12.0f;
+        }
+        if (o && o->lum_moon_r > 1.0f) {
+            mx = o->lum_moon_x; my = o->lum_moon_y;
+            mr = o->lum_moon_r + 10.0f;
+        }
+        draw_set_color(d, dc_scale(s->sunrise_lit, 0.8f));
+        draw_circle_stroked(d, gx, gy, gr, 1.0f);
+        draw_set_color(d, dca(0.45f, 0.44f, 0.42f, 0.5f));
+        draw_circle_stroked(d, mx, my, mr, 1.0f);
+    }
 }
 
 static void clock_render(const void *buf, DrawCtx *d, const Tempus *t, const RenderStyle *s) {

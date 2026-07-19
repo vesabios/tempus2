@@ -1214,20 +1214,23 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             ORR__CAGE_RING(s3, n3, 0.30f, 1.0f);
             #undef ORR__CAGE_RING
 
-            // The ecliptic band: flat in the orrery plane, entirely
-            // outside the sphere — the cage's one gilded ring
+            // The ecliptic band: flat in the orrery plane, pushed
+            // OUTSIDE the moon's ring reach (1.55) so the two never
+            // fight — the cage's one gilded ring, outermost as on
+            // the brass instruments
+            float Re = earth_r * 1.72f;
             draw_set_color(d, dca(0.70f, 0.54f, 0.24f, 0.60f));
             d->alpha = base_alpha * arm * 0.75f;
-            draw_circle_stroked(d, ex, ey, Rc, 1.2f);
+            draw_circle_stroked(d, ex, ey, Re, 1.2f);
             d->alpha = base_alpha * arm * 0.35f;
-            draw_circle_stroked(d, ex, ey, Rc + 3.0f, 1.0f);
+            draw_circle_stroked(d, ex, ey, Re + 3.0f, 1.0f);
             // The sun rides the band at its true bearing
             float lm = sqrtf(light[0]*light[0] + light[1]*light[1]);
             if (lm > 1.0e-4f) {
                 d->alpha = base_alpha * arm * 0.9f;
                 draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.9f));
-                draw_circle_filled(d, ex + light[0]/lm * (Rc + 1.5f),
-                                   ey + light[1]/lm * (Rc + 1.5f),
+                draw_circle_filled(d, ex + light[0]/lm * (Re + 1.5f),
+                                   ey + light[1]/lm * (Re + 1.5f),
                                    3.5f);
             }
             d->alpha = base_alpha;
@@ -1319,7 +1322,9 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         if (lz < 0) {
             float n = sqrtf(lx * lx + ly * ly);
             if (n > 1e-4f) { lx /= n; ly /= n; }
-            sun_c = dc_scale(sun_c, 1.0f - 0.5f * sysf);
+            // Fake translucency belongs to the SMALL clock-face
+            // globe only — at TELLVS the sun stands free (Seren)
+            sun_c = dc_scale(sun_c, 1.0f - 0.5f * sysf * (1.0f - m));
         }
         // In helio the real sun sits at the wheel center, so the marker
         // lifts well off the globe toward it — a bead on the sun line.
