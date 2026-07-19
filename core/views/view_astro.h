@@ -523,11 +523,6 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
     }
 
-    // ---- The name ----
-    d->alpha = base_alpha * 0.5f;
-    draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.8f));
-    draw_text_centered(d, FONT_date, 0, ASTRO_R_CAP + 44.0f,
-                       "ASTROLABIVM");
     d->alpha = base_alpha;
 }
 
