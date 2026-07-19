@@ -300,6 +300,15 @@ static void set_view_opacities(void) {
         double lum = 1.0 - tempus_smoothstep(0.0, 0.15, sky);
         double skyvis = tempus_smoothstep(0.0, 0.15, sky);
         lum = fade > skyvis ? fade : skyvis;
+        // DRACO flights keep the luminaries with VIEW_LVMEN the whole
+        // way (the orrery composes toward draco's published targets);
+        // at full blend the station takes over at exact coincidence —
+        // its own furnace-under, umbra-over sandwich needs the beads
+        // in its own layer
+        if (draco < 0.999) {
+            double dvis = tempus_smoothstep(0.0, 0.10, draco);
+            if (dvis > lum) lum = dvis;
+        }
         g_scene.views[VIEW_LVMEN].opacity = lum;
     }
 }
@@ -685,6 +694,11 @@ static void init(void) {
     if (getenv("TEMPUS_DRACO")) {
         g_worldview = WV_DRACO;
         g_scene.draco_blend = 1.0;
+    }
+    const char *drblend = getenv("TEMPUS_DRACOBLEND");  // dev: pin morph
+    if (drblend) {
+        g_worldview = WV_DRACO;
+        g_scene.draco_blend = atof(drblend);
     }
     if (getenv("TEMPUS_OFFICIVM")) {
         g_worldview = WV_OFFICIVM;

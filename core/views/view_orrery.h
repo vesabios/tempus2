@@ -60,6 +60,8 @@ struct OrreryViewState {
     float lum_pq[4];
     bool  lum_pq_valid;
     const SkyViewState *skyv;
+    const DracoViewState *drav;
+    double drab;        // mirrored scene draco_blend (DRACO handoff)
     bool  dragging;
     bool  drag_earth;       // system view: dragging Earth around its orbit
 
@@ -350,6 +352,8 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->skyb = sc->sky_blend;
     st->orbisb = sc->orbis_blend;
     st->skyv = &sc->sky_state;
+    st->drav = &sc->draco_state;
+    st->drab = sc->draco_blend;
     st->geo_azimuth = sc->solar_state.azimuth;
     st->geo_zenith = sc->solar_state.zenith;
     st->solar = &sc->solar_state;
@@ -1172,6 +1176,19 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             sz = sz * (1.0f - skw) + st->skyv->lum_sun_r * skw;
         }
 
+        // ... and the dragon's road is another: DRACO publishes its
+        // ecliptic seat and the sun flies there, taking the station's
+        // gold on the way (the view itself renders only at full blend)
+        float dw = (float)st->drab;
+        if (dw > 0.001f && st->drav) {
+            px = px * (1.0f - dw) + st->drav->lum_sun_x * dw;
+            py = py * (1.0f - dw) + st->drav->lum_sun_y * dw;
+            sz = sz * (1.0f - dw) + 28.0f * dw;
+            sun_c.r += (0.85f - sun_c.r) * dw;
+            sun_c.g += (0.62f - sun_c.g) * dw;
+            sun_c.b += (0.18f - sun_c.b) * dw;
+        }
+
         // Publish for VIEW_LVMEN and for hit-testing
         OrreryViewState *wst = (OrreryViewState *)(uintptr_t)buf;
         wst->lum_sun_x = px;
@@ -1180,7 +1197,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         wst->lum_sun_col[0] = sun_c.r;
         wst->lum_sun_col[1] = sun_c.g;
         wst->lum_sun_col[2] = sun_c.b;
-        wst->lum_sun_ray = ss * (1.0f - skw);
+        wst->lum_sun_ray = ss * (1.0f - skw) * (1.0f - dw);
         wst->bead_x = px;
         wst->bead_y = py;
         wst->bead_r = sz;
@@ -1340,6 +1357,26 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             if (mn3 > 1.0e-3f)
                 for (int i = 0; i < 3; i++) ml[i] /= mn3;
         }
+
+        // The dragon's wave: DRACO publishes the moon's seat at its
+        // true (scaled) latitude and the canonical lune light — from
+        // the clock station this is a pure position/size glide, since
+        // the aperture already wears the same phase-frame light
+        float dw2 = (float)st->drab;
+        if (dw2 > 0.001f && st->drav) {
+            mmx = mmx * (1.0f - dw2) + st->drav->lum_moon_x * dw2;
+            mmy = mmy * (1.0f - dw2) + st->drav->lum_moon_y * dw2;
+            mmr = mmr * (1.0f - dw2) + 28.0f * dw2;
+            float mn4 = 0;
+            for (int i = 0; i < 3; i++) {
+                ml[i] = ml[i] * (1.0f - dw2)
+                      + st->drav->lum_light[i] * dw2;
+                mn4 += ml[i] * ml[i];
+            }
+            mn4 = sqrtf(mn4);
+            if (mn4 > 1.0e-3f)
+                for (int i = 0; i < 3; i++) ml[i] /= mn4;
+        }
         // Publish for VIEW_LVMEN (and the pointer code's exclusions)
         stw->moon_x = mmx;
         stw->moon_y = mmy;
@@ -1369,9 +1406,9 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                                  stw->lum_pq, &stw->lum_pq_valid,
                                  stw->lum_moon_rot);
         }
-        stw->lum_moon_aux[0] = edx * morb * (1.0f - skw);
-        stw->lum_moon_aux[1] = edy * morb * (1.0f - skw);
-        stw->lum_moon_aux[2] = 1.0f - morb * (1.0f - skw);
+        stw->lum_moon_aux[0] = edx * morb * (1.0f - skw) * (1.0f - dw2);
+        stw->lum_moon_aux[1] = edy * morb * (1.0f - skw) * (1.0f - dw2);
+        stw->lum_moon_aux[2] = 1.0f - morb * (1.0f - skw) * (1.0f - dw2);
         stw->lum_moon_aux[3] = 1.0f;
     }
 

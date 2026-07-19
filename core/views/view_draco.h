@@ -29,6 +29,13 @@ struct DracoViewState {
     double sun_lon, moon_lon;   // geocentric ecliptic longitudes, deg
     double moon_lat;            // geocentric ecliptic latitude, deg
     double node_lon;            // mean ascending node (CAPVT), deg
+
+    // ONE OBJECT chart targets, published for the orrery's luminaire
+    // composition (VIEW_LVMEN renders; this view takes over only at
+    // exact coincidence when the flight completes)
+    float lum_sun_x, lum_sun_y;
+    float lum_moon_x, lum_moon_y;
+    float lum_light[3];         // the canonical lune's phase light
 };
 
 #endif // VIEW_DRACO_H
@@ -147,21 +154,38 @@ static void draco_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     DracoViewState *st = (DracoViewState *)buf;
     (void)dt;
     st->blend = sc->draco_blend;
-    if (st->blend < 0.001) return;
+    if (st->blend < 0.0001) return;
 
     double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
                  - t->config.timezone / 24.0;
-    if (fabs(jd_ut - st->cache_jd) <= 1.0 / 1440.0) return;
-    st->cache_jd = jd_ut;
+    if (fabs(jd_ut - st->cache_jd) > 1.0 / 1440.0) {
+        st->cache_jd = jd_ut;
+        double lons[BODY_COUNT];
+        planets__geo_lons(jd_ut, lons);
+        st->sun_lon = lons[BODY_SUN];
+        st->moon_lon = lons[BODY_MOON];
+        st->moon_lat = planets_moon_lat(jd_ut);
+        // Mean ascending node, regressing 18.6-year cycle (of-date)
+        st->node_lon = planets__wrap360(
+            125.04452 - 0.05295377 * (jd_ut - 2451545.0));
+    }
 
-    double lons[BODY_COUNT];
-    planets__geo_lons(jd_ut, lons);
-    st->sun_lon = lons[BODY_SUN];
-    st->moon_lon = lons[BODY_MOON];
-    st->moon_lat = planets_moon_lat(jd_ut);
-    // Mean ascending node, regressing 18.6-year cycle (of-date)
-    st->node_lon = planets__wrap360(
-        125.04452 - 0.05295377 * (jd_ut - 2451545.0));
+    // Chart targets for the luminaire composition, every update the
+    // station is anywhere in play — the movers need live endpoints
+    {
+        float sx, sy, mx, my;
+        orr__ecl_dir(st->sun_lon, &sx, &sy);
+        st->lum_sun_x = sx * DRACO_R;
+        st->lum_sun_y = sy * DRACO_R;
+        orr__ecl_dir(st->moon_lon, &mx, &my);
+        float mr = DRACO_R + DRACO_AMP / 5.145f * (float)st->moon_lat;
+        st->lum_moon_x = mx * mr;
+        st->lum_moon_y = my * mr;
+        float bb = (float)(globe_moon_phase(st->cache_jd) * 2.0 * M_PI);
+        st->lum_light[0] = sinf(bb);
+        st->lum_light[1] = 0.0f;
+        st->lum_light[2] = -cosf(bb);
+    }
 }
 
 static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
@@ -286,17 +310,26 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
             draco__glow(d, solar ? spx : mpx, solar ? spy : mpy,
                         70.0f + 50.0f * glow, glow, !solar);
 
+        // ONE OBJECT: during flights the luminaries are VIEW_LVMEN's
+        // (the orrery composes toward this view's published targets);
+        // this view draws its own only at EXACT coincidence — full
+        // blend, same position, size, and lune light — so the handoff
+        // is invisible and the furnace/umbra sandwich stays intact.
+        bool own = st->blend > 0.999;
+
         // The sun itself heats only at ITS OWN meal — gold to
         // near-white as the solar eclipse closes (a lunar eclipse
         // dims the moon; the sun just stands there, opposite)
+        if (own) {
         draw_set_color(d, dca(0.85f + 0.15f * glow_sol,
                               0.62f + 0.33f * glow_sol,
                               0.18f + 0.60f * glow_sol, 0.95f));
         draw_circle_filled(d, spx, spy, 28.0f);
         draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
         draw_circle_stroked(d, spx, spy, 34.0f, 1.0f);
+        }
 
-        GlobeCmd *gm = draw_globe_slot(d, mpx, mpy, 28.0f);
+        GlobeCmd *gm = own ? draw_globe_slot(d, mpx, mpy, 28.0f) : NULL;
         if (gm) {
             // The clock aperture's own dress: PHASE-FRAME light, the
             // canonical pure lune (bright limb to screen-right), not
