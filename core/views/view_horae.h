@@ -548,33 +548,6 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_circle_stroked(d, rcx, rcy, HORAE_RING_OUT, 1.0f);
     }
 
-    // ---- The marker: a double-pointed lozenge on the sky wheel ----
-    // No hand. A rhombus centered in the sky band at the contact
-    // bearing, its points aiming outward at the week ring's tooth and
-    // inward at the pinion's mesh simultaneously — the whole gear
-    // train named by one shape that lives ON the wheel it reads.
-    {
-        float px2 = -hdy, py2 = hdx;
-        float rmid = HORAE_CLOCK_R - HORAE_CLOCK_W * 0.5f;
-        float rout = HORAE_CLOCK_R + 5.0f;
-        float rin  = HORAE_CLOCK_R - HORAE_CLOCK_W - 5.0f;
-        float half = 5.5f;
-        draw_set_color(d, dca(0.82f, 0.79f, 0.71f, 0.95f));
-        int vb = d->num_verts;
-        draw__push_vert(d, hdx * rout, hdy * rout,
-                        d->white_u, d->white_v);
-        draw__push_vert(d, hdx * rmid + px2 * half,
-                        hdy * rmid + py2 * half,
-                        d->white_u, d->white_v);
-        draw__push_vert(d, hdx * rin, hdy * rin,
-                        d->white_u, d->white_v);
-        draw__push_vert(d, hdx * rmid - px2 * half,
-                        hdy * rmid - py2 * half,
-                        d->white_u, d->white_v);
-        draw__tri(d, vb, vb + 1, vb + 2);
-        draw__tri(d, vb, vb + 2, vb + 3);
-    }
-
     // ---- The rulers' pinion ----
     // The tangent idea carried inward: the seven Chaldean rulers as a
     // small wheel meshing the INSIDE of the sky wheel at the same
@@ -609,6 +582,34 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         // The meshing edge, so the dark wheel holds its shape
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
         draw_circle_stroked(d, pcx2, pcy2, rp, 1.0f);
+    }
+
+    // ---- The marker: a double-pointed lozenge on the sky wheel ----
+    // No hand. A rhombus centered in the sky band at the contact
+    // bearing, its points aiming outward at the week ring's tooth and
+    // inward at the pinion's mesh simultaneously — the whole gear
+    // train named by one shape that lives ON the wheel it reads.
+    // Drawn LAST among the wheels: the marker rides over all of them.
+    {
+        float px2 = -hdy, py2 = hdx;
+        float rmid = HORAE_CLOCK_R - HORAE_CLOCK_W * 0.5f;
+        float rout = HORAE_CLOCK_R + 8.0f;
+        float rin  = HORAE_CLOCK_R - HORAE_CLOCK_W - 8.0f;
+        float half = 7.0f;
+        draw_set_color(d, dca(0.82f, 0.79f, 0.71f, 0.95f));
+        int vb = d->num_verts;
+        draw__push_vert(d, hdx * rout, hdy * rout,
+                        d->white_u, d->white_v);
+        draw__push_vert(d, hdx * rmid + px2 * half,
+                        hdy * rmid + py2 * half,
+                        d->white_u, d->white_v);
+        draw__push_vert(d, hdx * rin, hdy * rin,
+                        d->white_u, d->white_v);
+        draw__push_vert(d, hdx * rmid - px2 * half,
+                        hdy * rmid - py2 * half,
+                        d->white_u, d->white_v);
+        draw__tri(d, vb, vb + 1, vb + 2);
+        draw__tri(d, vb, vb + 2, vb + 3);
     }
 
     // ---- The reading, written outside the ring at the contact ----
