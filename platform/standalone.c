@@ -9,6 +9,7 @@
 #else
 #define SOKOL_GLCORE
 #endif
+#include <strings.h>   // strncasecmp (the station-name prefix match)
 #include "../lib/sokol_app.h"
 #include "../lib/sokol_gfx.h"
 #include "../lib/sokol_glue.h"
