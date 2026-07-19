@@ -542,6 +542,12 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 ho->last_wy = wy;
                 c->fling_vel = 0;
                 c->drag_accum = 0;
+                // A band grab at HORAE leaves fling_week=true behind;
+                // the ring's own flings must clear it or they get
+                // week-quantized into apparent deadness (Seren: the
+                // flywheel stops working after touching the band)
+                c->fling_week = false;
+                c->week_accum = 0.0;
                 c->fling_keep_time = false;   // the ring scrubs hours
                 scene__begin_override(t);
                 return;
