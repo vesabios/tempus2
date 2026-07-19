@@ -1252,17 +1252,11 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     {
         OrreryViewState *wpl = (OrreryViewState *)(uintptr_t)buf;
         const PlanetsNow *pn3 = &st->planets;
-        // The CHART FAMILY: CAELVM and the astrolabe are the same sky
-        // in two projections — a planet's chart seat is the weighted
-        // mix of the two published positions, and the machine's claim
-        // yields to the family's combined presence
-        float abp = (float)st->astb;
-        float wS3 = (st->skyv && skw > 0.001f) ? skw : 0.0f;
-        float wA3 = (st->astv && abp > 0.001f) ? abp : 0.0f;
-        float chf = wS3 + wA3;
-        if (chf > 1.0f) chf = 1.0f;
-        bool chart3 = chf > 0.0f;
-        float fin3 = ink_in(INK_BORN, chf);
+        // The astrolabe is PERIOD ACCURATE: no planets on the plate
+        // (Seren) — CAELVM is the planets' only chart seat, and they
+        // fade in place on flights to the plate (absent-seat rule)
+        bool chart3 = st->skyv && skw > 0.001f;
+        float fin3 = ink_in(INK_BORN, skw);
         float a_pl3 = ink_in(INK_PLANET, ss);
         for (int p = 0; p < PL_COUNT; p++) {
             wpl->pl_ring_a[p] = 0;
@@ -1285,16 +1279,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                     wpl->pl_ring_a[p] = wpl->pl_ca[p];
             } else {
                 const SkyViewState *sv = st->skyv;
-                const AstroViewState *av = st->astv;
                 int b = (p < PL_EARTH) ? BODY_MERCURY + p
                                        : BODY_MERCURY + p - 1;
-                float ct = wS3 + wA3;
-                float cx3 = (wS3 > 0 ? sv->pl_x[b] * wS3 : 0)
-                          + (wA3 > 0 ? av->pl_x[b] * wA3 : 0);
-                float cy3 = (wS3 > 0 ? sv->pl_y[b] * wS3 : 0)
-                          + (wA3 > 0 ? av->pl_y[b] * wA3 : 0);
-                cx3 /= ct;
-                cy3 /= ct;
+                float cx3 = sv->pl_x[b];
+                float cy3 = sv->pl_y[b];
                 // The machine seat is the LIVE morphing ring (base_w
                 // flies with the station), and its claim is the
                 // station weight x the machine's own bead presence
@@ -1310,7 +1298,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 orr__ecl_dir(pn3->helio_lon[p], &dx3, &dy3);
                 float orbr3 = orr__orbit_r(p, base_w);
                 float pw3 = (float)tempus_smoothstep(0.0, 1.0,
-                                                     1.0 - chf)
+                                                     1.0 - skw)
                           * ink_in(INK_BEAD_CLAIM, ss);
                 wpl->pl_cx[p] = dx3 * orbr3 * pw3
                               + cx3 * (1.0f - pw3);
@@ -1608,37 +1596,32 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         {
             float wS = (st->skyv && skw > 0.001f) ? skw : 0.0f;
             float wD = (st->drav && dw2 > 0.001f) ? dw2 : 0.0f;
-            float wA = (st->astv && ab2 > 0.001f) ? ab2 : 0.0f;
-            if (wS > 0.0f || wD > 0.0f || wA > 0.0f) {
+            if (wS > 0.0f || wD > 0.0f) {
                 // MEMBER ROWS (Stage 2): seat 0 = the machine's composed
-                // moon; seats 1..3 = the chart stations' published
-                // members (CAELVM, DRACO, the astrolabe's plate).
-                // Cross-frame outputs, so seat_mix_pos (rule 3);
-                // the phase light is a live-frame dir3 (never nlerp'd).
-                float wB = 1.0f - wS - wD - wA;
+                // moon; seats 1..2 = the chart stations' published
+                // members. The astrolabe declares NO moon seat (period
+                // accuracy — brass carried no moon pointer): the moon
+                // fades in place on flights to the plate instead.
+                float wB = 1.0f - wS - wD;
                 if (wB < 0.0f) wB = 0.0f;
-                double wT = wB + wS + wD + wA;
-                double w[4] = { wB / wT, wS / wT, wD / wT, wA / wT };
-                float mx[4] = { mmx, wS > 0 ? st->skyv->lum_moon_x : 0,
-                                wD > 0 ? st->drav->lum_moon_x : 0,
-                                wA > 0 ? st->astv->lum_moon_x : 0 };
-                float my[4] = { mmy, wS > 0 ? st->skyv->lum_moon_y : 0,
-                                wD > 0 ? st->drav->lum_moon_y : 0,
-                                wA > 0 ? st->astv->lum_moon_y : 0 };
-                seat_mix_pos(mx, my, w, 4, &mmx, &mmy);
-                float mr[4] = { mmr, wS > 0 ? st->skyv->lum_moon_r : 0,
-                                28.0f,
-                                wA > 0 ? st->astv->lum_moon_r : 0 };
+                double wT = wB + wS + wD;
+                double w[3] = { wB / wT, wS / wT, wD / wT };
+                float mx[3] = { mmx, wS > 0 ? st->skyv->lum_moon_x : 0,
+                                wD > 0 ? st->drav->lum_moon_x : 0 };
+                float my[3] = { mmy, wS > 0 ? st->skyv->lum_moon_y : 0,
+                                wD > 0 ? st->drav->lum_moon_y : 0 };
+                seat_mix_pos(mx, my, w, 3, &mmx, &mmy);
+                float mr[3] = { mmr, wS > 0 ? st->skyv->lum_moon_r : 0,
+                                28.0f };
                 mmr = mr[0] * (float)w[0] + mr[1] * (float)w[1]
-                    + mr[2] * (float)w[2] + mr[3] * (float)w[3];
-                float lv[4][3];
+                    + mr[2] * (float)w[2];
+                float lv[3][3];
                 memcpy(lv[0], ml, sizeof(lv[0]));
                 for (int i = 0; i < 3; i++) {
                     lv[1][i] = wS > 0 ? st->skyv->lum_moon_light[i] : 0;
                     lv[2][i] = wD > 0 ? st->drav->lum_light[i] : 0;
-                    lv[3][i] = wA > 0 ? st->astv->lum_moon_light[i] : 0;
                 }
-                seat_mix_dir3((const float (*)[3])lv, w, 4, ml);
+                seat_mix_dir3((const float (*)[3])lv, w, 3, ml);
             }
         }
         // Publish for VIEW_LVMEN (and the pointer code's exclusions)
@@ -1648,7 +1631,9 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         stw->lum_moon_x = mmx;
         stw->lum_moon_y = mmy;
         stw->lum_moon_r = mmr;
-        stw->lum_moon_a = moon_dim;
+        // The absent-seat rule at the plate: no moon pointer on a
+        // period astrolabe, so the moon fades where it stands
+        stw->lum_moon_a = moon_dim * ink_out(INK_MACHINE_EXIT, ab2);
         memcpy(stw->lum_moon_light, ml, sizeof(ml));
         {
             // Tidal locking: geo shows the near side (lon 0 centered,
@@ -1666,11 +1651,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             globe_rot_slerp_cont(rot_geo, rot_helio, morb,
                                  stw->moon_pq, &stw->moon_pq_valid,
                                  mrot0);
-            // Every CHART returns the moon to the near side — the
-            // claim is the chart family's combined weight
-            double chw = skw + ab2;
-            if (chw > 1.0) chw = 1.0;
-            globe_rot_slerp_cont(mrot0, rot_geo, chw,
+            globe_rot_slerp_cont(mrot0, rot_geo, skw,
                                  stw->lum_pq, &stw->lum_pq_valid,
                                  stw->lum_moon_rot);
         }

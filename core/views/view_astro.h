@@ -282,52 +282,41 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
     // Day / twilight / night, from the sun's true altitude
     float dayk = (float)tempus_smoothstep(-12.0, 6.0, sun_alt);
 
-    // ---- The sky itself: the region above YOUR horizon ----
-    // The one shape that says what the instrument is — and it wears
-    // the real atmosphere: single-scattered Rayleigh blue and Mie
-    // sunset fire, the same light CAELVM breathes, flattened through
-    // the stereographic projection. Everything inside is UP now;
-    // everything outside is under the earth. The horizon clamps to
-    // the limb where it runs off the plate.
+    // ---- The sky itself: one CIRCLE, clipped by the plate ----
+    // Seren's law: the sky region is the SAME SHAPE at both stations
+    // — a perfect circle. CAELVM's bowl (centered, half-radius) RISES
+    // and grows into the astrolabe's horizon circle (offset up the
+    // meridian), and where it passes the limb it is CLIPPED. The
+    // lens is not a deformed bowl; it is a circle behind a plate,
+    // and the clip appearing at the top IS the transition.
     {
+        float hxn, hyn, hxs, hys;
+        astro__project_altaz(0.0f, 0.0f, lat, &hxn, &hyn);
+        astro__project_altaz(0.0f, 180.0f, lat, &hxs, &hys);
+        float hyc = (hyn + hys) * 0.5f;
+        float hr = fabsf(hyn - hys) * 0.5f;
+        float cy = hyc * (1.0f - wc);      // the bowl sits at origin
+        float cr = hr + (SKY_HOR - hr) * wc;
         int prev[ASTRO_SKY_SEC + 1], curv[ASTRO_SKY_SEC + 1];
-        // ONE SKY, TWO PROJECTIONS: when CAELVM shares the stage its
-        // bowl bows out and THIS mesh draws the shared shape — every
-        // vertex blended between the bowl's azimuthal projection and
-        // the plate's stereographic one (rule 3: evaluate both live,
-        // blend outputs). The wash strength rides the chart family's
-        // combined presence, so the sky never dips mid-handoff.
         d->alpha = 0.94f * fam;
-        float zx, zy;
-        astro__project(lat, 0, &zx, &zy);
-        if (wc > 0.0f) {
-            float czx, czy;
-            sky__project(0.0f, 90.0f, &czx, &czy);
-            zx = zx * (1.0f - wc) + czx * wc;
-            zy = zy * (1.0f - wc) + czy * wc;
-        }
         draw_set_color(d, dca(st->sky_cols[0][0], st->sky_cols[0][1],
                               st->sky_cols[0][2], 1.0f));
-        int cvi = draw__push_vert(d, zx, zy, d->white_u, d->white_v);
+        int cvi = draw__push_vert(d, 0, cy, d->white_u, d->white_v);
         for (int ri = 0; ri < ASTRO_SKY_RINGS; ri++) {
             float altv = astro__sky_alts[ri];
+            float rr2 = cr * (90.0f - altv) / 90.0f;
             for (int si = 0; si <= ASTRO_SKY_SEC; si++) {
                 const float *c =
                     st->sky_cols[1 + ri * (ASTRO_SKY_SEC + 1) + si];
                 draw_set_color(d, dca(c[0], c[1], c[2], 1.0f));
-                float az = (float)si / ASTRO_SKY_SEC * 360.0f;
-                float x, y;
-                astro__project_altaz(altv, az, lat, &x, &y);
-                float r = sqrtf(x * x + y * y);
-                if (r > ASTRO_R_CAP) {
-                    x *= ASTRO_R_CAP / r;
-                    y *= ASTRO_R_CAP / r;
-                }
-                if (wc > 0.0f) {
-                    float cx2, cy2;
-                    sky__project(az, altv, &cx2, &cy2);
-                    x = x * (1.0f - wc) + cx2 * wc;
-                    y = y * (1.0f - wc) + cy2 * wc;
+                float az = (float)si / ASTRO_SKY_SEC * 360.0f
+                         * d2r;
+                float x = -sinf(az) * rr2;
+                float y = cy + cosf(az) * rr2;
+                float pr2 = sqrtf(x * x + y * y);
+                if (pr2 > ASTRO_R_CAP) {   // the plate clips the sky
+                    x *= ASTRO_R_CAP / pr2;
+                    y *= ASTRO_R_CAP / pr2;
                 }
                 int vi = draw__push_vert(d, x, y,
                                          d->white_u, d->white_v);
@@ -540,19 +529,19 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
             float rn = sqrtf(x * x + y * y);
             float ux = rn > 1 ? x / rn : 0, uy = rn > 1 ? y / rn : -1;
             if (up) {
-                d->alpha = fam;
+                d->alpha = base_alpha;
                 draw_set_color(d, dca(0.92f, 0.88f, 0.76f, 1.0f));
                 draw_circle_filled(d, x, y, 3.0f);
-                d->alpha = fam * 0.7f;
+                d->alpha = base_alpha * 0.7f;
                 draw_line(d, x, y, x - ux * 16.0f, y - uy * 16.0f, 1.2f);
                 // Risen names in bright warm ink — they must read on
                 // the daylight blue as well as the night ink
-                d->alpha = fam * 0.9f;
+                d->alpha = base_alpha * 0.9f;
                 draw_set_color(d, dca(0.90f, 0.87f, 0.76f, 0.95f));
                 draw_text_ex(d, fw, 13.0f, x + 7.0f, y + 4.5f,
                              astro__stars[i].name);
             } else {
-                d->alpha = fam * 0.28f;
+                d->alpha = base_alpha * 0.28f;
                 draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.7f));
                 draw_circle_stroked(d, x, y, 2.2f, 1.0f);
             }

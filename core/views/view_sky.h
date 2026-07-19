@@ -617,43 +617,6 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         d->alpha = base_alpha;
     }
 
-    // ---- The fixed stars: the rete's pointer set, on this chart ----
-    // The SAME fifteen stars the astrolabe carries (planets_stars —
-    // one table, every chart): risen stars bright with their names,
-    // set stars anonymous ghosts. Suppressed as the plate rises (the
-    // astrolabe draws the shared, projection-blended copies).
-    if (fb > 0.001f && asup > 0.004f) {
-        float lst2 = (float)fmod(
-            planets__gmst(st->tv.jd_current + st->tv.percent_of_day
-                          - 0.5 - t->config.timezone / 24.0)
-            + t->config.longitude, 360.0);
-        int fw2 = _font_compat[FONT_date].weight;
-        for (int i = 0; i < PLANETS_NSTARS; i++) {
-            float saz, salt2;
-            planets_star_azalt(planets_stars[i].ra,
-                               planets_stars[i].dec, lst2,
-                               (float)t->config.latitude,
-                               &saz, &salt2);
-            float x, y;
-            sky__project(saz, salt2, &x, &y);
-            bool up = salt2 > 0.0f;
-            if (up) {
-                d->alpha = base_alpha * fb * asup;
-                draw_set_color(d, dca(0.92f, 0.88f, 0.76f, 1.0f));
-                draw_circle_filled(d, x, y, 3.0f);
-                d->alpha = base_alpha * fb * asup * 0.9f;
-                draw_set_color(d, dca(0.90f, 0.87f, 0.76f, 0.95f));
-                draw_text_ex(d, fw2, 13.0f, x + 7.0f, y + 4.5f,
-                             planets_stars[i].name);
-            } else {
-                d->alpha = base_alpha * fb * asup * 0.28f;
-                draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.7f));
-                draw_circle_stroked(d, x, y, 2.2f, 1.0f);
-            }
-        }
-        d->alpha = base_alpha;
-    }
-
     // ---- The bodies themselves ----
     // Beads leave their orbit rings and fly to where they truly hang in
     // your sky; anything below the horizon exits through the rim and
