@@ -79,6 +79,7 @@ struct SkyViewState {
     float path[BODY_COUNT][SKY_PATH_N][2];   // az, alt over +/-12h
     float ecl_az[SKY_ECL_N], ecl_alt[SKY_ECL_N];
     float sign_az[12], sign_alt[12];         // cusp positions (0 Aries...)
+    float sign_maz[12], sign_malt[12];       // sign MIDDLES (the sigils)
 };
 
 #endif // VIEW_SKY_H
@@ -359,6 +360,10 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         planets_sky_azalt(i * 30.0, 0.0, jd_ut, lat, lon, &az, &alt);
         st->sign_az[i] = (float)az;
         st->sign_alt[i] = (float)alt;
+        planets_sky_azalt(i * 30.0 + 15.0, 0.0, jd_ut, lat, lon,
+                          &az, &alt);
+        st->sign_maz[i] = (float)az;
+        st->sign_malt[i] = (float)alt;
     }
 
     // Targets from the fresh ephemeris — always AFTER the fill, so
@@ -481,10 +486,13 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             float y0 = ry0 * ORR_WEB_R * mw + sy0 * (1 - mw);
             float x1 = rx1 * ORR_WEB_R * mw + sx1 * (1 - mw);
             float y1 = ry1 * ORR_WEB_R * mw + sy1 * (1 - mw);
-            bool vis = st->ecl_alt[i] > 0.0f && st->ecl_alt[j] > 0.0f;
-            float a = (0.22f * mw + (vis ? 0.30f : 0.13f) * sw) * asup;
-            draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
-            draw_line(d, x0, y0, x1, y1, 1.0f);
+            // The astrolabe's exact ring: same gold, same weight,
+            // same uniform ink above and below the horizon (Seren)
+            float a = (0.22f * mw + 0.50f * sw) * asup;
+            draw_set_color(d, dca(0.70f, 0.54f, 0.24f, 0.85f * a
+                                  / (a > 0 ? 1.0f : 1.0f)));
+            d->alpha = base_alpha * a;
+            draw_line(d, x0, y0, x1, y1, 1.0f + 0.3f * sw);
         }
         // Sign cusps ride the same lerp
         for (int i = 0; i < 12; i++) {
@@ -493,12 +501,33 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             sky__project_clamped(st->sign_az[i], st->sign_alt[i], &sx, &sy);
             float x = rx * ORR_WEB_R * mw + sx * (1 - mw);
             float y = ry * ORR_WEB_R * mw + sy * (1 - mw);
-            bool vis = st->sign_alt[i] > 0.0f;
-            float a = (0.30f * mw + (vis ? 0.45f : 0.22f) * sw) * asup;
-            draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
-            draw_line(d, x - 4.0f, y - 4.0f, x + 4.0f, y + 4.0f, 1.0f);
-            draw_line(d, x - 4.0f, y + 4.0f, x + 4.0f, y - 4.0f, 1.0f);
+            // The X marks are the MACHINE's ring markers only — at
+            // rest the ring wears the sigils, as on the plate
+            float a = 0.30f * mw * asup;
+            if (a > 0.004f) {
+                d->alpha = base_alpha * a;
+                draw_set_color(d, dca(0.65f, 0.52f, 0.25f, 0.9f));
+                draw_line(d, x - 4.0f, y - 4.0f, x + 4.0f, y + 4.0f,
+                          1.0f);
+                draw_line(d, x - 4.0f, y + 4.0f, x + 4.0f, y - 4.0f,
+                          1.0f);
+            }
         }
+        // The sigils, every 30 degrees at the sign middles — the
+        // astrolabe's exact dress, feet toward the chart's center
+        for (int i = 0; i < 12; i++) {
+            float x, y;
+            sky__project_clamped(st->sign_maz[i], st->sign_malt[i],
+                                 &x, &y);
+            float rn = sqrtf(x * x + y * y);
+            if (rn < 1.0f) continue;
+            float ux = x / rn, uy = y / rn;
+            d->alpha = base_alpha * 0.55f * sw * asup;
+            draw_set_color(d, dca(0.70f, 0.54f, 0.24f, 0.85f));
+            orr__zodiac_glyph(d, i, x + ux * 13.0f, y + uy * 13.0f,
+                              ux, uy, 13.0f);
+        }
+        d->alpha = base_alpha;
     }
 
     // ---- Orbit rings unfurling into diurnal arcs ----
