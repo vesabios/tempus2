@@ -362,26 +362,34 @@ static inline void scene_event(Scene *sc, const Tempus *t, int key) {
 // of day; the override stays active afterward for inspection.
 
 // Advance the manual override by a signed number of days (fractional —
-// hours scroll continuously), wrapping within the override year. With
-// keep_time (HORAE mode) only the DATE position moves — the wheel still
-// glides smoothly, but the clock reading stays put: scrubbing changes
-// the day, never the hour.
+// hours scroll continuously), ROLLING ACROSS YEAR BOUNDARIES: passing
+// New Year's Eve lands in the next year, not back at this January.
+// (The old fmod-within-the-year wrap jumped 365 days = 52 weeks + 1,
+// slipping the weekday lattice a day per lap — weekdays are locked to
+// the calendar, so the year must carry.) With keep_time (HORAE mode)
+// only the DATE position moves — the wheel still glides smoothly, but
+// the clock reading stays put: scrubbing changes the day, never the
+// hour.
 static inline void scene__advance_override_days(Tempus *t, double dv,
                                                 bool keep_time) {
     double diy = (double)cal_days_in_year(t->override_year);
-    if (keep_time) {
-        double v = t->override_year_pct * diy + dv;
-        v = fmod(v, diy);
-        if (v < 0) v += diy;
-        t->override_year_pct = v / diy;
-    } else {
-        double v = floor(t->override_year_pct * diy)
-                 + t->override_day_pct + dv;
-        v = fmod(v, diy);
-        if (v < 0) v += diy;
-        t->override_year_pct = v / diy;
-        t->override_day_pct = v - floor(v);
+    double v = keep_time
+             ? t->override_year_pct * diy + dv
+             : floor(t->override_year_pct * diy)
+               + t->override_day_pct + dv;
+    while (v >= diy) {
+        v -= diy;
+        t->override_year++;
+        diy = (double)cal_days_in_year(t->override_year);
     }
+    while (v < 0) {
+        t->override_year--;
+        diy = (double)cal_days_in_year(t->override_year);
+        v += diy;
+    }
+    t->override_year_pct = v / diy;
+    if (!keep_time)
+        t->override_day_pct = v - floor(v);
     t->solar_dirty = true;
 }
 
@@ -402,13 +410,20 @@ static inline void scene__advance_override_weeks(CalendarViewState *c,
 }
 
 // Set the override date from a wheel angle (pct 0 = yule at screen-top),
-// preserving the time of day — shared by the sun-bead and earth drags
+// preserving the time of day — shared by the sun-bead and earth drags.
+// Crossing the top of the wheel rolls the YEAR (drags are continuous,
+// so a half-turn jump in pct can only mean the yule seam) — a full
+// orbit of the earth is a year of calendar, weekdays intact.
 static inline void scene__set_year_from_wheel_pct(Tempus *t, double pct_yule) {
     double doy = pct_yule * t->total_days
                - (t->jd_months[0] - t->jd_newyear);
     double diy = (double)cal_days_in_year(t->override_year);
     double pct_cal = doy / diy;
     pct_cal -= floor(pct_cal);
+    if (pct_cal - t->override_year_pct > 0.5)
+        t->override_year--;
+    else if (t->override_year_pct - pct_cal > 0.5)
+        t->override_year++;
     t->override_year_pct = pct_cal;
     t->solar_dirty = true;
 }
