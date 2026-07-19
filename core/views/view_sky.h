@@ -40,6 +40,10 @@ struct SkyViewState {
     bool  hour_dragging;
     float last_wx, last_wy;
 
+    // The dome's vertex colors, computed by true single-scattering in
+    // update (minute-gated): zenith vertex + 6 rings x 65 sectors
+    float dome[1 + 6 * 65][3];
+
     // Luminary chart targets, published for the orrery's composition:
     // the sun and moon are SINGLE objects — the orrery composes their
     // parameters across every station (this chart included, using
@@ -131,6 +135,104 @@ static const char *sky__body_name[BODY_COUNT] = {
     "URANUS", "NEPTUNE", "PLUTO",
 };
 
+// Dome sampling grid (shared by the update-side scattering pass and
+// the render-side mesh)
+#define SKY_DOME_SEC 64
+static const float sky__dome_alts[6] = { 68.0f, 47.0f, 29.0f, 14.0f,
+                                         5.0f, 0.0f };
+
+// Ray-sphere intersection (origin-centered sphere)
+static inline bool sky__rsi(const float ro[3], const float rd[3],
+                            float sr, float *t0, float *t1) {
+    float b = ro[0]*rd[0] + ro[1]*rd[1] + ro[2]*rd[2];
+    float c = ro[0]*ro[0] + ro[1]*ro[1] + ro[2]*ro[2] - sr*sr;
+    float h = b*b - c;
+    if (h < 0.0f) return false;
+    h = sqrtf(h);
+    *t0 = -b - h;
+    *t1 = -b + h;
+    return true;
+}
+
+// Single-scattering atmosphere (the classic Nishita-style raymarch):
+// Rayleigh + Mie along the view ray, with a secondary march toward
+// the sun for attenuation. Physically-derived sunrise and sunset —
+// the reds are real optical depth, not palette.
+static void sky__atmo(const float rd[3], const float sd[3],
+                      float out[3]) {
+    const float Re = 6371e3f, Ra = 6471e3f;
+    const float kR[3] = { 5.5e-6f, 13.0e-6f, 22.4e-6f };
+    const float kM = 21e-6f;
+    const float shR = 8000.0f, shM = 1200.0f;
+    const float g = 0.758f;
+    const float iSun = 22.0f;
+    const int ISTEPS = 12, JSTEPS = 6;
+
+    float ro[3] = { 0.0f, Re + 1200.0f, 0.0f };
+    float t0, t1;
+    out[0] = out[1] = out[2] = 0.0f;
+    if (!sky__rsi(ro, rd, Ra, &t0, &t1) || t1 < 0.0f) return;
+    float tA = t0 > 0.0f ? t0 : 0.0f;
+    float ds = (t1 - tA) / ISTEPS;
+    float tI = tA;
+
+    float mu = rd[0]*sd[0] + rd[1]*sd[1] + rd[2]*sd[2];
+    float mumu = mu * mu, gg = g * g;
+    float pR = 3.0f / (16.0f * (float)M_PI) * (1.0f + mumu);
+    float pM = 3.0f / (8.0f * (float)M_PI)
+             * ((1.0f - gg) * (1.0f + mumu))
+             / ((2.0f + gg) * powf(1.0f + gg - 2.0f * g * mu, 1.5f));
+
+    float totR[3] = { 0, 0, 0 }, totM[3] = { 0, 0, 0 };
+    float iOdR = 0.0f, iOdM = 0.0f;
+    for (int i = 0; i < ISTEPS; i++) {
+        float px = ro[0] + rd[0] * (tI + ds * 0.5f);
+        float py = ro[1] + rd[1] * (tI + ds * 0.5f);
+        float pz = ro[2] + rd[2] * (tI + ds * 0.5f);
+        float h = sqrtf(px*px + py*py + pz*pz) - Re;
+        float odR = expf(-h / shR) * ds;
+        float odM = expf(-h / shM) * ds;
+        iOdR += odR;
+        iOdM += odM;
+
+        float pp[3] = { px, py, pz };
+        float jt0, jt1;
+        sky__rsi(pp, sd, Ra, &jt0, &jt1);
+        float jds = jt1 / JSTEPS;
+        float jt = 0.0f;
+        float jOdR = 0.0f, jOdM = 0.0f;
+        for (int j = 0; j < JSTEPS; j++) {
+            float qx = px + sd[0] * (jt + jds * 0.5f);
+            float qy = py + sd[1] * (jt + jds * 0.5f);
+            float qz = pz + sd[2] * (jt + jds * 0.5f);
+            float jh = sqrtf(qx*qx + qy*qy + qz*qz) - Re;
+            jOdR += expf(-jh / shR) * jds;
+            jOdM += expf(-jh / shM) * jds;
+            jt += jds;
+        }
+        for (int cch = 0; cch < 3; cch++) {
+            float attn = expf(-(kM * (iOdM + jOdM)
+                                + kR[cch] * (iOdR + jOdR)));
+            totR[cch] += odR * attn;
+            totM[cch] += odM * attn;
+        }
+        tI += ds;
+    }
+    for (int cch = 0; cch < 3; cch++)
+        out[cch] = iSun * (pR * kR[cch] * totR[cch]
+                           + pM * kM * totM[cch]);
+}
+
+// az/alt (degrees) to the scattering frame's unit vector (y up)
+static inline void sky__atmo_dir(float az_deg, float alt_deg,
+                                 float v[3]) {
+    float a = az_deg * (float)M_PI / 180.0f;
+    float l = alt_deg * (float)M_PI / 180.0f;
+    v[0] = sinf(a) * cosf(l);
+    v[1] = sinf(l);
+    v[2] = cosf(a) * cosf(l);
+}
+
 static void sky_init(void *buf, const Tempus *t, const RenderStyle *s) {
     SkyViewState *st = (SkyViewState *)buf;
     st->opacity = 1.0;
@@ -185,6 +287,37 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
             planets_sky_azalt(blon, blat, jd, lat, lon, &az, &alt);
             st->path[b][i][0] = (float)az;
             st->path[b][i][1] = (float)alt;
+        }
+    }
+
+    // The dome: true scattering per vertex, cached on the minute.
+    // Night floor = the instrument's night tint, so the chart never
+    // goes pit-black under the stars.
+    {
+        float sd[3];
+        sky__atmo_dir(st->body_az[BODY_SUN], st->body_alt[BODY_SUN],
+                      sd);
+        for (int vi2 = 0; vi2 < 1 + 6 * (SKY_DOME_SEC + 1); vi2++) {
+            float az, altv;
+            if (vi2 == 0) {
+                az = 0.0f;
+                altv = 90.0f;
+            } else {
+                int ri = (vi2 - 1) / (SKY_DOME_SEC + 1);
+                int si = (vi2 - 1) % (SKY_DOME_SEC + 1);
+                az = (float)si / SKY_DOME_SEC * 360.0f;
+                altv = sky__dome_alts[ri];
+            }
+            float rd[3], col[3];
+            sky__atmo_dir(az, altv, rd);
+            sky__atmo(rd, sd, col);
+            for (int cch = 0; cch < 3; cch++) {
+                float c = 1.0f - expf(-col[cch]);
+                float base = cch == 0 ? 0.020f
+                           : cch == 1 ? 0.022f : 0.035f;
+                float v = base + c * 0.78f;
+                st->dome[vi2][cch] = v > 1.0f ? 1.0f : v;
+            }
         }
     }
 
@@ -271,54 +404,30 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         s->calendar_base_radius, st->orr ? st->orr->sys : 1.0,
         st->blend);
 
-    // ---- The bowl: a DIMENSIONAL sky at the rendering instant ----
-    // HORAE's Rayleigh machinery, but sampled per point of the dome:
-    // each vertex of the disc reads the gradient at an EFFECTIVE
-    // altitude — the sun's true altitude, biased up toward the sun's
-    // place in the sky and down away from it and toward the zenith.
-    // At sunset the sunward horizon burns gold while the antisolar
-    // sky is already blue hour; at noon the azure pales toward the
-    // horizon and deepens overhead; at night the whole dome settles.
-    // A realistic sunrise, from the same calibrated keyframes.
+    // ---- The bowl: the true sky at the rendering instant ----
+    // Single-scattering atmosphere, evaluated per dome vertex in
+    // update (minute-cached): real Rayleigh blues, real Mie-forward
+    // sunset fire climbing from wherever the sun actually stands.
     {
         float R_live = bez_R + (SKY_HOR - bez_R) * mb;
-        float sv[3];
-        sky__vec(st->body_az[BODY_SUN], st->body_alt[BODY_SUN], sv);
-        float salt = st->body_alt[BODY_SUN];
-
         d->alpha = base_alpha * mb;
         // Under the earth: the whole chart, a dark warm ground
         draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
         draw_circle_filled(d, 0, 0, SKY_R);
 
-        // The dome mesh: rings of altitude, sectors of azimuth
-        static const float ALTS[6] = { 68.0f, 47.0f, 29.0f, 14.0f,
-                                       5.0f, 0.0f };
-        enum { SEC = 64 };
+        enum { SEC = SKY_DOME_SEC };
         int prev[SEC + 1], curv[SEC + 1];
-        // Center vertex: the zenith
-        {
-            float eff = salt + 10.0f * sv[2] - 4.0f;
-            DrawColor cc = dc_scale(horae__sky(eff), 0.62f);
-            cc.a = 1.0f;
-            draw_set_color(d, cc);
-        }
+        draw_set_color(d, dca(st->dome[0][0], st->dome[0][1],
+                              st->dome[0][2], 1.0f));
         int cvi = draw__push_vert(d, 0, 0, d->white_u, d->white_v);
         for (int ri = 0; ri < 6; ri++) {
-            float alt = ALTS[ri];
+            float alt = sky__dome_alts[ri];
             float rr = (90.0f - alt) / 90.0f * R_live;
             for (int si = 0; si <= SEC; si++) {
-                float az = (float)si / SEC * 360.0f;
-                float pv[3];
-                sky__vec(az, alt, pv);
-                float sdot = pv[0] * sv[0] + pv[1] * sv[1]
-                           + pv[2] * sv[2];
-                float eff = salt + 10.0f * sdot
-                          - 4.0f * (alt / 90.0f);
-                DrawColor cc = dc_scale(horae__sky(eff), 0.62f);
-                cc.a = 1.0f;
-                draw_set_color(d, cc);
-                float a = az * (float)M_PI / 180.0f;
+                const float *dc2 =
+                    st->dome[1 + ri * (SEC + 1) + si];
+                draw_set_color(d, dca(dc2[0], dc2[1], dc2[2], 1.0f));
+                float a = (float)si / SEC * 2.0f * (float)M_PI;
                 int vi = draw__push_vert(d, -sinf(a) * rr,
                                          -cosf(a) * rr,
                                          d->white_u, d->white_v);
