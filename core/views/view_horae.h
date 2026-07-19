@@ -619,39 +619,32 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
     }
 
     // ---- The reading, written outside the ring at the contact ----
-    // The hand points through the mesh to the ruling planet; the words
-    // follow the touch around the dial.
+    // Just the DAY, in full classical dress — DIES LVNAE — steady for
+    // a whole revolution of the inner dial. (The hour-ruler genitive
+    // and HORA line flickered through their changes at every scrub;
+    // the pinion's sigil and the gold tooth already carry the hour.)
     {
         const uint8_t *c = horae__metal_col[ridx];
         float na = fmodf(ah, 2.0f * (float)M_PI);
         if (na < 0) na += 2.0f * (float)M_PI;
         bool lflip = (na > (float)M_PI * 0.5f && na < (float)M_PI * 1.5f);
 
-        // Planet name on its own arc, waist-centered
+        char db[24];
+        snprintf(db, sizeof(db), "DIES %s", horae__dies[w]);
         float nsz = _font_compat[FONT_month].size;
         float rn = 346.0f - nsz * 0.5f + nsz * (lflip ? 0.51f : 0.37f);
         draw_set_color(d, dca(0.80f, 0.77f, 0.70f, 0.95f));
-        draw_text_curved(d, FONT_month, 0, 0, rn, ah,
-                         horae__genitive[ridx], 1.2f, 1.0f);
+        draw_text_curved(d, FONT_month, 0, 0, rn, ah, db, 1.2f, 1.0f);
 
         // The ruler's pip sits directly ON the week ring's outer rim
         // at the contact, a bead threaded on the line — hand, pip,
-        // name, hour: one radial procession
+        // day: one radial procession
         {
             float pr = HORAE_RING_OUT - HORAE_ECC;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, 0.95f));
             draw_circle_filled(d, hdx * pr, hdy * pr, 6.5f);
         }
-
-        // The hour line on the arc beyond
-        char hb[28];
-        snprintf(hb, sizeof(hb), "HORA %s %s", horae__roman[hcur % 12],
-                 hcur < 12 ? "DIEI" : "NOCTIS");
-        float isz = _font_compat[FONT_date].size * 0.9f;
-        float ri = 386.0f - isz * 0.5f + isz * (lflip ? 0.51f : 0.37f);
-        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.60f));
-        draw_text_curved(d, FONT_date, 0, 0, ri, ah, hb, 0.8f, 0.9f);
     }
 
     d->alpha = base_alpha;
