@@ -20,3 +20,4 @@ tools/test_planets
 # OS junk
 .DS_Store
 *.o
+flightmatrix/
