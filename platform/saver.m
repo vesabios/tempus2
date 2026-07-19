@@ -84,10 +84,18 @@ static const int g_tour[] = {
 };
 #define TOUR_N ((int)(sizeof(g_tour) / sizeof(g_tour[0])))
 
+// macOS builds a SECOND view for the full-size preview (and one per
+// display when it runs for real). The instrument — core, scene, and
+// the whole GPU layer — is process-global, so it boots exactly once
+// and lives on ONE context; whichever view is animating owns the
+// drawable. Booting per-view called sg_setup twice and drew nothing.
+static NSOpenGLContext *g_ctx = nil;
+static double g_clock = 0;      // the instrument's own elapsed seconds
+static BOOL g_booted = NO;
+static __weak id g_activeView = nil;
+
 @interface TempusSaverView : ScreenSaverView {
-    NSOpenGLContext *_glctx;
-    BOOL   _ready;
-    double _clock;         // seconds since the saver woke
+    BOOL   _unused;
     double _last;
     int    _tourIdx;
     double _tourTimer;
@@ -111,7 +119,12 @@ static const int g_tour[] = {
     self = [super initWithFrame:frame isPreview:isPreview];
     if (!self) return nil;
     [self setAnimationTimeInterval:1.0 / 60.0];
+    [self setWantsBestResolutionOpenGLSurface:YES];
+    return self;
+}
 
+- (void)ensureContext {
+    if (g_ctx) return;
     NSOpenGLPixelFormatAttribute attrs[] = {
         NSOpenGLPFAAccelerated,
         NSOpenGLPFADoubleBuffer,
@@ -123,9 +136,20 @@ static const int g_tour[] = {
     };
     NSOpenGLPixelFormat *pf =
         [[NSOpenGLPixelFormat alloc] initWithAttributes:attrs];
-    _glctx = [[NSOpenGLContext alloc] initWithFormat:pf shareContext:nil];
-    [self setWantsBestResolutionOpenGLSurface:YES];
-    return self;
+    g_ctx = [[NSOpenGLContext alloc] initWithFormat:pf shareContext:nil];
+    GLint swap = 1;
+    [g_ctx setValues:&swap
+        forParameter:NSOpenGLContextParameterSwapInterval];
+}
+
+// Take the drawable: the newest animating view wins it.
+- (void)claimContext {
+    [self ensureContext];
+    if ([g_ctx view] != self) {
+        [g_ctx clearDrawable];
+        [g_ctx setView:self];
+    }
+    [g_ctx update];
 }
 
 // The observer: the Options sheet's location, or Greenwich if unset.
@@ -148,12 +172,7 @@ static const int g_tour[] = {
 }
 
 - (void)bootIfNeeded {
-    if (_ready) return;
-    [_glctx setView:self];
-    [_glctx makeCurrentContext];
-    GLint swap = 1;
-    [_glctx setValues:&swap forParameter:NSOpenGLContextParameterSwapInterval];
-
+    if (g_booted) return;
     sg_setup(&(sg_desc){ .logger.func = slog_func });
 
     TempusConfig cfg = [self configFromDefaults];
@@ -198,15 +217,29 @@ static const int g_tour[] = {
 
     saver_set_station(&g_scene, g_tour[0], 0.0);
     _tourIdx = 0;
-    _ready = YES;
+    g_booted = YES;
 }
 
-- (void)startAnimation { [super startAnimation]; _last = 0; _clock = 0; }
-- (void)stopAnimation  { [super stopAnimation]; }
+- (void)startAnimation {
+    [super startAnimation];
+    g_activeView = self;
+    [self claimContext];
+    _last = 0;
+}
+
+- (void)stopAnimation {
+    [super stopAnimation];
+    if (g_activeView == self) g_activeView = nil;
+}
 
 - (void)animateOneFrame {
+    // Only the view that owns the drawable draws; the others would
+    // fight over it every frame
+    if (g_activeView && g_activeView != self) return;
+    if (!g_activeView) g_activeView = self;
+    [self claimContext];
+    [g_ctx makeCurrentContext];
     [self bootIfNeeded];
-    [_glctx makeCurrentContext];
 
     NSRect bounds = [self bounds];
     NSRect back = [self convertRectToBacking:bounds];
@@ -216,7 +249,7 @@ static const int g_tour[] = {
     double dt = _last > 0 ? now - _last : 1.0 / 60.0;
     if (dt > 0.5) dt = 0.5;
     _last = now;
-    _clock += dt;
+    g_clock += dt;
 
     // The tour: fly, dwell, fly on
     if (_tourOn) {
@@ -228,7 +261,7 @@ static const int g_tour[] = {
         }
     }
 
-    tempus_update(&g_tempus, _clock);
+    tempus_update(&g_tempus, g_clock);
     scene_update(&g_scene, &g_tempus, dt);
 
     draw_begin(&g_draw, w, h);
@@ -257,7 +290,7 @@ static const int g_tour[] = {
     sg_end_pass();
     sg_commit();
 
-    [_glctx flushBuffer];
+    [g_ctx flushBuffer];
 }
 
 - (void)drawRect:(NSRect)rect {
@@ -361,7 +394,7 @@ static const int g_tour[] = {
     [d setBool:([_tourCheck state] == NSControlStateValueOn) forKey:@"tour"];
     [d setDouble:[_dwellSlider doubleValue] forKey:@"dwell"];
     [d synchronize];
-    if (_ready) {
+    if (g_booted) {
         tempus_set_location(&g_tempus,
                             [_latField doubleValue], [_lonField doubleValue]);
         _tourOn = ([_tourCheck state] == NSControlStateValueOn);
