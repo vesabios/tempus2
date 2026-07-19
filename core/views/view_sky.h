@@ -219,7 +219,9 @@ static void sky_init(void *buf, const Tempus *t, const RenderStyle *s) {
     st->opacity = 1.0;
     st->cache_jd = -1.0e9;
     st->view_az = 0.0f;
-    st->view_alt = 90.0f;
+    st->view_alt = 45.0f;   // default LOOK: halfway to the north
+                            // horizon (Seren) — the sky as a scene,
+                            // not a map; drag restores the zenith
     (void)t; (void)s;
 }
 
