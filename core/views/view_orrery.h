@@ -64,6 +64,18 @@ struct OrreryViewState {
     double drab;        // mirrored scene draco_blend (DRACO handoff)
     double w_dial;      // station-weight sum of the dial family
     double w_globe;     // station-weight sum of the globe family
+
+    // Stage 3: the planets' composed member rows (PL_* index; Earth
+    // unused), published for VIEW_LVMEN — the body renderer — and
+    // for the sky's name labels. pl_mx/my is the LIVE machine ring
+    // seat, stashed by the machine layout each frame it runs.
+    float pl_mx[PL_COUNT], pl_my[PL_COUNT];
+    float pl_cx[PL_COUNT], pl_cy[PL_COUNT];   // composed position
+    float pl_cr[PL_COUNT];                    // composed radius
+    float pl_ca[PL_COUNT];                    // composed alpha
+    float pl_col[PL_COUNT][4];                // composed rgba
+    float pl_ring_a[PL_COUNT];                // Saturn's machine ring
+    uint8_t pl_stroke[PL_COUNT];              // chart: stroked ring
     bool  dragging;
     bool  drag_earth;       // system view: dragging Earth around its orbit
 
@@ -568,6 +580,12 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
         ppx[PL_EARTH] = ex;
         ppy[PL_EARTH] = ey;
+        {
+            // Stash the LIVE machine seats for the member-row compose
+            OrreryViewState *wpl = (OrreryViewState *)(uintptr_t)buf;
+            memcpy(wpl->pl_mx, ppx, sizeof(ppx));
+            memcpy(wpl->pl_my, ppy, sizeof(ppy));
+        }
 
         // Geocentric markers: where each body APPEARS in the zodiac. The
         // dial is a true longitude scale around the sun, so aspect chords
@@ -835,19 +853,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         if (a_planet > 0.001f && (!sky_owns || a_name > 0.001f)) {
             for (int p = 0; p < PL_COUNT; p++) {
                 if (p == PL_EARTH) continue;
-                if (!sky_owns) {
-                d->alpha = base_alpha * a_planet;
-                draw_set_color(d, dc_u8(orr__planet[p].r, orr__planet[p].g,
-                                        orr__planet[p].b));
-                draw_circle_filled(d, ppx[p], ppy[p], orr__planet[p].size);
-                if (p == PL_SATURN) {
-                    draw_set_color(d, dca(orr__planet[p].r / 255.0f,
-                                          orr__planet[p].g / 255.0f,
-                                          orr__planet[p].b / 255.0f, 0.45f));
-                    draw_circle_stroked(d, ppx[p], ppy[p],
-                                        orr__planet[p].size * 1.75f, 1.0f);
-                }
-                }
+                // Beads themselves are VIEW_LVMEN's now (Stage 3) —
+                // this view only engraves the ring names.
                 if (a_name < 0.001f) continue;
                 float orbr = orr__orbit_r(p, wheel_R);
                 float th = (float)((0.75 + pn->helio_lon[p] / 360.0)
@@ -1096,6 +1103,63 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 draw_line(d, ox[k], oy[k], ox[k + 1], oy[k + 1], 1.0f);
             }
             d->alpha = base_alpha;
+        }
+    }
+
+    // ---- Stage 3: the planets' member rows -> VIEW_LVMEN ----
+    // One renderer for all nine bodies. Machine side: the live ring
+    // seats with the machine's own stagger (VIEW_LVMEN's opacity
+    // supplies the view fade — the beads dim exactly as the old
+    // in-pass draw did). Chart side: the sky's published members on
+    // the mover's parity weights (docs/TRANSITIONS.md): position
+    // pw = sys*(1-skw), alpha ba*(sys + (1-sys)*fin) — born in place
+    // when the machine has no system stage to fly from.
+    {
+        OrreryViewState *wpl = (OrreryViewState *)(uintptr_t)buf;
+        const PlanetsNow *pn3 = &st->planets;
+        bool chart3 = st->skyv && skw > 0.001f;
+        float fin3 = (float)tempus_smoothstep(0.10, 0.75, skw);
+        float a_pl3 = (float)tempus_smoothstep(0.20, 0.60, ss);
+        float wheel_Rc = s->calendar_base_radius
+                       * (float)tempus_wheel_scale(1.0);
+        for (int p = 0; p < PL_COUNT; p++) {
+            wpl->pl_ring_a[p] = 0;
+            wpl->pl_stroke[p] = 0;
+            if (p == PL_EARTH) { wpl->pl_ca[p] = 0; continue; }
+            wpl->pl_col[p][0] = orr__planet[p].r / 255.0f;
+            wpl->pl_col[p][1] = orr__planet[p].g / 255.0f;
+            wpl->pl_col[p][2] = orr__planet[p].b / 255.0f;
+            if (!chart3) {
+                wpl->pl_cx[p] = wpl->pl_mx[p];
+                wpl->pl_cy[p] = wpl->pl_my[p];
+                wpl->pl_cr[p] = orr__planet[p].size;
+                // The machine's own view fade rides IN the row (the
+                // renderer draws at absolute alpha): a DRACO flight
+                // holds VIEW_LVMEN's opacity high for the luminaries,
+                // and the beads must not borrow that strength.
+                wpl->pl_ca[p] = base_alpha * a_pl3;
+                wpl->pl_col[p][3] = 1.0f;
+                if (p == PL_SATURN)
+                    wpl->pl_ring_a[p] = wpl->pl_ca[p];
+            } else {
+                const SkyViewState *sv = st->skyv;
+                int b = (p < PL_EARTH) ? BODY_MERCURY + p
+                                       : BODY_MERCURY + p - 1;
+                float dx3, dy3;
+                orr__ecl_dir(pn3->helio_lon[p], &dx3, &dy3);
+                float orbr3 = orr__orbit_r(p, wheel_Rc);
+                float pw3 = ss * (1.0f - skw);
+                wpl->pl_cx[p] = dx3 * orbr3 * pw3
+                              + sv->pl_x[b] * (1.0f - pw3);
+                wpl->pl_cy[p] = dy3 * orbr3 * pw3
+                              + sv->pl_y[b] * (1.0f - pw3);
+                wpl->pl_cr[p] = orr__planet[p].size * pw3
+                              + sv->pl_r[b] * (1.0f - pw3);
+                wpl->pl_ca[p] = sv->pl_ba[b]
+                              * (ss + (1.0f - ss) * fin3);
+                wpl->pl_col[p][3] = 0.95f;
+                wpl->pl_stroke[p] = sv->pl_stroke[b];
+            }
         }
     }
 

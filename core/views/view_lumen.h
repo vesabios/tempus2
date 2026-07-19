@@ -54,6 +54,35 @@ static void lumen_render(const void *buf, DrawCtx *d, const Tempus *t,
     (void)t; (void)s;
     if (!o) return;
 
+    // ---- The planets (Stage 3: one renderer for every body) ----
+    // Composed member rows from the orrery — machine ring seat x sky
+    // chart target. Drawn under the luminaries, above every surface.
+    // Rows carry their ABSOLUTE alpha (each side's own fade law is
+    // composed in) — this view's opacity is the luminaries' law, not
+    // the planets'.
+    for (int p = 0; p < PL_COUNT; p++) {
+        if (o->pl_ca[p] <= 0.003f) continue;
+        d->alpha = o->pl_ca[p];
+        draw_set_color(d, dca(o->pl_col[p][0], o->pl_col[p][1],
+                              o->pl_col[p][2], o->pl_col[p][3]));
+        if (o->pl_stroke[p])
+            draw_circle_stroked(d, o->pl_cx[p], o->pl_cy[p],
+                                o->pl_cr[p], 1.2f);
+        else
+            draw_circle_filled(d, o->pl_cx[p], o->pl_cy[p],
+                               o->pl_cr[p]);
+        // Saturn's engraved ring is machine regalia — it rides the
+        // machine side of the row and dissolves toward the chart
+        if (o->pl_ring_a[p] > 0.003f) {
+            d->alpha = o->pl_ring_a[p];
+            draw_set_color(d, dca(o->pl_col[p][0], o->pl_col[p][1],
+                                  o->pl_col[p][2], 0.45f));
+            draw_circle_stroked(d, o->pl_cx[p], o->pl_cy[p],
+                                o->pl_cr[p] * 1.75f, 1.0f);
+        }
+    }
+    d->alpha = base_alpha;
+
     // ---- The sun ----
     {
         float px = o->lum_sun_x, py = o->lum_sun_y;

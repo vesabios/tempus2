@@ -66,6 +66,13 @@ struct SkyViewState {
     // station the machine is at or between
     const OrreryViewState *orr;
 
+    // Stage 3: published chart members for the planets (BODY_*
+    // index; sun/moon slots unused — they are VIEW_LVMEN's already).
+    // The orrery composes member rows from these; LVMEN renders.
+    float pl_x[BODY_COUNT], pl_y[BODY_COUNT], pl_r[BODY_COUNT];
+    float pl_ba[BODY_COUNT];        // subdued-below-horizon policy
+    uint8_t pl_stroke[BODY_COUNT];  // not observable: stroked ring
+
     // Everything projected, refreshed when the clock minute moves
     float body_az[BODY_COUNT], body_alt[BODY_COUNT];
     float path[BODY_COUNT][SKY_PATH_N][2];   // az, alt over +/-12h
@@ -244,6 +251,17 @@ static void sky__lum_targets(SkyViewState *st) {
     st->lum_moon_light[0] = ux * sinf(bb);
     st->lum_moon_light[1] = uy * sinf(bb);
     st->lum_moon_light[2] = -cosf(bb);
+
+    // The planets' chart members, published on the same terms
+    for (int b = BODY_MERCURY; b < BODY_COUNT; b++) {
+        float bx, by;
+        sky__project(st->body_az[b], st->body_alt[b], &bx, &by);
+        st->pl_x[b] = bx;
+        st->pl_y[b] = by;
+        st->pl_r[b] = orr__pip_r(st->now.mag[b]);
+        st->pl_ba[b] = st->body_alt[b] > 0.0f ? 1.0f : 0.78f;
+        st->pl_stroke[b] = !st->sky.observable[b];
+    }
 }
 
 static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
@@ -594,126 +612,16 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // your sky; anything below the horizon exits through the rim and
     // fades — which is what setting is.
     for (int b = BODY_COUNT - 1; b >= 0; b--) {
-        // The sun and moon are VIEW_LVMEN's: single objects composed
-        // by the orrery across every station, drawn once above both
-        // machine and sky. This chart never draws its own copies.
+        // The beads are VIEW_LVMEN's now (Stage 3): every body is
+        // composed by the orrery from these published chart members
+        // and drawn once by the body renderer. This chart keeps only
+        // its NAME labels, set at the composed (live) positions.
         if (b == BODY_SUN || b == BODY_MOON) continue;
-        float sx, sy;
-        sky__project_clamped(st->body_az[b], st->body_alt[b], &sx, &sy);
-
-        // Machine endpoint + size. Sun and moon come from the orrery's
-        // LIVE published positions — the mover starts from wherever the
-        // machine actually draws them, so direct flights from ANY
-        // station (TELLVS included) are continuous without routing
-        // through MACHINA first.
-        float rx = 0, ry = 0, rsz;
-        if (b == BODY_SUN) {
-            rx = st->orr ? st->orr->bead_x : 0;
-            ry = st->orr ? st->orr->bead_y : 0;
-            rsz = st->orr ? st->orr->bead_r : 22.0f * 1.45f;
-        } else if (b == BODY_MOON) {
-            rx = st->orr ? st->orr->moon_x : 0;
-            ry = st->orr ? st->orr->moon_y : 0;
-            rsz = st->orr ? st->orr->moon_r : 9.9f;
-        } else {
-            int pl = planets_body_pl(b);
-            float gx, gy;
-            orr__ecl_dir(st->now.helio_lon[pl], &gx, &gy);
-            float orbr = orr__orbit_r(pl, wheel_R);
-            rx = gx * orbr;
-            ry = gy * orbr;
-            rsz = orr__planet[pl].size;
-        }
-
-        bool handoff = (b == BODY_SUN || b == BODY_MOON);
-        float pw = handoff ? (1 - mb) : mw;
-        float x = rx * pw + sx * (1 - pw);
-        float y = ry * pw + sy * (1 - pw);
-        // Below the horizon is a place on this chart, not an exit:
-        // bodies in the unseen sky just read slightly subdued
-        float ba = st->body_alt[b] > 0.0f ? 1.0f : 0.78f;
-        if (b == BODY_SUN || b == BODY_MOON)
-            ba = 1.0f + (ba - 1.0f) * mb;   // full strength at the
-                                            // machine seam — the owner
-                                            // hands off at full alpha
-        if (!handoff)
-            ba *= ms + (1.0f - ms) * fin;   // born in place, fading in
-        float pr = rsz * pw + orr__pip_r(st->now.mag[b]) * (1 - pw);
-
-        if (b == BODY_MOON) {
-            // The moon as a phase-lit globe, its bright limb aimed at
-            // the sun's place in (or under) the sky
-            d->alpha = base_alpha * ba;
-            GlobeCmd *gm = draw_globe_slot(d, x, y,
-                rsz * pw + (orr__pip_r(st->now.mag[b]) + 12.0f) * (1 - pw));
-            d->alpha = base_alpha;
-            if (gm) {
-                double phb = globe_moon_phase(st->cache_jd);
-                float bb = (float)(phb * 2.0 * M_PI);
-                float ssx, ssy;
-                sky__project(st->body_az[BODY_SUN],
-                             st->body_alt[BODY_SUN], &ssx, &ssy);
-                float ux = ssx - x, uy = ssy - y;
-                float un = sqrtf(ux * ux + uy * uy);
-                if (un > 1e-4f) { ux /= un; uy /= un; }
-                globe_rotation(0, 0, gm->rot);
-                gm->light[0] = ux * sinf(bb);
-                gm->light[1] = uy * sinf(bb);
-                gm->light[2] = -cosf(bb);
-                gm->land = true;
-                gm->tex_id = 1;
-                gm->grid_boost = 0.0f;
-                gm->obs_lat = 999.0f;
-                gm->day_col[0] = 0.58f; gm->day_col[1] = 0.55f;
-                gm->day_col[2] = 0.49f; gm->day_col[3] = 1.0f;
-                gm->night_col[0] = 0.10f; gm->night_col[1] = 0.105f;
-                gm->night_col[2] = 0.23f; gm->night_col[3] = 1.0f;
-            }
-            continue;
-        }
-
-        d->alpha = base_alpha * ba;
-        draw_set_color(d, dca(sky__body_col[b][0] / 255.0f,
-                              sky__body_col[b][1] / 255.0f,
-                              sky__body_col[b][2] / 255.0f, 0.95f));
-        if (st->sky.observable[b] || b == BODY_SUN)
-            draw_circle_filled(d, x, y, pr);
-        else
-            draw_circle_stroked(d, x, y, pr, 1.2f);
-
-        // The same sun that anchored MACHINA: its corona and rays ride
-        // along, dissolving as it becomes a body in the sky. Their
-        // strength tracks the LIVE machine (system stage): flying to a
-        // station whose sun wears no regalia, the rays dissolve with
-        // the flight and the handoff matches exactly.
-        float sun_ray_w = st->orr ? (float)st->orr->sys : 1.0f;
-        if (b == BODY_SUN && mb < 0.999f && sun_ray_w > 0.001f) {
-            float ra2 = (1.0f - mb) * sun_ray_w;
-            d->alpha = base_alpha * ra2;
-            draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
-            draw_circle_stroked(d, x, y, pr * 28.0f / 22.0f, 1.0f);
-            draw_set_color(d, dca(0.72f, 0.46f, 0.08f, 0.75f));
-            for (int i = 0; i < 12; i++) {
-                float a = (float)i / 12.0f * 2.0f * (float)M_PI;
-                float ux = sinf(a), uy = -cosf(a);
-                float qx = cosf(a), qy = sinf(a);
-                float rb = pr * 1.32f;
-                float rt = pr * ((i & 1) ? 1.52f : 1.78f);
-                float half = pr * 0.13f;
-                int vb = d->num_verts;
-                draw__push_vert(d, x + ux * rt, y + uy * rt,
-                                d->white_u, d->white_v);
-                draw__push_vert(d, x + ux * rb - qx * half,
-                                y + uy * rb - qy * half,
-                                d->white_u, d->white_v);
-                draw__push_vert(d, x + ux * rb + qx * half,
-                                y + uy * rb + qy * half,
-                                d->white_u, d->white_v);
-                draw__tri(d, vb, vb + 1, vb + 2);
-            }
-            d->alpha = base_alpha;
-        }
-
+        int pl = planets_body_pl(b);
+        if (pl < 0 || !st->orr) continue;
+        float x = st->orr->pl_cx[pl], y = st->orr->pl_cy[pl];
+        float pr = st->orr->pl_cr[pl];
+        float ba = st->orr->pl_ca[pl];
         if (sky__body_name[b] && fb > 0.01f) {
             int lw = _font_compat[FONT_date].weight;
             float lsz = 15.0f;
