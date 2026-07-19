@@ -467,67 +467,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         d->alpha = base_alpha;
     }
 
-    // ---- The zodiac dial bending into the ecliptic ----
-    // Matched point-by-point in ecliptic longitude: the ring's lambda
-    // position lerps to the sky's lambda position. Below-horizon
-    // stretches fade out as they arrive — half the zodiac is always
-    // under the earth, and now you can watch which half.
-    {
-        for (int i = 0; i < SKY_ECL_N; i++) {
-            int j = (i + 1) % SKY_ECL_N;
-            float l0 = i * 360.0f / SKY_ECL_N;
-            float l1 = j * 360.0f / SKY_ECL_N;
-            float rx0, ry0, rx1, ry1, sx0, sy0, sx1, sy1;
-            orr__ecl_dir(l0, &rx0, &ry0);
-            orr__ecl_dir(l1, &rx1, &ry1);
-            sky__project_clamped(st->ecl_az[i], st->ecl_alt[i], &sx0, &sy0);
-            sky__project_clamped(st->ecl_az[j], st->ecl_alt[j], &sx1, &sy1);
-            float x0 = rx0 * ORR_WEB_R * mw + sx0 * (1 - mw);
-            float y0 = ry0 * ORR_WEB_R * mw + sy0 * (1 - mw);
-            float x1 = rx1 * ORR_WEB_R * mw + sx1 * (1 - mw);
-            float y1 = ry1 * ORR_WEB_R * mw + sy1 * (1 - mw);
-            // The astrolabe's exact ring: same gold, same weight,
-            // same uniform ink above and below the horizon (Seren)
-            float a = (0.44f * mw + 1.0f * sw) * asup;
-            draw_set_color(d, dca(0.70f, 0.54f, 0.24f, 0.85f));
-            d->alpha = base_alpha * a * 0.50f;
-            draw_line(d, x0, y0, x1, y1, 1.0f + 0.3f * sw);
-        }
-        // Sign cusps ride the same lerp
-        for (int i = 0; i < 12; i++) {
-            float rx, ry, sx, sy;
-            orr__ecl_dir(i * 30.0f, &rx, &ry);
-            sky__project_clamped(st->sign_az[i], st->sign_alt[i], &sx, &sy);
-            float x = rx * ORR_WEB_R * mw + sx * (1 - mw);
-            float y = ry * ORR_WEB_R * mw + sy * (1 - mw);
-            // The X marks are the MACHINE's ring markers only — at
-            // rest the ring wears the sigils, as on the plate
-            float a = 0.30f * mw * asup;
-            if (a > 0.004f) {
-                d->alpha = base_alpha * a;
-                draw_set_color(d, dca(0.65f, 0.52f, 0.25f, 0.9f));
-                draw_line(d, x - 4.0f, y - 4.0f, x + 4.0f, y + 4.0f,
-                          1.0f);
-                draw_line(d, x - 4.0f, y + 4.0f, x + 4.0f, y - 4.0f,
-                          1.0f);
-            }
-        }
-        // The sigils, every 30 degrees at the sign middles — the
-        // astrolabe's exact dress, feet toward the chart's center
-        for (int i = 0; i < 12; i++) {
-            float x, y;
-            sky__project_clamped(st->sign_maz[i], st->sign_malt[i],
-                                 &x, &y);
-            float rn = sqrtf(x * x + y * y);
-            if (rn < 1.0f) continue;
-            float ux = x / rn, uy = y / rn;
-            d->alpha = base_alpha * 0.55f * sw * asup;
-            draw_set_color(d, dca(0.70f, 0.54f, 0.24f, 0.85f));
-            orr__zodiac_glyph(d, i, x + ux * 13.0f, y + uy * 13.0f,
-                              ux, uy, 13.0f);
-        }
-        d->alpha = base_alpha;
-    }
+    // (The ecliptic and its sigils are SHARED elements — the one
+    // drawer renders them from every station's published seats.)
 
     // ---- Orbit rings unfurling into diurnal arcs ----
     // Each body's ring is sampled as an arc of its orbit centered on

@@ -57,6 +57,11 @@ struct AstroViewState {
     float lum_moon_x, lum_moon_y, lum_moon_r;
     float lum_moon_light[3];
 
+    // The plate's ecliptic ring and sigil seats, published for the
+    // shared drawer (one ring, three seats, zero crossfade)
+    float ecl_x[SKY_ECL_N], ecl_y[SKY_ECL_N];
+    float sig_x[12], sig_y[12];
+
     // Planet chart targets (BODY_* index): the plate's stereographic
     // positions for the same az/alt CAELVM publishes policy for —
     // radius, subdual, and stroke are the SKY's (same sky, same
@@ -230,6 +235,29 @@ static void astro_update(void *buf, const Tempus *t, double dt, Scene *sc) {
 
     astro__horizon_circle(lat, &st->sky_hyc, &st->sky_hr);
 
+    // The ecliptic's plate seats, for the shared drawer
+    {
+        float eps2 = ASTRO_OBL * d2r;
+        for (int i = 0; i < SKY_ECL_N; i++) {
+            float laml = (float)i / SKY_ECL_N * 360.0f;
+            float lam2 = laml * d2r;
+            float dec2 = asinf(sinf(eps2) * sinf(lam2));
+            float ra2 = atan2f(cosf(eps2) * sinf(lam2),
+                               cosf(lam2)) / d2r;
+            astro__project(dec2 / d2r, lst - ra2,
+                           &st->ecl_x[i], &st->ecl_y[i]);
+        }
+        for (int i = 0; i < 12; i++) {
+            float laml = (float)i * 30.0f + 15.0f;
+            float lam2 = laml * d2r;
+            float dec2 = asinf(sinf(eps2) * sinf(lam2));
+            float ra2 = atan2f(cosf(eps2) * sinf(lam2),
+                               cosf(lam2)) / d2r;
+            astro__project(dec2 / d2r, lst - ra2,
+                           &st->sig_x[i], &st->sig_y[i]);
+        }
+    }
+
     double key = floor(jd_ut * 1440.0);
     if (key == st->sky_jd && lat == st->sky_lat) return;
     st->sky_jd = key;
@@ -371,66 +399,10 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
         // rides them along the rim between the stations.)
     }
 
-    // ---- The rete: the zodiac ring and the star pointers ----
-    // Hour angle LST - RA is the turning; no matrix anywhere. The
-    // ring wears its twelve sigils — it IS the wheel's zodiac, bent
-    // onto the sky and turning with it.
+    // ---- The rete: the star pointers ----
+    // (The ecliptic ring and its sigils are SHARED elements now —
+    // the one drawer renders them from published seats.)
     {
-        float eps = ASTRO_OBL * d2r;
-        draw_set_color(d, dca(0.70f, 0.54f, 0.24f, 0.85f));
-        float px = 0, py = 0;
-        bool pv = false;
-        for (int i = 0; i <= 180; i++) {
-            float laml = (float)i / 180.0f * 360.0f;
-            float lam = laml * d2r;
-            float dec = asinf(sinf(eps) * sinf(lam));
-            float ra = atan2f(cosf(eps) * sinf(lam), cosf(lam)) / d2r;
-            float x, y;
-            bool v = astro__project(dec / d2r, lst - ra, &x, &y);
-            if (v && wc > 0.0f) {
-                double saz, salt2;
-                planets_sky_azalt(laml, 0.0, jd_ut,
-                                  t->config.latitude,
-                                  t->config.longitude, &saz, &salt2);
-                float cx2, cy2;
-                sky__project((float)saz, (float)salt2, &cx2, &cy2);
-                x = x * (1.0f - wc) + cx2 * wc;
-                y = y * (1.0f - wc) + cy2 * wc;
-            }
-            if (v && pv) {
-                d->alpha = fam * 0.50f;
-                draw_line(d, px, py, x, y, 1.3f);
-            }
-            px = x; py = y; pv = v;
-        }
-        // The sigils, every 30 degrees of the ecliptic, turning with
-        // the rete; feet toward the plate center
-        for (int sign = 0; sign < 12; sign++) {
-            float lam = ((float)sign * 30.0f + 15.0f) * d2r;
-            float dec = asinf(sinf(eps) * sinf(lam));
-            float ra = atan2f(cosf(eps) * sinf(lam), cosf(lam)) / d2r;
-            float x, y;
-            if (!astro__project(dec / d2r, lst - ra, &x, &y)) continue;
-            if (wc > 0.0f) {
-                double saz, salt2;
-                planets_sky_azalt((float)sign * 30.0f + 15.0f, 0.0,
-                                  jd_ut, t->config.latitude,
-                                  t->config.longitude, &saz, &salt2);
-                float cx2, cy2;
-                sky__project((float)saz, (float)salt2, &cx2, &cy2);
-                x = x * (1.0f - wc) + cx2 * wc;
-                y = y * (1.0f - wc) + cy2 * wc;
-            }
-            if (x * x + y * y > ASTRO_R_CAP * ASTRO_R_CAP && wc < 0.5f)
-                continue;
-            float rn = sqrtf(x * x + y * y);
-            if (rn < 1) continue;
-            float ux = x / rn, uy = y / rn;
-            d->alpha = fam * 0.55f;
-            draw_set_color(d, dca(0.70f, 0.54f, 0.24f, 0.85f));
-            orr__zodiac_glyph(d, sign, x + ux * 13.0f, y + uy * 13.0f,
-                              ux, uy, 13.0f);
-        }
         // Star pointers: risen stars burn with their names; set stars
         // are ghosts — the plate always says WHICH sky you own now
         int fw = _font_compat[FONT_date].weight;
@@ -651,6 +623,59 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
         }
         memcpy(prev, curv, sizeof(prev));
     }
+    // ---- The ECLIPTIC: one ring, three seats, zero crossfade ----
+    // Machine zodiac ring x CAELVM's sky lie x the plate's ring, all
+    // blended per-vertex by the same weights every object rides.
+    if (sv) {
+        float chf = fam;
+        float mw3 = (float)st->sys * (1.0f - chf);
+        float a_line = chf * (0.44f * mw3 + 0.50f * (1.0f - mw3));
+        if (a_line > 0.004f) {
+            draw_set_color(d, dca(0.70f, 0.54f, 0.24f, 0.85f));
+            d->alpha = base_alpha * a_line;
+            float px = 0, py = 0;
+            for (int i = 0; i <= SKY_ECL_N; i++) {
+                int k = i % SKY_ECL_N;
+                float laml = (float)k / SKY_ECL_N * 360.0f;
+                float rx3, ry3;
+                orr__ecl_dir(laml, &rx3, &ry3);
+                float mx3 = rx3 * ORR_WEB_R, my3 = ry3 * ORR_WEB_R;
+                float cx3, cy3;
+                sky__project_clamped(sv->ecl_az[k], sv->ecl_alt[k],
+                                     &cx3, &cy3);
+                float chx = av->ecl_x[k] * (1.0f - wc) + cx3 * wc;
+                float chy = av->ecl_y[k] * (1.0f - wc) + cy3 * wc;
+                float x = mx3 * mw3 + chx * (1.0f - mw3);
+                float y = my3 * mw3 + chy * (1.0f - mw3);
+                if (i > 0)
+                    draw_line(d, px, py, x, y, 1.3f);
+                px = x; py = y;
+            }
+            // the sigils, feet toward the blended chart center
+            float a_sig = chf * (1.0f - mw3) * 0.55f;
+            if (a_sig > 0.004f) {
+                float cyb = av->sky_hyc * (1.0f - wc);
+                for (int i2 = 0; i2 < 12; i2++) {
+                    float cx3, cy3;
+                    sky__project_clamped(sv->sign_maz[i2],
+                                         sv->sign_malt[i2],
+                                         &cx3, &cy3);
+                    float x = av->sig_x[i2] * (1.0f - wc) + cx3 * wc;
+                    float y = av->sig_y[i2] * (1.0f - wc) + cy3 * wc;
+                    float dnx = x, dny = y - cyb;
+                    float dl = sqrtf(dnx * dnx + dny * dny);
+                    if (dl < 1.0f) continue;
+                    dnx /= dl; dny /= dl;
+                    d->alpha = base_alpha * a_sig;
+                    orr__zodiac_glyph(d, i2, x + dnx * 13.0f,
+                                      y + dny * 13.0f,
+                                      dnx, dny, 13.0f);
+                }
+            }
+        }
+        d->alpha = base_alpha;
+    }
+
     // The RIM: the circle strokes its own boundary — the hairline is
     // the mesh's edge, so it can never drift from it (Seren caught
     // the old station-owned rim shearing off during the blend)
