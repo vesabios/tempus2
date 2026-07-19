@@ -49,7 +49,7 @@
 static Tempus          g_tempus;
 static Scene           g_scene;
 static DrawCtx         g_draw;
-static bool            g_show_debug = true;
+static bool            g_show_debug = false;   // D toggles
 
 static sg_pipeline     g_pip;
 static sg_bindings     g_bind;
@@ -423,6 +423,21 @@ static void load_atlas(void) {
     });
 }
 
+// Letterspaced caps for chrome engravings (the logo's voice). Returns
+// advance. draw_text_ex has no tracking; per-glyph is cheap at chrome
+// sizes.
+static float chrome_text_tracked(DrawCtx *d, int weight, float size,
+                                 float x, float y, float track_em,
+                                 const char *s) {
+    char c[2] = { 0, 0 };
+    float cur = x;
+    for (; *s; s++) {
+        c[0] = *s;
+        cur += draw_text_ex(d, weight, size, cur, y, c) + track_em * size;
+    }
+    return cur - track_em * size - x;
+}
+
 // ---- Debug GUI ----
 
 static void debug_gui(void) {
@@ -678,6 +693,10 @@ static void init(void) {
         g_scene.helio_blend = 1.0;
         g_scene.system_blend = atof(sblend);
     }
+    const char *lkalt = getenv("TEMPUS_LOOKALT");   // dev: pin the look
+    if (lkalt) g_scene.sky_state.view_alt = (float)atof(lkalt);
+    const char *lkaz = getenv("TEMPUS_LOOKAZ");
+    if (lkaz) g_scene.sky_state.view_az = (float)atof(lkaz);
     const char *oblend = getenv("TEMPUS_ORBISBLEND");  // dev: pin closeup
     if (oblend) {
         g_worldview = WV_ORBIS;
@@ -986,6 +1005,100 @@ static void frame(void) {
                 g_wv_btn[i][3] = y + wv_sz + 6.0f;
                 y += 34.0f;
             }
+        }
+
+        // Civil-time readout, upper-left: the modern register in chrome
+        // space, opposite the annunciator. Location + GMT offset over
+        // the date and 12-hour time.
+        {
+            float half_w = (w / h) * 640.0f;
+            float x0 = -half_w + 42.0f;
+
+            // Nearest charted city to the configured home. Rescanned
+            // only when the location moves (ORBIS drags it live).
+            static double loc_la = 999.0, loc_lo = 999.0;
+            static const char *loc_city = NULL;
+            static double loc_km = 0.0;
+            if (g_tempus.config.latitude != loc_la ||
+                g_tempus.config.longitude != loc_lo) {
+                loc_la = g_tempus.config.latitude;
+                loc_lo = g_tempus.config.longitude;
+                double la = loc_la * M_PI / 180.0;
+                double lo = loc_lo * M_PI / 180.0;
+                double o0 = cos(la) * cos(lo), o1 = cos(la) * sin(lo);
+                double o2 = sin(la);
+                int best = 0;
+                double bd = -2.0;
+                for (int i = 0; i < CITY_NUM; i++) {
+                    double cla = city_pts[i].lat * 0.01 * M_PI / 180.0;
+                    double clo = city_pts[i].lon * 0.01 * M_PI / 180.0;
+                    double dd = cos(cla) * cos(clo) * o0
+                              + cos(cla) * sin(clo) * o1 + sin(cla) * o2;
+                    if (dd > bd) { bd = dd; best = i; }
+                }
+                if (bd > 1.0) bd = 1.0;
+                loc_city = city_pts[best].name;
+                loc_km = acos(bd) * 6371.0;
+            }
+
+            char tzs[16];
+            double tz = g_tempus.config.timezone;
+            int tzh = (int)fabs(tz);
+            int tzm = (int)((fabs(tz) - tzh) * 60.0 + 0.5);
+            if (tzm)
+                snprintf(tzs, sizeof(tzs), "GMT%c%d:%02d",
+                         tz < 0 ? '-' : '+', tzh, tzm);
+            else
+                snprintf(tzs, sizeof(tzs), "GMT%c%d",
+                         tz < 0 ? '-' : '+', tzh);
+
+            char loc_label[64];
+            if (loc_city && loc_km < 150.0)
+                snprintf(loc_label, sizeof(loc_label), "%s", loc_city);
+            else
+                snprintf(loc_label, sizeof(loc_label), "%.2f%s %.2f%s",
+                         fabs(loc_la), loc_la >= 0 ? "N" : "S",
+                         fabs(loc_lo), loc_lo >= 0 ? "E" : "W");
+
+            char mon[16];
+            snprintf(mon, sizeof(mon), "%s",
+                     cal_month_names[g_tempus.month - 1]);
+            for (char *p = mon + 1; *p; p++)
+                if (*p >= 'A' && *p <= 'Z') *p += 'a' - 'A';
+            char dateline[40];
+            snprintf(dateline, sizeof(dateline), "%s %d, %d",
+                     mon, g_tempus.day, g_tempus.year);
+
+            int hh = g_tempus.hours % 12;
+            if (hh == 0) hh = 12;
+            char timeline[16];
+            snprintf(timeline, sizeof(timeline), "%d:%02d",
+                     hh, g_tempus.mins);
+            const char *meridiem = g_tempus.hours < 12 ? "AM" : "PM";
+
+            // Engraved caps up top: place tracked wide, offset dimmer.
+            // Below, the date in light figures; then the hour as the
+            // hero line, meridiem in small caps sharing its baseline.
+            float lx = x0;
+            draw_set_color(&g_draw, dca(0.62f, 0.60f, 0.55f, 0.62f));
+            lx += chrome_text_tracked(&g_draw, SDF_WEIGHT_MEDIUM, 15.0f,
+                                      lx, -604.0f, 0.38f, loc_label);
+            draw_set_color(&g_draw, dca(0.50f, 0.49f, 0.46f, 0.40f));
+            chrome_text_tracked(&g_draw, SDF_WEIGHT_MEDIUM, 15.0f,
+                                lx + 22.0f, -604.0f, 0.38f, tzs);
+
+            draw_set_color(&g_draw, dca(0.78f, 0.75f, 0.68f, 0.78f));
+            draw_text_ex(&g_draw, SDF_WEIGHT_LIGHT, 40.0f,
+                         x0, -578.0f, dateline);
+
+            draw_set_color(&g_draw, dca(0.78f, 0.75f, 0.68f, 0.95f));
+            float tw = draw_text_ex(&g_draw, SDF_WEIGHT_LIGHT, 68.0f,
+                                    x0, -528.0f, timeline);
+            float mer_y = -528.0f + sdf_nascent[SDF_WEIGHT_LIGHT] * 68.0f
+                        - sdf_nascent[SDF_WEIGHT_MEDIUM] * 20.0f;
+            draw_set_color(&g_draw, dca(0.62f, 0.60f, 0.55f, 0.62f));
+            chrome_text_tracked(&g_draw, SDF_WEIGHT_MEDIUM, 20.0f,
+                                x0 + tw + 12.0f, mer_y, 0.20f, meridiem);
         }
 
         // Build nuklear GUI

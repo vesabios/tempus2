@@ -442,10 +442,17 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
     bool in_sky = sc->sky_blend > 0.5;
 
     if (phase == 0) {
-        // CAELVM: the hour ring between the chart and the bezel is
-        // the rendering-time control — one turn, one day
+        // CAELVM: the chart itself is the LOOK — drag to pitch the
+        // view toward any horizon and gaze around; the hour ring
+        // outside it scrubs the rendering time
         if (sc->sky_blend > 0.5) {
             float rp0 = sqrtf(wx * wx + wy * wy);
+            if (rp0 < 548.0f) {
+                sk->chart_dragging = true;
+                sk->last_wx = wx;
+                sk->last_wy = wy;
+                return;
+            }
             if (rp0 > 556.0f && rp0 < 596.0f) {
                 sk->hour_dragging = true;
                 sk->last_wx = wx;
@@ -624,6 +631,10 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         tempus_set_location(t, lat, lon);
         ob->last_wx = wx;
         ob->last_wy = wy;
+    } else if (phase == 1 && sk->chart_dragging) {
+        sky_view_pan(sk, wx - sk->last_wx, wy - sk->last_wy);
+        sk->last_wx = wx;
+        sk->last_wy = wy;
     } else if (phase == 1 && sk->hour_dragging) {
         // Incremental angle about center, clockwise = forward; one
         // revolution of the ring is one day
@@ -686,6 +697,7 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         ho->ring_dragging = false;
         ob->dragging = false;
         sk->hour_dragging = false;
+        sk->chart_dragging = false;
     }
 }
 

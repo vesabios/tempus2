@@ -40,6 +40,13 @@ struct SkyViewState {
     bool  hour_dragging;
     float last_wx, last_wy;
 
+    // The LOOK: the chart's projection center. Zenith by default;
+    // drag the chart to pitch toward any horizon and look around.
+    // view_alt clamps at 10 degrees — you may graze the ground with
+    // your gaze but not bury it.
+    float view_az, view_alt;
+    bool  chart_dragging;
+
     // The dome's vertex colors, computed by true single-scattering in
     // update (minute-gated): zenith vertex + 6 rings x 65 sectors
     float dome[1 + 6 * 65][3];
@@ -77,16 +84,78 @@ struct SkyViewState {
 // sky filling the outer annulus out to the nadir stretched into the
 // rim. Nothing is ever off the chart — setting is just crossing the
 // horizon circle. North top; east LEFT (the view looking up).
+// The projection center — file-scope so the pure projection helpers
+// keep their signatures. Set from the view state at the top of both
+// update and render.
+static float sky__vc[3], sky__vr[3], sky__vd[3];
+
+static void sky__set_center(float az0_deg, float alt0_deg) {
+    float a = az0_deg * (float)M_PI / 180.0f;
+    float l = alt0_deg * (float)M_PI / 180.0f;
+    // center; screen +y (down) = toward the az0 horizon; +x = their
+    // cross — reduces to north-bottom/east-right at the zenith
+    sky__vc[0] = sinf(a) * cosf(l);
+    sky__vc[1] = cosf(a) * cosf(l);
+    sky__vc[2] = sinf(l);
+    sky__vd[0] = sinf(a) * sinf(l);
+    sky__vd[1] = cosf(a) * sinf(l);
+    sky__vd[2] = -cosf(l);
+    sky__vr[0] = sky__vd[1] * sky__vc[2] - sky__vd[2] * sky__vc[1];
+    sky__vr[1] = sky__vd[2] * sky__vc[0] - sky__vd[0] * sky__vc[2];
+    sky__vr[2] = sky__vd[0] * sky__vc[1] - sky__vd[1] * sky__vc[0];
+}
+
+// Azimuthal-equidistant about the LIVE view center: angular distance
+// maps to radius, bearing to screen direction. At the zenith this is
+// exactly the old chart (north bottom, east right); pitched toward a
+// horizon, that horizon draws near while the far sky recedes toward
+// the rim — and nothing is ever off the chart.
 static inline void sky__project(float az_deg, float alt_deg,
                                 float *x, float *y) {
     if (alt_deg > 90.0f) alt_deg = 90.0f;
     if (alt_deg < -90.0f) alt_deg = -90.0f;
-    float rr = (90.0f - alt_deg) / 180.0f * SKY_R;
-    // North at the BOTTOM, east on the right (Seren's orientation —
-    // the chart as you'd hold it facing south)
     float a = az_deg * (float)M_PI / 180.0f;
-    *x = sinf(a) * rr;
-    *y = cosf(a) * rr;
+    float l = alt_deg * (float)M_PI / 180.0f;
+    float v[3] = { sinf(a) * cosf(l), cosf(a) * cosf(l), sinf(l) };
+    float cosc = v[0]*sky__vc[0] + v[1]*sky__vc[1] + v[2]*sky__vc[2];
+    if (cosc > 1.0f) cosc = 1.0f;
+    if (cosc < -1.0f) cosc = -1.0f;
+    float rr = acosf(cosc) / (float)M_PI * SKY_R;
+    float px = v[0]*sky__vr[0] + v[1]*sky__vr[1] + v[2]*sky__vr[2];
+    float py = v[0]*sky__vd[0] + v[1]*sky__vd[1] + v[2]*sky__vd[2];
+    float len = sqrtf(px * px + py * py);
+    if (len < 1.0e-5f) {
+        *x = 0.0f;
+        *y = cosc > 0.0f ? 0.0f : SKY_R;
+        return;
+    }
+    *x = px / len * rr;
+    *y = py / len * rr;
+}
+
+// Pan the look: the content follows the finger; the center walks the
+// sphere the other way. Called from the pointer code.
+static inline void sky_view_pan(SkyViewState *st, float dx, float dy) {
+    float mag = sqrtf(dx * dx + dy * dy);
+    if (mag < 1.0e-4f) return;
+    sky__set_center(st->view_az, st->view_alt);
+    float dAng = mag / SKY_R * (float)M_PI;
+    float tx = (-dx * sky__vr[0] - dy * sky__vd[0]) / mag;
+    float ty = (-dx * sky__vr[1] - dy * sky__vd[1]) / mag;
+    float tz = (-dx * sky__vr[2] - dy * sky__vd[2]) / mag;
+    float ca = cosf(dAng), sa = sinf(dAng);
+    float nx = sky__vc[0] * ca + tx * sa;
+    float ny = sky__vc[1] * ca + ty * sa;
+    float nz = sky__vc[2] * ca + tz * sa;
+    float nn = sqrtf(nx*nx + ny*ny + nz*nz);
+    nx /= nn; ny /= nn; nz /= nn;
+    if (nz > 1.0f) nz = 1.0f;
+    float alt = asinf(nz) * 180.0f / (float)M_PI;
+    if (alt < 89.9f)
+        st->view_az = atan2f(nx, ny) * 180.0f / (float)M_PI;
+    if (alt > 90.0f) alt = 90.0f;
+    if (alt < 10.0f) alt = 10.0f;   // the pitch clamp: no digging
+    st->view_alt = alt;
 }
 
 #define SKY_HOR (SKY_R * 0.5f)   // the horizon circle
@@ -147,6 +216,8 @@ static void sky_init(void *buf, const Tempus *t, const RenderStyle *s) {
     SkyViewState *st = (SkyViewState *)buf;
     st->opacity = 1.0;
     st->cache_jd = -1.0e9;
+    st->view_az = 0.0f;
+    st->view_alt = 90.0f;
     (void)t; (void)s;
 }
 
@@ -164,6 +235,7 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     (void)dt;
     st->blend = sc->sky_blend;
     if (st->blend < 0.001) return;
+    sky__set_center(st->view_az, st->view_alt);
     st->rise_hr = (float)sc->solar_state.sunrise_hr;
     st->set_hr = (float)sc->solar_state.sunset_hr;
 
@@ -288,6 +360,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // counterpart fades in late.
     float mb = (float)st->blend;               // morph position
     float fb = (float)tempus_smoothstep(0.25, 0.95, st->blend);
+    sky__set_center(st->view_az, st->view_alt);
     // Machine-counterpart weight: only MACHINA has zodiac/rings/beads
     // to hand off. Parked there (system stage 1) every element takes
     // the full ownership flight from its machine slot; parked anywhere
@@ -322,20 +395,24 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_circle_filled(d, 0, 0, SKY_R);
 
         enum { SEC = SKY_DOME_SEC };
+        float mk = R_live / SKY_HOR;   // morph scale about center
         int prev[SEC + 1], curv[SEC + 1];
         draw_set_color(d, dca(st->dome[0][0], st->dome[0][1],
                               st->dome[0][2], 1.0f));
-        int cvi = draw__push_vert(d, 0, 0, d->white_u, d->white_v);
+        float zx0, zy0;
+        sky__project(0.0f, 90.0f, &zx0, &zy0);
+        int cvi = draw__push_vert(d, zx0 * mk, zy0 * mk,
+                                  d->white_u, d->white_v);
         for (int ri = 0; ri < 6; ri++) {
             float alt = sky__dome_alts[ri];
-            float rr = (90.0f - alt) / 90.0f * R_live;
             for (int si = 0; si <= SEC; si++) {
                 const float *dc2 =
                     st->dome[1 + ri * (SEC + 1) + si];
                 draw_set_color(d, dca(dc2[0], dc2[1], dc2[2], 1.0f));
-                float a = (float)si / SEC * 2.0f * (float)M_PI;
-                int vi = draw__push_vert(d, sinf(a) * rr,
-                                         cosf(a) * rr,
+                float az = (float)si / SEC * 360.0f;
+                float vx2, vy2;
+                sky__project(az, alt, &vx2, &vy2);
+                int vi = draw__push_vert(d, vx2 * mk, vy2 * mk,
                                          d->white_u, d->white_v);
                 curv[si] = vi;
                 if (si > 0) {
@@ -352,23 +429,37 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         d->alpha = base_alpha;
     }
 
-    // Altitude circles at 30 and 60 degrees + the zenith (furniture)
+    // Altitude circles at +/-30 and +/-60 degrees + the zenith cross —
+    // all sampled through the live projection so they follow the look
     if (fb > 0.001f) {
         d->alpha = base_alpha * fb;
-        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.10f));
-        draw_circle_stroked(d, 0, 0, SKY_R * (30.0f / 180.0f), 1.0f);
-        draw_circle_stroked(d, 0, 0, SKY_R * (60.0f / 180.0f), 1.0f);
-        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.06f));
-        draw_circle_stroked(d, 0, 0, SKY_R * (120.0f / 180.0f), 1.0f);
-        draw_circle_stroked(d, 0, 0, SKY_R * (150.0f / 180.0f), 1.0f);
-        // The nadir, stretched into the outermost rim
+        static const float circ_alt[4] = { 60.0f, 30.0f, -30.0f,
+                                           -60.0f };
+        for (int ci = 0; ci < 4; ci++) {
+            draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
+                                  ci < 2 ? 0.10f : 0.06f));
+            float px2 = 0, py2 = 0;
+            for (int i = 0; i <= 72; i++) {
+                float az = (float)i / 72.0f * 360.0f;
+                float cx2, cy2;
+                sky__project(az, circ_alt[ci], &cx2, &cy2);
+                if (i > 0)
+                    draw_line(d, px2, py2, cx2, cy2, 1.0f);
+                px2 = cx2; py2 = cy2;
+            }
+        }
+        // The chart's edge: the point opposite the look, stretched
+        // into the outermost rim
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.20f));
         draw_circle_stroked(d, 0, 0, SKY_R, 1.0f);
-        // The zenith cross: what is overhead at midnight — the chart's
-        // fixed center
-        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
-        draw_line(d, -6.0f, 0, 6.0f, 0, 1.0f);
-        draw_line(d, 0, -6.0f, 0, 6.0f, 1.0f);
+        // The zenith cross rides the look
+        {
+            float zx2, zy2;
+            sky__project(0.0f, 90.0f, &zx2, &zy2);
+            draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
+            draw_line(d, zx2 - 6.0f, zy2, zx2 + 6.0f, zy2, 1.0f);
+            draw_line(d, zx2, zy2 - 6.0f, zx2, zy2 + 6.0f, 1.0f);
+        }
         d->alpha = base_alpha;
     }
 
@@ -472,12 +563,24 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     }
 
     // ---- The horizon: Earth's orbit becomes Earth's ground ----
+    // Sampled through the projection: pitched toward a horizon, the
+    // near rim draws close while the far side recedes.
     {
         float rim_r = bez_R + (SKY_HOR - bez_R) * mb;
+        float mk = rim_r / SKY_HOR;
         d->alpha = base_alpha * (float)tempus_smoothstep(0.05, 0.5,
                                                          st->blend);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.55f));
-        draw_circle_stroked(d, 0, 0, rim_r, 1.0f);
+        float px2 = 0, py2 = 0;
+        for (int i = 0; i <= 96; i++) {
+            float az = (float)i / 96.0f * 360.0f;
+            float hx2, hy2;
+            sky__project(az, 0.0f, &hx2, &hy2);
+            hx2 *= mk; hy2 *= mk;
+            if (i > 0)
+                draw_line(d, px2, py2, hx2, hy2, 1.0f);
+            px2 = hx2; py2 = hy2;
+        }
         d->alpha = base_alpha;
     }
 
@@ -622,24 +725,32 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     if (fb > 0.001f) {
         d->alpha = base_alpha * fb;
         int cw = _font_compat[FONT_month].weight;
-        // az 0/90/180/270 = N/E/S/W; the chart mirror puts E on the left
+        // az 0/90/180/270 = N/E/S/W — pinned to the LIVE horizon,
+        // ticks pointing away from the zenith's projection
         static const char *card[4] = { "N", "E", "S", "W" };
+        float zpx, zpy;
+        sky__project(0.0f, 90.0f, &zpx, &zpy);
         for (int i = 0; i < 36; i++) {
-            float a = (float)i * 10.0f * (float)M_PI / 180.0f;
-            float dx = sinf(a), dy = cosf(a);
+            float az = (float)i * 10.0f;
+            float bx, by;
+            sky__project(az, 0.0f, &bx, &by);
+            float dx = bx - zpx, dy = by - zpy;
+            float dn = sqrtf(dx * dx + dy * dy);
+            if (dn < 1.0e-3f) { dx = 0; dy = 1; dn = 1; }
+            dx /= dn; dy /= dn;
             bool major = (i % 9) == 0;
             draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
                                   major ? 0.6f : 0.25f));
-            draw_line(d, dx * SKY_HOR, dy * SKY_HOR,
-                      dx * (SKY_HOR + (major ? 14.0f : 7.0f)),
-                      dy * (SKY_HOR + (major ? 14.0f : 7.0f)), 1.0f);
+            draw_line(d, bx, by,
+                      bx + dx * (major ? 14.0f : 7.0f),
+                      by + dy * (major ? 14.0f : 7.0f), 1.0f);
             if (major) {
                 float sz = _font_compat[FONT_month].size;
                 float tw2 = sdf_measure_width(cw, card[i / 9]) * sz;
                 draw_set_color(d, dca(0.66f, 0.63f, 0.57f, 0.75f));
                 draw_text_ex(d, cw, sz,
-                             dx * (SKY_HOR + 34.0f) - tw2 * 0.5f,
-                             dy * (SKY_HOR + 34.0f) - sz * 0.5f,
+                             bx + dx * 34.0f - tw2 * 0.5f,
+                             by + dy * 34.0f - sz * 0.5f,
                              card[i / 9]);
             }
         }
