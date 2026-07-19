@@ -438,13 +438,15 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
             float ux = rn > 1 ? x / rn : 0, uy = rn > 1 ? y / rn : -1;
             if (up) {
                 d->alpha = base_alpha;
-                draw_set_color(d, dca(0.86f, 0.82f, 0.70f, 1.0f));
-                draw_circle_filled(d, x, y, 2.6f);
-                d->alpha = base_alpha * 0.6f;
-                draw_line(d, x, y, x - ux * 16.0f, y - uy * 16.0f, 1.1f);
-                d->alpha = base_alpha * 0.55f;
-                draw_set_color(d, dca(0.66f, 0.63f, 0.57f, 0.85f));
-                draw_text_ex(d, fw, 11.5f, x + 6.0f, y + 4.0f,
+                draw_set_color(d, dca(0.92f, 0.88f, 0.76f, 1.0f));
+                draw_circle_filled(d, x, y, 3.0f);
+                d->alpha = base_alpha * 0.7f;
+                draw_line(d, x, y, x - ux * 16.0f, y - uy * 16.0f, 1.2f);
+                // Risen names in bright warm ink — they must read on
+                // the daylight blue as well as the night ink
+                d->alpha = base_alpha * 0.9f;
+                draw_set_color(d, dca(0.90f, 0.87f, 0.76f, 0.95f));
+                draw_text_ex(d, fw, 13.0f, x + 7.0f, y + 4.5f,
                              astro__stars[i].name);
             } else {
                 d->alpha = base_alpha * 0.28f;
