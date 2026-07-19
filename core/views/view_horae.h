@@ -595,7 +595,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             // The face's numerals run 15px by day; the lens shows
             // its one at 24 — magnified, same voice
             float msz = 24.0f;
-            float mr = (Rn - rp - 2.0f) - msz * 0.5f
+            float mr = (Rn - rp + 4.0f) - msz * 0.5f
                      + msz * (mflip ? 0.51f : 0.37f);
             draw_set_color(d, dca(0.80f, 0.77f, 0.70f,
                                   hcur < 12 ? 0.95f : 0.70f));
