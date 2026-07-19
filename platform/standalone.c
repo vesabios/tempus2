@@ -68,6 +68,16 @@ static int             g_shot_countdown = 0;
 // flight always lands on the same pixels. The regression net for
 // every transition.
 static int    g_fly_from = -1, g_fly_to = -1;
+// TEMPUS_FILM=<dir> renders the TOUR as a numbered frame sequence at a
+// fixed 30fps — the instrument in motion, which no still can hold.
+// TEMPUS_FILM_SECS sets its length, TEMPUS_FILM_DWELL the pause at each
+// station before the next flight.
+static const char *g_film_dir = NULL;
+static int    g_film_frame = 0;
+static double g_film_secs = 40.0;
+static double g_film_dwell = 2.6;
+static double g_film_clock = 0.0;
+static int    g_film_idx = 0;
 static double g_fly_t = 1.75;
 static int    g_fly_settle = 0;
 static double g_fly_clock = -1.0;
@@ -725,6 +735,15 @@ static void init(void) {
         if (g_fly_from < 0)
             fprintf(stderr, "TEMPUS_FLY: bad spec '%s'\n", fly);
     }
+    g_film_dir = getenv("TEMPUS_FILM");
+    if (g_film_dir) {
+        const char *fs = getenv("TEMPUS_FILM_SECS");
+        if (fs) g_film_secs = atof(fs);
+        const char *fd = getenv("TEMPUS_FILM_DWELL");
+        if (fd) g_film_dwell = atof(fd);
+        g_show_debug = false;
+        g_tour_active = false;
+    }
     g_pace_log = getenv("TEMPUS_PACE_LOG") != NULL;
     if (g_pace_log)
         g_show_debug = false;  // the debug panel forces full rate
@@ -763,7 +782,33 @@ static void frame(void) {
     double dt = sapp_frame_duration();
     if (g_fly_from >= 0)
         dt = 1.0 / 60.0;   // determinism: same flight, same pixels
+    if (g_film_dir)
+        dt = 1.0 / 30.0;   // the film's own clock
     g_time += dt;
+
+    // Film: fly the tour on a fixed timestep, dumping every frame
+    if (g_film_dir) {
+        static const Worldview film_tour[] = {
+            WV_HOROLOGIVM, WV_ORBIS, WV_TELLVS, WV_MACHINA,
+            WV_ASTROLAB, WV_CAELVM, WV_DRACO, WV_HORAE,
+        };
+        const int film_n = (int)(sizeof(film_tour) / sizeof(film_tour[0]));
+        const double leg = 3.5 + g_film_dwell;
+        if (g_film_frame == 0)
+            snap_station(film_tour[0]);
+        g_film_clock += dt;
+        int want = (int)(g_film_clock / leg);
+        if (want != g_film_idx && want < film_n) {
+            g_film_idx = want;
+            set_worldview(film_tour[want % film_n]);
+        }
+        char path[512];
+        snprintf(path, sizeof path, "%s/f%05d.png", g_film_dir,
+                 g_film_frame++);
+        save_shot(path);
+        if (g_film_clock >= g_film_secs) sapp_request_quit();
+        return;
+    }
 
     // Flight harness: settle, take off, capture at the appointed second
     if (g_fly_from >= 0) {
