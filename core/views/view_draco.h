@@ -75,25 +75,32 @@ static const char *draco__sign_abl[12] = {
 static void draco__glow(DrawCtx *d, float cx, float cy, float r,
                         float k, bool ember) {
     const int SEG = 48;
-    static const float shell_r[4] = { 0.0f, 0.30f, 0.62f, 1.0f };
+    #define DRACO_NSH 5
+    // TIGHT falloff — alphas ride ~(1-r)^2.5, so the fire hugs the
+    // silhouette in a hot ring and dies fast into a faint bloom
+    // (the photographic look, not a wide wash)
+    static const float shell_r[DRACO_NSH] = {
+        0.0f, 0.14f, 0.30f, 0.55f, 1.0f };
     // Gold furnace for the sun's meal; for the moon's, the umbral
     // blood-copper — Earth's shadow is lit only by sunlight refracted
     // through our atmosphere, every sunset at once
-    static const float shell_sun[4][4] = {
-        { 1.00f, 0.97f, 0.88f, 0.95f },
-        { 1.00f, 0.80f, 0.38f, 0.60f },
-        { 0.92f, 0.50f, 0.12f, 0.24f },
-        { 0.80f, 0.35f, 0.05f, 0.00f },
+    static const float shell_sun[DRACO_NSH][4] = {
+        { 1.00f, 0.98f, 0.92f, 0.98f },
+        { 1.00f, 0.88f, 0.55f, 0.72f },
+        { 1.00f, 0.66f, 0.22f, 0.34f },
+        { 0.85f, 0.40f, 0.08f, 0.10f },
+        { 0.70f, 0.28f, 0.03f, 0.00f },
     };
-    static const float shell_moon[4][4] = {
-        { 0.92f, 0.50f, 0.34f, 0.80f },
-        { 0.74f, 0.24f, 0.10f, 0.50f },
-        { 0.48f, 0.10f, 0.04f, 0.20f },
-        { 0.30f, 0.04f, 0.02f, 0.00f },
+    static const float shell_moon[DRACO_NSH][4] = {
+        { 0.95f, 0.55f, 0.38f, 0.85f },
+        { 0.85f, 0.32f, 0.14f, 0.55f },
+        { 0.62f, 0.16f, 0.06f, 0.25f },
+        { 0.40f, 0.08f, 0.03f, 0.08f },
+        { 0.26f, 0.04f, 0.02f, 0.00f },
     };
     const float (*shell_c)[4] = ember ? shell_moon : shell_sun;
-    int base[4];
-    for (int sh = 0; sh < 4; sh++) {
+    int base[DRACO_NSH];
+    for (int sh = 0; sh < DRACO_NSH; sh++) {
         draw_set_color(d, dca(shell_c[sh][0], shell_c[sh][1],
                               shell_c[sh][2], shell_c[sh][3] * k));
         if (sh == 0) {
@@ -112,12 +119,13 @@ static void draco__glow(DrawCtx *d, float cx, float cy, float r,
     for (int i = 0; i < SEG; i++) {
         int j = (i + 1) % SEG;
         draw__tri(d, base[0], base[1] + i, base[1] + j);
-        for (int sh = 1; sh < 3; sh++) {
+        for (int sh = 1; sh < DRACO_NSH - 1; sh++) {
             draw__tri(d, base[sh] + i, base[sh + 1] + i,
                       base[sh + 1] + j);
             draw__tri(d, base[sh] + i, base[sh + 1] + j, base[sh] + j);
         }
     }
+    #undef DRACO_NSH
 }
 
 static void draco_init(void *buf, const Tempus *t, const RenderStyle *s) {
