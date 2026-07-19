@@ -107,12 +107,14 @@ static void cal__render_glyphs(DrawCtx *d, const Tempus *t, const RenderStyle *s
         float angle = f * (float)(M_PI * 2.0);
         float cs = sinf(angle), sn = -cosf(angle);
 
+        // Hairline: a 2-wide bar ALONG THE RADIAL (the original's
+        // rotated-frame rect; an axis-aligned rect here reads as a
+        // skewed box at most angles)
         draw_set_color(d, s->holiday_stroke);
-        float lx0 = px + cs * s->glyph_line_start;
-        float ly0 = py + sn * s->glyph_line_start;
-        float lx1 = px + cs * s->glyph_line_end;
-        float ly1 = py + sn * s->glyph_line_end;
-        draw_rect_filled(d, lx0 - 1, ly0, lx1 + 1, ly1);
+        draw_line(d, px + cs * s->glyph_line_start,
+                  py + sn * s->glyph_line_start,
+                  px + cs * s->glyph_line_end,
+                  py + sn * s->glyph_line_end, 2.0f);
 
         if (i % 2 == 1) {
             draw_set_color(d, s->glyph_color);
@@ -124,9 +126,14 @@ static void cal__render_glyphs(DrawCtx *d, const Tempus *t, const RenderStyle *s
             else if (i == 3)
                 draw_circle_filled(d, gx, gy, 15.0f);
             else if (i == 1 || i == 5) {
-                draw_circle_filled(d, gx, gy, 15.0f);
-                draw_set_color(d, s->clear);
-                draw_rect_filled(d, gx - 20, gy, gx + 20, gy + 20);
+                // Equinox: the half-disc — a semicircle with its flat
+                // edge tangential, the visible half toward the center
+                // (the original covered the outer half with a rotated
+                // black rect; we just draw the surviving half)
+                float ta = atan2f(sn, cs);
+                draw_arc_filled(d, gx, gy, 0.0f, 15.0f,
+                                ta + (float)M_PI * 0.5f,
+                                ta + (float)M_PI * 1.5f, 24);
             }
         }
     }
@@ -194,8 +201,9 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
     }
 
-    // Current-month arc: a background band drawn UNDER the day ticks so
-    // it never occludes them
+    // Current-month arc: OUTSIDE the tick ring entirely (the original's
+    // negative width builds outward: offset 49, width -30 => the band
+    // spans +49..+79, clear of the ticks, the pointer nesting between)
     {
         int cm = tv->month - 1;
         float arc_r = radius + (float)tempus_mix(s->month_arc_radius_a, s->month_arc_radius_b, blend);
@@ -205,25 +213,37 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
         float a0 = m0 * 2.0f * (float)M_PI - (float)(M_PI * 0.5);
         float a1 = m1 * 2.0f * (float)M_PI - (float)(M_PI * 0.5);
         draw_set_color(d, dc_scale(s->month_color, 0.5f));
-        draw_arc_filled(d, 0, 0, arc_r + arc_w, arc_r, a0, a1, 48);
+        draw_arc_filled(d, 0, 0, arc_r, arc_r - arc_w, a0, a1, 48);
     }
 
-    // Day tick marks (from cache). Zoomed in, they pull inside the ring
-    // so the month arc band never crowds them.
-    float tick_in = radius - 16.0f * (float)blend;
-    float tick_out = radius + 20.0f * (1.0f - (float)blend) - 2.0f * (float)blend;
+    // Day tick marks (from cache), the original's grammar: ordinary
+    // days are HAIRLINES, month boundaries (and the leap tick) are
+    // 4-wide BARS, and the span holds radius..radius+20 at every
+    // zoom — the date numerals move inside instead.
+    float tick_in = radius;
+    float tick_out = radius + 20.0f;
     for (int i = 0; i < st->num_ticks; i++) {
+        bool bar = true;
         switch (st->ticks[i].kind) {
             case TICK_LEAP:           draw_set_color(d, s->leap_year); break;
             case TICK_MONTH_BOUNDARY: draw_set_color(d, s->month_color); break;
             case TICK_TODAY_MONTH:    draw_set_color(d, s->month_text_color); break;
-            case TICK_TODAY:          draw_set_color(d, s->month_color); break;
-            default:                 draw_set_color(d, s->day_marks); break;
+            case TICK_TODAY:
+                draw_set_color(d, s->month_color);
+                bar = false;
+                break;
+            default:
+                draw_set_color(d, s->day_marks);
+                bar = false;
+                break;
         }
         float ix, iy, ox, oy;
         cal__fc(st->ticks[i].angle, tick_in, &ix, &iy);
         cal__fc(st->ticks[i].angle, tick_out, &ox, &oy);
-        draw_line_thin(d, ix, iy, ox, oy);
+        if (bar)
+            draw_line(d, ix, iy, ox, oy, 4.0f);
+        else
+            draw_line_thin(d, ix, iy, ox, oy);
     }
 
     // Day-of-month numbers, radially set beside their ticks — fade in
@@ -261,7 +281,7 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
                     if (na < 0) na += 2.0f * (float)M_PI;
                     bool nflip = (na > (float)M_PI * 0.5f && na < (float)M_PI * 1.5f);
                     float gh = _font_compat[FONT_event].size * 0.5f * 0.8f;
-                    float nr = nflip ? (tick_in - 12.0f) : (tick_in - 12.0f - gh);
+                    float nr = nflip ? (radius - 12.0f) : (radius - 12.0f - gh);
                     draw_text_curved(d, FONT_event, 0, 0, nr,
                                      theta, buf, 0.05f, 0.5f);
                 }
@@ -301,7 +321,18 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
             double mid_jd = (t->jd_months[i] + t->jd_months[i + 1]) / 2.0;
             float mf = (float)tempus_jd_to_wheel_pct(t, mid_jd);
             float angle = mf * 2.0f * (float)M_PI;
-            draw_text_curved(d, FONT_month, 0, 0, text_r,
+            // Waist-centered on the nominal radius: without the flip
+            // compensation, top-half names ride farther out than
+            // bottom-half ones (the original's renderer centered the
+            // letterform band)
+            float na = fmodf(angle, 2.0f * (float)M_PI);
+            if (na < 0) na += 2.0f * (float)M_PI;
+            bool mflip = (na > (float)M_PI * 0.5f
+                          && na < (float)M_PI * 1.5f);
+            float msz = _font_compat[FONT_month].size;
+            float mr = text_r - msz * 0.5f
+                     + msz * (mflip ? 0.51f : 0.37f);
+            draw_text_curved(d, FONT_month, 0, 0, mr,
                            angle, tempus_month_name(t, i), text_mix, 1.0f);
         }
         d->tx = stx; d->ty = sty;
@@ -315,22 +346,23 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
         float px, py;
         cal__fc(pos, pointer_r, &px, &py);
 
+        // The original's wheel pointer: a HOLLOW triangle, 30 wide by
+        // 28 tall, apex aimed radially INWARD and capping the day
+        // tick's outer end (offset 9 + texture inset 11 = +20), flat
+        // base outward at +48 — drawn as three strokes, month teal
         draw_set_color(d, s->month_text_color);
         float angle = (float)(pos * M_PI * 2.0);
-        float cs = sinf(angle), sn = -cosf(angle);
-        float size = 8.0f;
-        float tip_x = px - offx - cs * size;
-        float tip_y = py - offy - sn * size;
-        float base_x = px - offx + cs * size;
-        float base_y = py - offy + sn * size;
-        float perp_x = -sn * size * 0.6f;
-        float perp_y = cs * size * 0.6f;
-
-        int base = d->num_verts;
-        draw__push_vert(d, tip_x, tip_y, d->white_u, d->white_v);
-        draw__push_vert(d, base_x + perp_x, base_y + perp_y, d->white_u, d->white_v);
-        draw__push_vert(d, base_x - perp_x, base_y - perp_y, d->white_u, d->white_v);
-        draw__tri(d, base, base+1, base+2);
+        float cs = sinf(angle), sn = -cosf(angle);   // radial out
+        float tx2 = -sn, ty2 = cs;                   // tangent
+        float ax = px - offx + cs * 11.0f;
+        float ay = py - offy + sn * 11.0f;
+        float b1x = px - offx + cs * 39.0f + tx2 * 15.0f;
+        float b1y = py - offy + sn * 39.0f + ty2 * 15.0f;
+        float b2x = px - offx + cs * 39.0f - tx2 * 15.0f;
+        float b2y = py - offy + sn * 39.0f - ty2 * 15.0f;
+        draw_line(d, ax, ay, b1x, b1y, 2.2f);
+        draw_line(d, b1x, b1y, b2x, b2y, 2.2f);
+        draw_line(d, b2x, b2y, ax, ay, 2.2f);
     }
 }
 

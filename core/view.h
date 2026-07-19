@@ -122,7 +122,7 @@ static inline RenderStyle style_default(void) {
     s.holiday_stroke  = dc_u8(80, 80, 80);
     s.leap_year       = dc(0.5f, 0.5f, 0);
     s.year_stroke     = dc_u8(221, 240, 0);
-    s.day_marks       = dc(0.3f, 0.3f, 0.3f);
+    s.day_marks       = dc(0.2f, 0.2f, 0.2f);
     s.seconds_color   = dc(1, 0, 0);
     s.minutes_color   = dc(1, 1, 1);
     s.hours_color     = dc(1, 1, 1);
