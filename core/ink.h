@@ -28,6 +28,7 @@ typedef enum {
     INK_SIGHT,         // geocentric sight-lines
     INK_WEB,           // aspect web
     INK_MOON_SHRINK,   // the moon's shrink toward a bead at system
+    INK_ARMILLARY,     // the TELLVS ring cage, rising with helio
     INK_BEAD_CLAIM,    // the beads' machine claim in the member rows:
                        //   full-width, so a geo-parked flight to the
                        //   system spreads the transit over the WHOLE
@@ -57,6 +58,7 @@ static const double ink_table[INK_COUNT][2] = {
     [INK_SIGHT]        = { 0.60, 0.95 },
     [INK_WEB]          = { 0.70, 1.00 },
     [INK_MOON_SHRINK]  = { 0.20, 0.70 },
+    [INK_ARMILLARY]    = { 0.30, 0.90 },
     [INK_BEAD_CLAIM]   = { 0.00, 1.00 },
     [INK_MACHINE_EXIT] = { 0.00, 0.55 },
     [INK_ORBIS_CHROME] = { 0.00, 0.20 },

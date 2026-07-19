@@ -1106,6 +1106,134 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
     }
 
+    // ---- The armillary cage: TELLVS becomes an armillary sphere ----
+    // The classical ring cage in the globe's LIVE frame. Equator and
+    // tropics are circles of latitude (spin-invariant, so the daily
+    // rotation never carries them); the two colures stand CELESTIALLY
+    // — built each frame from the live axis and the equinox line
+    // (equator plane meets the orrery plane), so they hold their
+    // stations while the surface spins beneath. The ecliptic band
+    // lies flat in the orrery plane — the one circle the cage shares
+    // with the machine — with a small sun bead riding it at the true
+    // bearing. Segments passing behind the globe go nearly dark; the
+    // back of the cage reads at half ink, engraved not neon.
+    {
+        float arm = ink_in(INK_ARMILLARY, m) * sysf * (1.0f - obf);
+        if (arm > 0.004f && machine_vis) {
+            float d2r_ = (float)M_PI / 180.0f;
+            float Rc = earth_r * 1.14f;
+            d->alpha = base_alpha * arm;
+
+            // Axis and celestial frame, live
+            float zax[3] = { 0, 0, 1 }, n3[3];
+            globe_mat_mul_vec(rot, zax, n3);
+            float en = sqrtf(n3[0]*n3[0] + n3[1]*n3[1]);
+            float e3[3] = { 1, 0, 0 }, s3[3];
+            if (en > 1.0e-4f) {          // equinox line: n x z_view
+                e3[0] = n3[1] / en; e3[1] = -n3[0] / en; e3[2] = 0;
+            }
+            s3[0] = n3[1]*e3[2] - n3[2]*e3[1];   // solstitial dir
+            s3[1] = n3[2]*e3[0] - n3[0]*e3[2];
+            s3[2] = n3[0]*e3[1] - n3[1]*e3[0];
+
+            // One engraved ring: p(t) = u cos t + v sin t, segments
+            // shaded by depth and the globe's silhouette
+            #define ORR__CAGE_RING(U, V, A, W) do {                    \
+                float px_ = 0, py_ = 0, pz_ = 0;                       \
+                for (int i_ = 0; i_ <= 96; i_++) {                     \
+                    float t_ = (float)i_ / 96.0f * 2.0f * (float)M_PI; \
+                    float ct_ = cosf(t_), st_ = sinf(t_);              \
+                    float qx_ = (U)[0]*ct_ + (V)[0]*st_;               \
+                    float qy_ = (U)[1]*ct_ + (V)[1]*st_;               \
+                    float qz_ = (U)[2]*ct_ + (V)[2]*st_;               \
+                    float sx_ = ex + qx_ * Rc, sy_ = ey + qy_ * Rc;    \
+                    if (i_ > 0) {                                      \
+                        float mz_ = (pz_ + qz_) * 0.5f;                \
+                        float mr_ = Rc * sqrtf(((px_+qx_)*0.5f)        \
+                                    *((px_+qx_)*0.5f)                  \
+                                    + ((py_+qy_)*0.5f)                 \
+                                    *((py_+qy_)*0.5f));                \
+                        float fa_ = 1.0f;                              \
+                        if (mz_ < 0)                                   \
+                            fa_ = mr_ < earth_r ? 0.10f : 0.45f;       \
+                        d->alpha = base_alpha * arm * (A) * fa_;       \
+                        draw_line(d, ex + px_ * Rc, ey + py_ * Rc,     \
+                                  sx_, sy_, (W));                      \
+                    }                                                  \
+                    px_ = qx_; py_ = qy_; pz_ = qz_;                   \
+                }                                                      \
+            } while (0)
+
+            draw_set_color(d, dca(0.58f, 0.56f, 0.51f, 0.85f));
+            // Equator + tropics: u/v span the equatorial plane, the
+            // circle of latitude phi rides the axis
+            float lats[3] = { 0.0f, 23.436f, -23.436f };
+            float lalpha[3] = { 0.60f, 0.28f, 0.28f };
+            for (int L = 0; L < 3; L++) {
+                float cl = cosf(lats[L] * d2r_);
+                float sl = sinf(lats[L] * d2r_);
+                float u3[3] = { e3[0]*cl + n3[0]*sl,
+                                e3[1]*cl + n3[1]*sl,
+                                e3[2]*cl + n3[2]*sl };
+                float v3[3] = { s3[0]*cl + n3[0]*sl,
+                                s3[1]*cl + n3[1]*sl,
+                                s3[2]*cl + n3[2]*sl };
+                // circles of latitude: center offset along the axis
+                float off = sl;
+                float ec3[3] = { e3[0]*cl, e3[1]*cl, e3[2]*cl };
+                float sc3[3] = { s3[0]*cl, s3[1]*cl, s3[2]*cl };
+                (void)u3; (void)v3;
+                float px2 = 0, py2 = 0, pz2 = 0;
+                for (int i = 0; i <= 96; i++) {
+                    float t = (float)i / 96.0f * 2.0f * (float)M_PI;
+                    float qx = ec3[0]*cosf(t) + sc3[0]*sinf(t)
+                             + n3[0]*off;
+                    float qy = ec3[1]*cosf(t) + sc3[1]*sinf(t)
+                             + n3[1]*off;
+                    float qz = ec3[2]*cosf(t) + sc3[2]*sinf(t)
+                             + n3[2]*off;
+                    if (i > 0) {
+                        float mz = (pz2 + qz) * 0.5f;
+                        float mr = Rc * sqrtf(((px2+qx)*0.5f)
+                                   *((px2+qx)*0.5f)
+                                   + ((py2+qy)*0.5f)*((py2+qy)*0.5f));
+                        float fa = 1.0f;
+                        if (mz < 0)
+                            fa = mr < earth_r ? 0.10f : 0.45f;
+                        d->alpha = base_alpha * arm * lalpha[L] * fa;
+                        draw_line(d, ex + px2 * Rc, ey + py2 * Rc,
+                                  ex + qx * Rc, ey + qy * Rc,
+                                  L == 0 ? 1.4f : 1.0f);
+                    }
+                    px2 = qx; py2 = qy; pz2 = qz;
+                }
+            }
+            // The colures: great circles through the poles, one
+            // through the equinoxes, one through the solstices
+            ORR__CAGE_RING(e3, n3, 0.30f, 1.0f);
+            ORR__CAGE_RING(s3, n3, 0.30f, 1.0f);
+            #undef ORR__CAGE_RING
+
+            // The ecliptic band: flat in the orrery plane, entirely
+            // outside the sphere — the cage's one gilded ring
+            draw_set_color(d, dca(0.70f, 0.54f, 0.24f, 0.60f));
+            d->alpha = base_alpha * arm * 0.75f;
+            draw_circle_stroked(d, ex, ey, Rc, 1.2f);
+            d->alpha = base_alpha * arm * 0.35f;
+            draw_circle_stroked(d, ex, ey, Rc + 3.0f, 1.0f);
+            // The sun rides the band at its true bearing
+            float lm = sqrtf(light[0]*light[0] + light[1]*light[1]);
+            if (lm > 1.0e-4f) {
+                d->alpha = base_alpha * arm * 0.9f;
+                draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.9f));
+                draw_circle_filled(d, ex + light[0]/lm * (Rc + 1.5f),
+                                   ey + light[1]/lm * (Rc + 1.5f),
+                                   3.5f);
+            }
+            d->alpha = base_alpha;
+        }
+    }
+
     // ---- Stage 3: the planets' member rows -> VIEW_LVMEN ----
     // One renderer for all nine bodies. Machine side: the live ring
     // seats with the machine's own stagger (VIEW_LVMEN's opacity
