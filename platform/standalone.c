@@ -110,25 +110,21 @@ static double g_fly_clock = -1.0;
 // (helio_blend, zoom, system_blend) morph axis. Named in the
 // instrument's Latin: the timepiece, the earth as a body, the machine
 // of the world. CAELVM (the local sky) joins as the fourth.
-typedef enum {
-    WV_HOROLOGIVM = 0,   // geocentric dial + clock
-    WV_HORAE,            // the planetary hours
-    WV_ROTAE,            // the nested cycle wheels
-    WV_SAECVLVM,         // the years of a life
-    WV_TELLVS,           // heliocentric earth
-    WV_MACHINA,          // full system + zodiac + aspect web
-    WV_CAELVM,           // the local sky, first person
-    WV_ORBIS,            // the world chart: choose your place on earth
-    WV_OFFICIVM,         // the book of hours: the canonical offices
-    WV_DRACO,            // the eclipse dragon: the lunar nodes
-    WV_COUNT
-} Worldview;
-
-static const char *g_worldview_names[WV_COUNT] = {
-    "HOROLOGIVM", "HORAE", "ROTAE", "SAECVLVM",
-    "TELLVS", "MACHINA MVNDI", "CAELVM", "ORBIS", "OFFICIVM",
-    "DRACO",
-};
+// The station enum and its declared columns live in core/station.h
+// (docs/TRANSITIONS.md). The shell keeps its WV_ names as aliases.
+typedef Station Worldview;
+#define WV_HOROLOGIVM ST_HOROLOGIVM
+#define WV_HORAE      ST_HORAE
+#define WV_ROTAE      ST_ROTAE
+#define WV_SAECVLVM   ST_SAECVLVM
+#define WV_TELLVS     ST_TELLVS
+#define WV_MACHINA    ST_MACHINA
+#define WV_CAELVM     ST_CAELVM
+#define WV_ORBIS      ST_ORBIS
+#define WV_OFFICIVM   ST_OFFICIVM
+#define WV_DRACO      ST_DRACO
+#define WV_COUNT      ST_COUNT
+#define g_worldview_names_at(i) (station_table[i].name)
 
 static Worldview g_worldview = WV_HOROLOGIVM;
 
@@ -207,8 +203,8 @@ static void snap_station(Worldview wv) {
 // Station by case-insensitive prefix ("MACHINA" matches "MACHINA MVNDI")
 static int station_by_name(const char *name, size_t len) {
     for (int i = 0; i < WV_COUNT; i++) {
-        size_t n = strlen(g_worldview_names[i]);
-        if (len <= n && strncasecmp(name, g_worldview_names[i], len) == 0)
+        size_t n = strlen(g_worldview_names_at(i));
+        if (len <= n && strncasecmp(name, g_worldview_names_at(i), len) == 0)
             return i;
     }
     return -1;
@@ -228,66 +224,41 @@ static void set_worldview(Worldview wv) {
     double fly_delay = 0.0;
     double sky_delay = 0.0;
 
-    tween_cancel_target(&g_scene.tweens, &g_scene.sky_blend);
-    tween_start_delayed(&g_scene.tweens, &g_scene.sky_blend,
-                        g_scene.sky_blend, wv == WV_CAELVM ? 1.0 : 0.0,
-                        sky_delay, 3.0, EASE_IN_OUT_CUBIC);
-    tween_cancel_target(&g_scene.tweens, &g_scene.horae_blend);
-    tween_start_delayed(&g_scene.tweens, &g_scene.horae_blend,
-                        g_scene.horae_blend, wv == WV_HORAE ? 1.0 : 0.0,
-                        fly_delay, 3.0, EASE_IN_OUT_CUBIC);
-    tween_cancel_target(&g_scene.tweens, &g_scene.rotae_blend);
-    tween_start_delayed(&g_scene.tweens, &g_scene.rotae_blend,
-                        g_scene.rotae_blend, wv == WV_ROTAE ? 1.0 : 0.0,
-                        fly_delay, 3.0, EASE_IN_OUT_CUBIC);
-    tween_cancel_target(&g_scene.tweens, &g_scene.saec_blend);
-    tween_start_delayed(&g_scene.tweens, &g_scene.saec_blend,
-                        g_scene.saec_blend, wv == WV_SAECVLVM ? 1.0 : 0.0,
-                        fly_delay, 3.0, EASE_IN_OUT_CUBIC);
-    tween_cancel_target(&g_scene.tweens, &g_scene.offic_blend);
-    tween_start_delayed(&g_scene.tweens, &g_scene.offic_blend,
-                        g_scene.offic_blend, wv == WV_OFFICIVM ? 1.0 : 0.0,
-                        fly_delay, 3.0, EASE_IN_OUT_CUBIC);
-    tween_cancel_target(&g_scene.tweens, &g_scene.draco_blend);
-    tween_start_delayed(&g_scene.tweens, &g_scene.draco_blend,
-                        g_scene.draco_blend, wv == WV_DRACO ? 1.0 : 0.0,
-                        fly_delay, 3.0, EASE_IN_OUT_CUBIC);
-    tween_cancel_target(&g_scene.tweens, &g_scene.orbis_blend);
-    // The closeup composes GEOMETRICALLY with the station flight (the
-    // globe's radius blends against the moving base morph), so it rides
-    // the same clock as the flight — a shorter tween finishes early and
-    // drops the earth onto a base that hasn't arrived yet.
-    // ABSENT-SEAT RULE: flying from ORBIS to a pure overlay station
-    // (no globe there), the closeup does NOT release — it would fly
-    // toward the 12-o'clock clock seat nobody is going to. It PARKS,
-    // fades with the machine, and snaps home only once hidden
-    // (set_view_opacities does the snap).
-    bool overlay_dst = (wv == WV_HORAE || wv == WV_ROTAE
-                     || wv == WV_SAECVLVM || wv == WV_OFFICIVM
-                     || wv == WV_DRACO);
-    if (!(overlay_dst && g_scene.orbis_blend > 0.5))
-        tween_start_delayed(&g_scene.tweens, &g_scene.orbis_blend,
-                            g_scene.orbis_blend, wv == WV_ORBIS ? 1.0 : 0.0,
-                            fly_delay, 3.5, EASE_IN_OUT_CUBIC);
-    switch (wv) {
-        case WV_HOROLOGIVM: fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
-        case WV_HORAE:      fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
-        case WV_ROTAE:      fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
-        case WV_SAECVLVM:   fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
-        case WV_TELLVS:     fly_worldview(1.0, 1.0, 0.0, 3.5, fly_delay); break;
-        case WV_MACHINA:    fly_worldview(1.0, 0.0, 1.0, 3.5, 0.0); break;
-        // CAELVM parks the machine WHEREVER IT WAS: the sky movers
-        // seam to the live published positions of the station you
-        // left, so no machine flight happens under the rising sky —
-        // from the dial stations that means no ghost of MACHINA
-        // ringing in mid-flight. Leaving the sky, the machine resumes
-        // from the same parked state and flies direct to the target.
-        case WV_CAELVM:     break;
-        case WV_ORBIS:      fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
-        case WV_OFFICIVM:   fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
-        case WV_DRACO:      fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
-        default: break;
+    // Every station-owned blend flies by the same rule; the table
+    // declares the columns, the special cases declare themselves:
+    // ORBIS rides the 3.5s geometric clock and PARKS on flights to
+    // pure overlays (absent-seat rule — the globe has no seat there,
+    // so it holds, fades with the machine, and snaps home hidden).
+    static double *const blends[ST_COUNT] = {
+        [ST_CAELVM]   = &g_scene.sky_blend,
+        [ST_HORAE]    = &g_scene.horae_blend,
+        [ST_ROTAE]    = &g_scene.rotae_blend,
+        [ST_SAECVLVM] = &g_scene.saec_blend,
+        [ST_OFFICIVM] = &g_scene.offic_blend,
+        [ST_DRACO]    = &g_scene.draco_blend,
+        [ST_ORBIS]    = &g_scene.orbis_blend,
+    };
+    bool overlay_dst = blends[wv] != NULL
+                    && wv != ST_ORBIS && wv != ST_CAELVM;
+    for (int i = 0; i < ST_COUNT; i++) {
+        if (!blends[i]) continue;
+        tween_cancel_target(&g_scene.tweens, blends[i]);
+        if (i == ST_ORBIS && overlay_dst && *blends[i] > 0.5)
+            continue;   // park
+        double dur = (i == ST_ORBIS) ? 3.5 : 3.0;
+        double dly = (i == ST_CAELVM) ? sky_delay : fly_delay;
+        tween_start_delayed(&g_scene.tweens, blends[i], *blends[i],
+                            (int)wv == i ? 1.0 : 0.0, dly, dur,
+                            EASE_IN_OUT_CUBIC);
     }
+    // The base machine morph flies to the station's declared targets;
+    // CAELVM parks the machine WHEREVER IT WAS (park_machine): the
+    // sky movers seam to live published positions, so no machine
+    // flight happens under the rising sky.
+    if (!station_table[wv].park_machine)
+        fly_worldview(station_table[wv].fly_helio,
+                      station_table[wv].fly_zoom,
+                      station_table[wv].fly_system, 3.5, fly_delay);
 }
 
 static void apply_view_mode(void) {
@@ -633,7 +604,10 @@ static void debug_gui(void) {
 
             // Worldview station (tweened camera flight between vantages)
             nk_layout_row_dynamic(ctx, 25, 1);
-            int wv = nk_combo(ctx, g_worldview_names, WV_COUNT,
+            static const char *combo_names[ST_COUNT];
+            for (int ci = 0; ci < ST_COUNT; ci++)
+                combo_names[ci] = station_table[ci].name;
+            int wv = nk_combo(ctx, combo_names, WV_COUNT,
                               (int)g_worldview, 22, nk_vec2(240, 140));
             if (wv != (int)g_worldview)
                 set_worldview((Worldview)wv);
@@ -1052,7 +1026,7 @@ static void init(void) {
                 snap_station((Worldview)a);
                 g_fly_settle = 5;   // frames to settle before takeoff
                 fprintf(stderr, "fly: %s -> %s @ %.2fs\n",
-                        g_worldview_names[a], g_worldview_names[b],
+                        g_worldview_names_at(a), g_worldview_names_at(b),
                         g_fly_t);
             }
         }
@@ -1168,13 +1142,13 @@ static void frame(void) {
             float x_r = half_w - 42.0f;
             float y = -640.0f + 46.0f;
             for (int i = 0; i < WV_COUNT; i++) {
-                float tw = sdf_measure_width(wv_w, g_worldview_names[i])
+                float tw = sdf_measure_width(wv_w, g_worldview_names_at(i))
                          * wv_sz;
                 draw_set_color(&g_draw, (int)g_worldview == i
                     ? dca(0.78f, 0.75f, 0.68f, 0.95f)
                     : dca(0.50f, 0.49f, 0.46f, 0.38f));
                 draw_text_ex(&g_draw, wv_w, wv_sz, x_r - tw, y,
-                             g_worldview_names[i]);
+                             g_worldview_names_at(i));
                 g_wv_btn[i][0] = x_r - tw - 10.0f;
                 g_wv_btn[i][1] = y - 6.0f;
                 g_wv_btn[i][2] = x_r + 10.0f;
@@ -1410,6 +1384,12 @@ static void frame(void) {
 }
 
 static void event(const sapp_event *e) {
+    // Shot and flight-harness runs are measurement instruments: they
+    // ignore ALL input. (A baseline bake once caught stray desktop
+    // clicks and keystrokes — five polluted reference frames.)
+    if (g_shot_path)
+        return;
+
     // Any input: briefly return to full rate so interaction feels live
     g_boost_until = g_time + 1.0;
 

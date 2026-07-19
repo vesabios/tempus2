@@ -5,6 +5,7 @@
 #define VIEW_H
 
 #include "tempus.h"
+#include "station.h"
 #include "atmo.h"
 #include "draw.h"
 #include "globe.h"
@@ -160,13 +161,16 @@ static inline double tempus_wheel_scale(double system_blend) {
 // the globe closeup (r 355, sun and moon ring floating above it) and
 // the band.
 #define TEMPUS_ORBIS_WHEEL_R 505.0
+// Constants above are legacy aliases; the wheel's resting radius per
+// station is DECLARED in station_table (docs/TRANSITIONS.md). Blend
+// chain unchanged from the pre-refactor formula — pixel parity.
 static inline double tempus_wheel_radius(double base, double system_blend,
                                          double sky_blend,
                                          double orbis_blend) {
     double r = base * tempus_wheel_scale(system_blend);
-    r += (TEMPUS_SYS_WHEEL_R - r) * system_blend;
-    r += (TEMPUS_ORBIS_WHEEL_R - r) * orbis_blend;
-    return r + (TEMPUS_SKY_WHEEL_R - r) * sky_blend;
+    r += (station_table[ST_MACHINA].wheel_r - r) * system_blend;
+    r += (station_table[ST_ORBIS].wheel_r - r) * orbis_blend;
+    return r + (station_table[ST_CAELVM].wheel_r - r) * sky_blend;
 }
 
 // ---- View lifecycle ----

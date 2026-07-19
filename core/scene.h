@@ -131,6 +131,12 @@ struct Scene {
     // offices strung around the day wheel
     double      offic_blend;
     double      draco_blend;
+
+    // The station weight vector (station.h): normalized barycentric
+    // weights derived from the blends every update — the transition
+    // manager's blend input. Blends remain the tween targets; weights
+    // are the read side.
+    double      stw[ST_COUNT];
 };
 
 // Now Scene is defined — include view function implementations
@@ -261,6 +267,12 @@ static inline void scene__advance_override_weeks(CalendarViewState *c,
 
 static inline void scene_update(Scene *sc, Tempus *t, double dt) {
     tween_update_all(&sc->tweens, dt);
+
+    // The station weight vector, fresh before any view reads it
+    station_weights(sc->helio_blend, sc->system_blend, sc->sky_blend,
+                    sc->horae_blend, sc->rotae_blend, sc->saec_blend,
+                    sc->orbis_blend, sc->offic_blend, sc->draco_blend,
+                    sc->stw);
 
     // Time-scrub flywheel: while dragging, estimate velocity from the
     // accumulated motion; after release, coast with exponential decay —
@@ -579,23 +591,15 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 c->last_wy = wy;
                 c->fling_vel = 0;    // grabbing stops the flywheel
                 c->drag_accum = 0;
-                // In HORAE, ORBIS, and at the main 12-hour face the
-                // band scrubs whole days (the clock's own hands and
-                // controls own the hours there); elsewhere fractional.
-                // DRACO scrubs TRUE time — the moon glides its 13
-                // degrees a day along the wave, and an eclipse is an
-                // HOUR, not a date: the hunt needs the hours to flow.
-                c->fling_keep_time = (sc->horae_blend > 0.5
-                                  || sc->orbis_blend > 0.5
-                                  || sc->offic_blend > 0.5
-                                  || sc->sky_blend > 0.5
-                                  || (sc->helio_blend <= 0.5
-                                      && sc->system_blend <= 0.5
-                                      && sc->sky_blend <= 0.5
-                                      && sc->rotae_blend <= 0.5
-                                      && sc->saec_blend <= 0.5))
-                                  && sc->draco_blend <= 0.5;
-                c->fling_week = sc->horae_blend > 0.5;
+                // Band input policy is DECLARED per station
+                // (station_table): the dominant station by weight
+                // says whether the band clicks whole days, steps
+                // whole weeks, or scrubs true fractional time.
+                {
+                    Station ds = station_dominant(sc->stw);
+                    c->fling_keep_time = station_table[ds].band_keep_time;
+                    c->fling_week = station_table[ds].band_week_clicks;
+                }
                 c->week_accum = 0.0;
                 scene__begin_override(t);
             }
