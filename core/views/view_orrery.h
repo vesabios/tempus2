@@ -1252,10 +1252,18 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     {
         OrreryViewState *wpl = (OrreryViewState *)(uintptr_t)buf;
         const PlanetsNow *pn3 = &st->planets;
-        // The astrolabe is PERIOD ACCURATE: no planets on the plate
-        // (Seren) — CAELVM is the planets' only chart seat, and they
-        // fade in place on flights to the plate (absent-seat rule)
-        bool chart3 = st->skyv && skw > 0.001f;
+        // The astrolabe is PERIOD ACCURATE: no planets VISIBLE on the
+        // plate — but they still TRAVEL true (Seren: like the stars,
+        // move them correctly and fade them out). POSITION rides the
+        // whole chart family (sky seat -> plate seat); PRESENCE rides
+        // CAELVM's share alone, so they dissolve en route and the
+        // plate stands period-pure at rest.
+        float abp = (float)st->astb;
+        float wS3 = (st->skyv && skw > 0.001f) ? skw : 0.0f;
+        float wA3 = (st->astv && abp > 0.001f) ? abp : 0.0f;
+        float chf = wS3 + wA3;
+        if (chf > 1.0f) chf = 1.0f;
+        bool chart3 = chf > 0.0f && st->skyv;
         float fin3 = ink_in(INK_BORN, skw);
         float a_pl3 = ink_in(INK_PLANET, ss);
         for (int p = 0; p < PL_COUNT; p++) {
@@ -1279,10 +1287,16 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                     wpl->pl_ring_a[p] = wpl->pl_ca[p];
             } else {
                 const SkyViewState *sv = st->skyv;
+                const AstroViewState *av = st->astv;
                 int b = (p < PL_EARTH) ? BODY_MERCURY + p
                                        : BODY_MERCURY + p - 1;
-                float cx3 = sv->pl_x[b];
-                float cy3 = sv->pl_y[b];
+                float ct = wS3 + wA3;
+                float cx3 = (wS3 > 0 ? sv->pl_x[b] * wS3 : 0)
+                          + (wA3 > 0 && av ? av->pl_x[b] * wA3 : 0);
+                float cy3 = (wS3 > 0 ? sv->pl_y[b] * wS3 : 0)
+                          + (wA3 > 0 && av ? av->pl_y[b] * wA3 : 0);
+                cx3 /= ct > 0 ? ct : 1.0f;
+                cy3 /= ct > 0 ? ct : 1.0f;
                 // The machine seat is the LIVE morphing ring (base_w
                 // flies with the station), and its claim is the
                 // station weight x the machine's own bead presence
@@ -1298,7 +1312,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 orr__ecl_dir(pn3->helio_lon[p], &dx3, &dy3);
                 float orbr3 = orr__orbit_r(p, base_w);
                 float pw3 = (float)tempus_smoothstep(0.0, 1.0,
-                                                     1.0 - skw)
+                                                     1.0 - chf)
                           * ink_in(INK_BEAD_CLAIM, ss);
                 wpl->pl_cx[p] = dx3 * orbr3 * pw3
                               + cx3 * (1.0f - pw3);
