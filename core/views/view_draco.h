@@ -238,15 +238,27 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
     }
 
     // ---- The reading ----
+    // Degree within the sign rides along (archaic additive numerals),
+    // so the node's slow regression READS as motion — without it, a
+    // node near a cusp flips signs under the scrub as if at random
+    static const char *draco__deg[30] = {
+        "", "I", "II", "III", "IIII", "V", "VI", "VII", "VIII",
+        "VIIII", "X", "XI", "XII", "XIII", "XIIII", "XV", "XVI",
+        "XVII", "XVIII", "XVIIII", "XX", "XXI", "XXII", "XXIII",
+        "XXIIII", "XXV", "XXVI", "XXVII", "XXVIII", "XXVIIII",
+    };
     {
         int hs = (int)(st->node_lon / 30.0) % 12;
         int ts = (hs + 6) % 12;
-        char line[40];
+        int dg = (int)fmod(st->node_lon, 30.0);
+        char line[48];
         draw_set_color(d, dca(0.80f, 0.77f, 0.70f, 0.95f));
-        snprintf(line, sizeof(line), "CAPVT IN %s", draco__sign_abl[hs]);
+        snprintf(line, sizeof(line), "CAPVT IN %s %s",
+                 draco__sign_abl[hs], draco__deg[dg]);
         draw_text_centered(d, FONT_month, 0, -18.0f, line);
         draw_set_color(d, dca(0.50f, 0.49f, 0.46f, 0.55f));
-        snprintf(line, sizeof(line), "CAVDA IN %s", draco__sign_abl[ts]);
+        snprintf(line, sizeof(line), "CAVDA IN %s %s",
+                 draco__sign_abl[ts], draco__deg[dg]);
         draw_text_centered(d, FONT_date, 0, 18.0f, line);
         if (season > 0.15f) {
             DrawColor g = dc_scale(s->sunrise_handle, 1.0f);
