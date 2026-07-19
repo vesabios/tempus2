@@ -1596,32 +1596,35 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         {
             float wS = (st->skyv && skw > 0.001f) ? skw : 0.0f;
             float wD = (st->drav && dw2 > 0.001f) ? dw2 : 0.0f;
-            if (wS > 0.0f || wD > 0.0f) {
+            float wA = (st->astv && ab2 > 0.001f) ? ab2 : 0.0f;
+            if (wS > 0.0f || wD > 0.0f || wA > 0.0f) {
                 // MEMBER ROWS (Stage 2): seat 0 = the machine's composed
-                // moon; seats 1..2 = the chart stations' published
-                // members. The astrolabe declares NO moon seat (period
-                // accuracy — brass carried no moon pointer): the moon
-                // fades in place on flights to the plate instead.
-                float wB = 1.0f - wS - wD;
+                // moon; seats 1..3 = the chart stations' published
+                // members (CAELVM, DRACO, the astrolabe's plate).
+                float wB = 1.0f - wS - wD - wA;
                 if (wB < 0.0f) wB = 0.0f;
-                double wT = wB + wS + wD;
-                double w[3] = { wB / wT, wS / wT, wD / wT };
-                float mx[3] = { mmx, wS > 0 ? st->skyv->lum_moon_x : 0,
-                                wD > 0 ? st->drav->lum_moon_x : 0 };
-                float my[3] = { mmy, wS > 0 ? st->skyv->lum_moon_y : 0,
-                                wD > 0 ? st->drav->lum_moon_y : 0 };
-                seat_mix_pos(mx, my, w, 3, &mmx, &mmy);
-                float mr[3] = { mmr, wS > 0 ? st->skyv->lum_moon_r : 0,
-                                28.0f };
+                double wT = wB + wS + wD + wA;
+                double w[4] = { wB / wT, wS / wT, wD / wT, wA / wT };
+                float mx[4] = { mmx, wS > 0 ? st->skyv->lum_moon_x : 0,
+                                wD > 0 ? st->drav->lum_moon_x : 0,
+                                wA > 0 ? st->astv->lum_moon_x : 0 };
+                float my[4] = { mmy, wS > 0 ? st->skyv->lum_moon_y : 0,
+                                wD > 0 ? st->drav->lum_moon_y : 0,
+                                wA > 0 ? st->astv->lum_moon_y : 0 };
+                seat_mix_pos(mx, my, w, 4, &mmx, &mmy);
+                float mr[4] = { mmr, wS > 0 ? st->skyv->lum_moon_r : 0,
+                                28.0f,
+                                wA > 0 ? st->astv->lum_moon_r : 0 };
                 mmr = mr[0] * (float)w[0] + mr[1] * (float)w[1]
-                    + mr[2] * (float)w[2];
-                float lv[3][3];
+                    + mr[2] * (float)w[2] + mr[3] * (float)w[3];
+                float lv[4][3];
                 memcpy(lv[0], ml, sizeof(lv[0]));
                 for (int i = 0; i < 3; i++) {
                     lv[1][i] = wS > 0 ? st->skyv->lum_moon_light[i] : 0;
                     lv[2][i] = wD > 0 ? st->drav->lum_light[i] : 0;
+                    lv[3][i] = wA > 0 ? st->astv->lum_moon_light[i] : 0;
                 }
-                seat_mix_dir3((const float (*)[3])lv, w, 3, ml);
+                seat_mix_dir3((const float (*)[3])lv, w, 4, ml);
             }
         }
         // Publish for VIEW_LVMEN (and the pointer code's exclusions)
@@ -1631,9 +1634,7 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         stw->lum_moon_x = mmx;
         stw->lum_moon_y = mmy;
         stw->lum_moon_r = mmr;
-        // The absent-seat rule at the plate: no moon pointer on a
-        // period astrolabe, so the moon fades where it stands
-        stw->lum_moon_a = moon_dim * ink_out(INK_MACHINE_EXIT, ab2);
+        stw->lum_moon_a = moon_dim;
         memcpy(stw->lum_moon_light, ml, sizeof(ml));
         {
             // Tidal locking: geo shows the near side (lon 0 centered,
@@ -1651,7 +1652,11 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             globe_rot_slerp_cont(rot_geo, rot_helio, morb,
                                  stw->moon_pq, &stw->moon_pq_valid,
                                  mrot0);
-            globe_rot_slerp_cont(mrot0, rot_geo, skw,
+            // Every CHART returns the moon to the near side — the
+            // claim is the chart family's combined weight
+            double chw = skw + ab2;
+            if (chw > 1.0) chw = 1.0;
+            globe_rot_slerp_cont(mrot0, rot_geo, chw,
                                  stw->lum_pq, &stw->lum_pq_valid,
                                  stw->lum_moon_rot);
         }
