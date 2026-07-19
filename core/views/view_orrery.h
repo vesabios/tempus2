@@ -1171,26 +1171,36 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
         d->alpha = base_alpha;
 
-        // The sky blend is just one more term of the SAME object's
-        // composition: position and size ease to the chart targets the
-        // sky view publishes. VIEW_LVMEN draws the result, once.
-        if (skw > 0.001f && st->skyv) {
-            px = px * (1.0f - skw) + st->skyv->lum_sun_x * skw;
-            py = py * (1.0f - skw) + st->skyv->lum_sun_y * skw;
-            sz = sz * (1.0f - skw) + st->skyv->lum_sun_r * skw;
-        }
-
-        // ... and the dragon's road is another: DRACO publishes its
-        // ecliptic seat and the sun flies there, taking the station's
-        // gold on the way (the view itself renders only at full blend)
+        // The chart stations (CAELVM, DRACO) are alternatives to the
+        // MACHINE's seat, not to each other — BARYCENTRIC weights, so
+        // a sky<->draco flight travels chart-to-chart while the
+        // machine's weight pins to zero (sequential lerps let the
+        // aperture leak back in mid-flight: the sun dipped inward
+        // and back out).
         float dw = (float)st->drab;
-        if (dw > 0.001f && st->drav) {
-            px = px * (1.0f - dw) + st->drav->lum_sun_x * dw;
-            py = py * (1.0f - dw) + st->drav->lum_sun_y * dw;
-            sz = sz * (1.0f - dw) + 28.0f * dw;
-            sun_c.r += (0.85f - sun_c.r) * dw;
-            sun_c.g += (0.62f - sun_c.g) * dw;
-            sun_c.b += (0.18f - sun_c.b) * dw;
+        float wS = (st->skyv && skw > 0.001f) ? skw : 0.0f;
+        float wD = (st->drav && dw > 0.001f) ? dw : 0.0f;
+        if (wS > 0.0f || wD > 0.0f) {
+            float wB = 1.0f - wS - wD;
+            if (wB < 0.0f) wB = 0.0f;
+            float wT = wB + wS + wD;
+            float kx = px * wB, ky = py * wB, ks = sz * wB;
+            if (wS > 0.0f) {
+                kx += st->skyv->lum_sun_x * wS;
+                ky += st->skyv->lum_sun_y * wS;
+                ks += st->skyv->lum_sun_r * wS;
+            }
+            if (wD > 0.0f) {
+                kx += st->drav->lum_sun_x * wD;
+                ky += st->drav->lum_sun_y * wD;
+                ks += 28.0f * wD;
+            }
+            px = kx / wT; py = ky / wT; sz = ks / wT;
+            // the dragon's gold rides its share of the mix
+            float gd = wD / wT;
+            sun_c.r += (0.85f - sun_c.r) * gd;
+            sun_c.g += (0.62f - sun_c.g) * gd;
+            sun_c.b += (0.18f - sun_c.b) * gd;
         }
 
         // Publish for VIEW_LVMEN and for hit-testing
@@ -1344,42 +1354,43 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 for (int i = 0; i < 3; i++) ml[i] /= mn2;
         }
 
-        // The sky blend: one more term of the SAME object's
-        // composition — position, size, orientation, and phase light
-        // all ease to the chart targets the sky view publishes
-        if (skw > 0.001f && st->skyv) {
-            mmx = mmx * (1.0f - skw) + st->skyv->lum_moon_x * skw;
-            mmy = mmy * (1.0f - skw) + st->skyv->lum_moon_y * skw;
-            mmr = mmr * (1.0f - skw) + st->skyv->lum_moon_r * skw;
-            float mn3 = 0;
-            for (int i = 0; i < 3; i++) {
-                ml[i] = ml[i] * (1.0f - skw)
-                      + st->skyv->lum_moon_light[i] * skw;
-                mn3 += ml[i] * ml[i];
-            }
-            mn3 = sqrtf(mn3);
-            if (mn3 > 1.0e-3f)
-                for (int i = 0; i < 3; i++) ml[i] /= mn3;
-        }
-
-        // The dragon's wave: DRACO publishes the moon's seat at its
-        // true (scaled) latitude and the canonical lune light — from
-        // the clock station this is a pure position/size glide, since
-        // the aperture already wears the same phase-frame light
+        // Chart stations mix BARYCENTRICALLY (see the sun): the
+        // machine's aperture seat must not leak into a sky<->draco
+        // flight. Position, size, and phase light all share weights.
         float dw2 = (float)st->drab;
-        if (dw2 > 0.001f && st->drav) {
-            mmx = mmx * (1.0f - dw2) + st->drav->lum_moon_x * dw2;
-            mmy = mmy * (1.0f - dw2) + st->drav->lum_moon_y * dw2;
-            mmr = mmr * (1.0f - dw2) + 28.0f * dw2;
-            float mn4 = 0;
-            for (int i = 0; i < 3; i++) {
-                ml[i] = ml[i] * (1.0f - dw2)
-                      + st->drav->lum_light[i] * dw2;
-                mn4 += ml[i] * ml[i];
+        {
+            float wS = (st->skyv && skw > 0.001f) ? skw : 0.0f;
+            float wD = (st->drav && dw2 > 0.001f) ? dw2 : 0.0f;
+            if (wS > 0.0f || wD > 0.0f) {
+                float wB = 1.0f - wS - wD;
+                if (wB < 0.0f) wB = 0.0f;
+                float wT = wB + wS + wD;
+                float kx = mmx * wB, ky = mmy * wB, kr = mmr * wB;
+                float kl[3] = { ml[0] * wB, ml[1] * wB, ml[2] * wB };
+                if (wS > 0.0f) {
+                    kx += st->skyv->lum_moon_x * wS;
+                    ky += st->skyv->lum_moon_y * wS;
+                    kr += st->skyv->lum_moon_r * wS;
+                    for (int i = 0; i < 3; i++)
+                        kl[i] += st->skyv->lum_moon_light[i] * wS;
+                }
+                if (wD > 0.0f) {
+                    kx += st->drav->lum_moon_x * wD;
+                    ky += st->drav->lum_moon_y * wD;
+                    kr += 28.0f * wD;
+                    for (int i = 0; i < 3; i++)
+                        kl[i] += st->drav->lum_light[i] * wD;
+                }
+                mmx = kx / wT; mmy = ky / wT; mmr = kr / wT;
+                float mn3 = 0;
+                for (int i = 0; i < 3; i++) {
+                    ml[i] = kl[i] / wT;
+                    mn3 += ml[i] * ml[i];
+                }
+                mn3 = sqrtf(mn3);
+                if (mn3 > 1.0e-3f)
+                    for (int i = 0; i < 3; i++) ml[i] /= mn3;
             }
-            mn4 = sqrtf(mn4);
-            if (mn4 > 1.0e-3f)
-                for (int i = 0; i < 3; i++) ml[i] /= mn4;
         }
         // Publish for VIEW_LVMEN (and the pointer code's exclusions)
         stw->moon_x = mmx;
