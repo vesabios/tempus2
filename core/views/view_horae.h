@@ -360,16 +360,9 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                       sx * HORAE_CLOCK_R, sy * HORAE_CLOCK_R, 1.0f);
         }
 
-        // The current cell wears bright rims
-        {
-            float p0 = rise + u[hcur] + rot + 1.0f;
-            float p1 = rise + u[hcur + 1] + rot + 1.0f;
-            draw_set_color(d, dca(0.92f, 0.89f, 0.80f, 0.9f));
-            horae__cell(d, 0, 0, HORAE_CLOCK_R - 2.0f, HORAE_CLOCK_R,
-                        p0, p1);
-            horae__cell(d, 0, 0, HORAE_CLOCK_R - HORAE_CLOCK_W,
-                        HORAE_CLOCK_R - HORAE_CLOCK_W + 2.0f, p0, p1);
-        }
+        // (The current cell used to wear bright rims here — retired:
+        // the boxed highlight fought the sky band's own colors. The
+        // hand at the contact already names the hour.)
 
         // Full archaic: no civil ticks, no arabic — the TEMPORAL cells
         // carry roman numerals, I through XII twice, ENGRAVED ALONG
