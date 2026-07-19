@@ -557,37 +557,54 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                     calt[k] = salt2;
                     sky__project(saz, salt2, &cx2[k], &cy2[k]);
                 }
-                draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.8f));
+                // Below the horizon the figures wear the deep of
+                // night — dark violet, plainly visible, so the
+                // projection's outer-annulus warp can be SEEN
+                // stretching them toward the rim (Seren)
                 for (int e = 0; e < cn->nedges; e++) {
                     int a2 = cn->edges[e * 2];
                     int b2 = cn->edges[e * 2 + 1];
                     bool up2 = calt[a2] > 0 && calt[b2] > 0;
+                    if (up2)
+                        draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
+                                              0.8f));
+                    else
+                        draw_set_color(d, dca(0.38f, 0.33f, 0.62f,
+                                              0.8f));
                     d->alpha = base_alpha * fb * csup
-                             * (up2 ? 0.30f : 0.10f);
+                             * (up2 ? 0.30f : 0.30f);
                     draw_line(d, cx2[a2], cy2[a2],
                               cx2[b2], cy2[b2], 1.0f);
                 }
-                float nx = 0, ny = 0;
+                float nx = 0, ny = 0, ax3 = 0, ay3 = 0;
                 int nup = 0;
                 for (int k = 0; k < cn->nstars; k++) {
                     bool up2 = calt[k] > 0;
                     d->alpha = base_alpha * fb * csup
-                             * (up2 ? 0.60f : 0.20f);
-                    draw_set_color(d, dca(0.80f, 0.77f, 0.68f,
-                                          0.9f));
+                             * (up2 ? 0.60f : 0.45f);
+                    draw_set_color(d, up2
+                        ? dca(0.80f, 0.77f, 0.68f, 0.9f)
+                        : dca(0.48f, 0.42f, 0.75f, 0.9f));
                     draw_circle_filled(d, cx2[k], cy2[k], 1.8f);
+                    ax3 += cx2[k]; ay3 += cy2[k];
                     if (up2) { nx += cx2[k]; ny += cy2[k]; nup++; }
                 }
-                if (nup >= 2) {
+                {
                     char nm[20];
                     snprintf(nm, sizeof(nm), "%s", cn->name);
                     float tw2 = sdf_measure_width(fw2, nm) * 11.0f;
-                    d->alpha = base_alpha * fb * csup * 0.35f;
-                    draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
-                                          0.8f));
-                    draw_text_ex(d, fw2, 11.0f,
-                                 nx / nup - tw2 * 0.5f,
-                                 ny / nup + 4.0f, nm);
+                    float lx2, ly2;
+                    bool up3 = nup >= 2;
+                    if (up3) { lx2 = nx / nup; ly2 = ny / nup; }
+                    else { lx2 = ax3 / cn->nstars;
+                           ly2 = ay3 / cn->nstars; }
+                    d->alpha = base_alpha * fb * csup
+                             * (up3 ? 0.35f : 0.28f);
+                    draw_set_color(d, up3
+                        ? dca(0.62f, 0.60f, 0.55f, 0.8f)
+                        : dca(0.44f, 0.39f, 0.68f, 0.8f));
+                    draw_text_ex(d, fw2, 11.0f, lx2 - tw2 * 0.5f,
+                                 ly2 + 4.0f, nm);
                 }
             }
             d->alpha = base_alpha;
