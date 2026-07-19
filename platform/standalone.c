@@ -214,7 +214,7 @@ static int station_by_name(const char *name, size_t len) {
 static void set_worldview(Worldview wv) {
     if (wv == g_worldview) return;
     // Leaving the world chart commits the chosen location to disk
-    if (g_worldview == WV_ORBIS)
+    if (g_worldview == WV_ORBIS && !g_shot_path)
         config_save(&g_tempus.config);
     g_worldview = wv;
 
@@ -701,7 +701,12 @@ static void init(void) {
 
     // Initialize Tempus core state
     TempusConfig cfg = tempus_default_config();
-    config_load(&cfg);
+    // Shot runs are measurement instruments: the observer is pinned to
+    // defaults — user config is neither read nor written, so baselines
+    // can't drift when the live app saves a new location. An explicit
+    // TEMPUS_CONFIG is still honored (a deliberately frozen observer).
+    if (!getenv("TEMPUS_SHOT") || getenv("TEMPUS_CONFIG"))
+        config_load(&cfg);
 #if !defined(__EMSCRIPTEN__) && !defined(_WIN32)
     if (g_cfg_tz_name[0]) {
         setenv("TZ", g_cfg_tz_name, 1);
