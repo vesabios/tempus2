@@ -183,18 +183,6 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         orr__ecl_dir(st->node_lon + 180.0, &tx, &ty);
         float ha = 0.55f + (head_near ? 0.40f * season : 0.0f);
         float ta = 0.55f + (!head_near ? 0.40f * season : 0.0f);
-        // The feeding: a soft gold halo swells at the jaw where the
-        // meal happens — the sun's jaw for a solar eclipse, the
-        // opposite one (where the full moon stands) for a lunar
-        if (glow > 0.01f) {
-            bool at_head = solar ? head_near : !head_near;
-            float gx = at_head ? hx : tx, gy = at_head ? hy : ty;
-            DrawColor g = dc_scale(s->sunrise_handle, 1.0f);
-            g.a = 0.30f * glow;
-            draw_set_color(d, g);
-            draw_circle_filled(d, gx * DRACO_R, gy * DRACO_R,
-                               20.0f + 10.0f * glow);
-        }
         draw_set_color(d, dca(0.72f, 0.70f, 0.64f, ha));
         orr__strokes(d, draco__sg_caput, hx * DRACO_R, hy * DRACO_R,
                      hx, hy, 34.0f, 1.3f);
@@ -211,17 +199,32 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         float sx, sy;
         orr__ecl_dir(st->sun_lon, &sx, &sy);
         float spx = sx * DRACO_R, spy = sy * DRACO_R;
-        draw_set_color(d, dca(0.85f, 0.62f, 0.18f, 0.95f));
-        draw_circle_filled(d, spx, spy, 22.0f);
-        draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
-        draw_circle_stroked(d, spx, spy, 27.0f, 1.0f);
-
         float mx, my;
         orr__ecl_dir(st->moon_lon, &mx, &my);
         // The moon sits at its TRUE latitude, scaled by the wave's
         // own exaggeration — it rides the dragon's back exactly
         float mr = DRACO_R + DRACO_AMP / 5.145f * (float)st->moon_lat;
         float mpx = mx * mr, mpy = my * mr;
+
+        // The feeding halo rides the MEAL, not the jaw sigil — an
+        // eclipse can strike up to ~18 degrees from the crossing
+        // (the ecliptic limit), so the glow wraps the body being
+        // eaten: the sun at a solar eclipse, the moon at a lunar.
+        // Under the beads, a swelling gold ground.
+        if (glow > 0.01f) {
+            DrawColor g = dc_scale(s->sunrise_handle, 1.0f);
+            g.a = 0.30f * glow;
+            draw_set_color(d, g);
+            draw_circle_filled(d, solar ? spx : mpx,
+                               solar ? spy : mpy,
+                               28.0f + 12.0f * glow);
+        }
+
+        draw_set_color(d, dca(0.85f, 0.62f, 0.18f, 0.95f));
+        draw_circle_filled(d, spx, spy, 22.0f);
+        draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
+        draw_circle_stroked(d, spx, spy, 27.0f, 1.0f);
+
         GlobeCmd *gm = draw_globe_slot(d, mpx, mpy, 22.0f);
         if (gm) {
             // The clock aperture's own dress: PHASE-FRAME light, the
