@@ -80,3 +80,30 @@ assets/font_atlas.h assets/font_atlas.png: tools/bake_font
 clean:
 	rm -f $(TARGET) tools/bake_font
 	rm -rf build
+
+# ---- macOS screensaver bundle ----
+# The instrument as a .saver: same core, same GPU layer, hosted in a
+# ScreenSaverView. Ad-hoc signed for local use; shipping it to other
+# Macs needs a Developer ID and Apple notarization.
+SAVER = Tempus.saver
+
+.PHONY: saver saver-install
+
+saver:
+	@rm -rf $(SAVER)
+	@mkdir -p $(SAVER)/Contents/MacOS $(SAVER)/Contents/Resources
+	$(CC) $(CFLAGS) $(PLATFORM_CFLAGS) -bundle \
+	    -framework ScreenSaver -framework Cocoa -framework OpenGL \
+	    -framework Foundation \
+	    platform/saver.m core/spa.c -o $(SAVER)/Contents/MacOS/Tempus -lm
+	@cp platform/saver-Info.plist $(SAVER)/Contents/Info.plist
+	@cp assets/font_atlas.png assets/land_mask.png assets/moon_mask.png \
+	    $(SAVER)/Contents/Resources/
+	@codesign --force --deep --sign - $(SAVER) 2>/dev/null || true
+	@echo "built $(SAVER)"
+
+saver-install: saver
+	@mkdir -p ~/Library/Screen\ Savers
+	@rm -rf ~/Library/Screen\ Savers/$(SAVER)
+	@cp -R $(SAVER) ~/Library/Screen\ Savers/
+	@echo "installed to ~/Library/Screen Savers/$(SAVER)"

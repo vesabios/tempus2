@@ -21,3 +21,4 @@ tools/test_planets
 .DS_Store
 *.o
 flightmatrix/
+Tempus.saver/
