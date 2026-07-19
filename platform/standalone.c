@@ -272,8 +272,10 @@ static void set_view_opacities(void) {
                 * (1.0 - tempus_smoothstep(0.0, 0.55, offic))
                 * (1.0 - tempus_smoothstep(0.0, 0.55, draco));
     // ORBIS keeps the orrery: the globe IS the station (it grows to the
-    // closeup inside the orrery itself). Only the clock chrome bows out.
-    double orbis_fade = 1.0 - tempus_smoothstep(0.0, 0.55, orbis);
+    // closeup inside the orrery itself). Only the clock chrome bows out
+    // — and it bows out FAST (gone by a fifth of the flight): the dial
+    // furniture has no business hanging over the growing planet.
+    double orbis_fade = 1.0 - tempus_smoothstep(0.0, 0.20, orbis);
     // The calendar wheel survives into the sky as its bezel — the time
     // control rides along to every worldview
     g_scene.views[VIEW_CALENDAR].opacity = 1.0;
