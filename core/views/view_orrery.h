@@ -1252,8 +1252,17 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     {
         OrreryViewState *wpl = (OrreryViewState *)(uintptr_t)buf;
         const PlanetsNow *pn3 = &st->planets;
-        bool chart3 = st->skyv && skw > 0.001f;
-        float fin3 = ink_in(INK_BORN, skw);
+        // The CHART FAMILY: CAELVM and the astrolabe are the same sky
+        // in two projections — a planet's chart seat is the weighted
+        // mix of the two published positions, and the machine's claim
+        // yields to the family's combined presence
+        float abp = (float)st->astb;
+        float wS3 = (st->skyv && skw > 0.001f) ? skw : 0.0f;
+        float wA3 = (st->astv && abp > 0.001f) ? abp : 0.0f;
+        float chf = wS3 + wA3;
+        if (chf > 1.0f) chf = 1.0f;
+        bool chart3 = chf > 0.0f;
+        float fin3 = ink_in(INK_BORN, chf);
         float a_pl3 = ink_in(INK_PLANET, ss);
         for (int p = 0; p < PL_COUNT; p++) {
             wpl->pl_ring_a[p] = 0;
@@ -1276,8 +1285,16 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                     wpl->pl_ring_a[p] = wpl->pl_ca[p];
             } else {
                 const SkyViewState *sv = st->skyv;
+                const AstroViewState *av = st->astv;
                 int b = (p < PL_EARTH) ? BODY_MERCURY + p
                                        : BODY_MERCURY + p - 1;
+                float ct = wS3 + wA3;
+                float cx3 = (wS3 > 0 ? sv->pl_x[b] * wS3 : 0)
+                          + (wA3 > 0 ? av->pl_x[b] * wA3 : 0);
+                float cy3 = (wS3 > 0 ? sv->pl_y[b] * wS3 : 0)
+                          + (wA3 > 0 ? av->pl_y[b] * wA3 : 0);
+                cx3 /= ct;
+                cy3 /= ct;
                 // The machine seat is the LIVE morphing ring (base_w
                 // flies with the station), and its claim is the
                 // station weight x the machine's own bead presence
@@ -1293,12 +1310,12 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 orr__ecl_dir(pn3->helio_lon[p], &dx3, &dy3);
                 float orbr3 = orr__orbit_r(p, base_w);
                 float pw3 = (float)tempus_smoothstep(0.0, 1.0,
-                                                     1.0 - skw)
+                                                     1.0 - chf)
                           * ink_in(INK_BEAD_CLAIM, ss);
                 wpl->pl_cx[p] = dx3 * orbr3 * pw3
-                              + sv->pl_x[b] * (1.0f - pw3);
+                              + cx3 * (1.0f - pw3);
                 wpl->pl_cy[p] = dy3 * orbr3 * pw3
-                              + sv->pl_y[b] * (1.0f - pw3);
+                              + cy3 * (1.0f - pw3);
                 wpl->pl_cr[p] = orr__planet[p].size * pw3
                               + sv->pl_r[b] * (1.0f - pw3);
                 wpl->pl_ca[p] = sv->pl_ba[b]

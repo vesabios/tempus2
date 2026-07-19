@@ -388,6 +388,9 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // counterpart fades in late.
     float mb = (float)st->blend;               // morph position
     float fb = ink_in(INK_CHART_LATE, st->blend);
+    // The astrolabe takes the shared sky elements with it — this
+    // chart's copies bow out as the plate rises
+    float asup = 1.0f - (float)tempus_smoothstep(0.0, 0.15, st->astb);
     sky__set_center(st->view_az, st->view_alt);
     // Machine-counterpart weight: only MACHINA has zodiac/rings/beads
     // to hand off. Parked there (system stage 1) every element takes
@@ -420,8 +423,6 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         // The astrolabe takes the sky with it: ITS wash draws the
         // shared shape (this bowl's projection blended toward the
         // plate's), so the bowl bows out as soon as the plate rises
-        float asup = 1.0f - (float)tempus_smoothstep(0.0, 0.15,
-                                                     st->astb);
         d->alpha = base_alpha * mb * asup;
         // Under the earth: the whole chart, a dark warm ground
         draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
@@ -516,7 +517,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             float x1 = rx1 * ORR_WEB_R * mw + sx1 * (1 - mw);
             float y1 = ry1 * ORR_WEB_R * mw + sy1 * (1 - mw);
             bool vis = st->ecl_alt[i] > 0.0f && st->ecl_alt[j] > 0.0f;
-            float a = 0.22f * mw + (vis ? 0.30f : 0.13f) * sw;
+            float a = (0.22f * mw + (vis ? 0.30f : 0.13f) * sw) * asup;
             draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
             draw_line(d, x0, y0, x1, y1, 1.0f);
         }
@@ -528,7 +529,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             float x = rx * ORR_WEB_R * mw + sx * (1 - mw);
             float y = ry * ORR_WEB_R * mw + sy * (1 - mw);
             bool vis = st->sign_alt[i] > 0.0f;
-            float a = 0.30f * mw + (vis ? 0.45f : 0.22f) * sw;
+            float a = (0.30f * mw + (vis ? 0.45f : 0.22f) * sw) * asup;
             draw_set_color(d, dca(0.65f, 0.52f, 0.25f, a));
             draw_line(d, x - 4.0f, y - 4.0f, x + 4.0f, y + 4.0f, 1.0f);
             draw_line(d, x - 4.0f, y + 4.0f, x + 4.0f, y - 4.0f, 1.0f);
@@ -612,6 +613,43 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             if (i > 0)
                 draw_line(d, px2, py2, hx2, hy2, 1.0f);
             px2 = hx2; py2 = hy2;
+        }
+        d->alpha = base_alpha;
+    }
+
+    // ---- The fixed stars: the rete's pointer set, on this chart ----
+    // The SAME fifteen stars the astrolabe carries (planets_stars —
+    // one table, every chart): risen stars bright with their names,
+    // set stars anonymous ghosts. Suppressed as the plate rises (the
+    // astrolabe draws the shared, projection-blended copies).
+    if (fb > 0.001f && asup > 0.004f) {
+        float lst2 = (float)fmod(
+            planets__gmst(st->tv.jd_current + st->tv.percent_of_day
+                          - 0.5 - t->config.timezone / 24.0)
+            + t->config.longitude, 360.0);
+        int fw2 = _font_compat[FONT_date].weight;
+        for (int i = 0; i < PLANETS_NSTARS; i++) {
+            float saz, salt2;
+            planets_star_azalt(planets_stars[i].ra,
+                               planets_stars[i].dec, lst2,
+                               (float)t->config.latitude,
+                               &saz, &salt2);
+            float x, y;
+            sky__project(saz, salt2, &x, &y);
+            bool up = salt2 > 0.0f;
+            if (up) {
+                d->alpha = base_alpha * fb * asup;
+                draw_set_color(d, dca(0.92f, 0.88f, 0.76f, 1.0f));
+                draw_circle_filled(d, x, y, 3.0f);
+                d->alpha = base_alpha * fb * asup * 0.9f;
+                draw_set_color(d, dca(0.90f, 0.87f, 0.76f, 0.95f));
+                draw_text_ex(d, fw2, 13.0f, x + 7.0f, y + 4.5f,
+                             planets_stars[i].name);
+            } else {
+                d->alpha = base_alpha * fb * asup * 0.28f;
+                draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.7f));
+                draw_circle_stroked(d, x, y, 2.2f, 1.0f);
+            }
         }
         d->alpha = base_alpha;
     }

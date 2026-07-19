@@ -53,6 +53,12 @@ struct AstroViewState {
     float lum_sun_x, lum_sun_y, lum_sun_r;
     float lum_moon_x, lum_moon_y, lum_moon_r;
     float lum_moon_light[3];
+
+    // Planet chart targets (BODY_* index): the plate's stereographic
+    // positions for the same az/alt CAELVM publishes policy for —
+    // radius, subdual, and stroke are the SKY's (same sky, same
+    // instant); only the projection differs.
+    float pl_x[BODY_COUNT], pl_y[BODY_COUNT];
 };
 
 #endif // VIEW_ASTRO_H
@@ -107,26 +113,9 @@ static inline bool astro__project_altaz(float alt_deg, float az_deg,
     return astro__project(dec, H, x, y);
 }
 
-// The named stars of the rete — the classical pointer set (J2000)
-typedef struct { const char *name; float ra, dec; } AstroStar;
-static const AstroStar astro__stars[] = {
-    { "SIRIVS",     101.287f, -16.716f },
-    { "PROCYON",    114.825f,   5.225f },
-    { "REGVLVS",    152.093f,  11.967f },
-    { "SPICA",      201.298f, -11.161f },
-    { "ARCTVRVS",   213.915f,  19.182f },
-    { "ANTARES",    247.352f, -26.432f },
-    { "VEGA",       279.235f,  38.784f },
-    { "ALTAIR",     297.696f,   8.868f },
-    { "DENEB",      310.358f,  45.280f },
-    { "FOMALHAVT",  344.413f, -29.622f },
-    { "ALDEBARAN",   68.980f,  16.509f },
-    { "RIGEL",       78.634f,  -8.202f },
-    { "CAPELLA",     79.172f,  45.998f },
-    { "BETELGEVSE",  88.793f,   7.407f },
-    { "POLLVX",     116.329f,  28.026f },
-};
-#define ASTRO_NSTARS (int)(sizeof(astro__stars) / sizeof(astro__stars[0]))
+// The stars live in planets.h now — one table, every chart
+#define astro__stars planets_stars
+#define ASTRO_NSTARS PLANETS_NSTARS
 
 static void astro_init(void *buf, const Tempus *t, const RenderStyle *s) {
     AstroViewState *st = (AstroViewState *)buf;
@@ -205,6 +194,18 @@ static void astro_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         st->lum_moon_light[2] = -cosf(bb);
     }
 
+    // Planet targets: the sky's own az/alt through THIS projection
+    if (st->skyv) {
+        for (int b = BODY_MERCURY; b < BODY_COUNT; b++) {
+            float px2, py2;
+            astro__project_altaz(st->skyv->body_alt[b],
+                                 st->skyv->body_az[b], lat,
+                                 &px2, &py2);
+            st->pl_x[b] = px2;
+            st->pl_y[b] = py2;
+        }
+    }
+
     double key = floor(jd_ut * 1440.0);
     if (key == st->sky_jd && lat == st->sky_lat) return;
     st->sky_jd = key;
@@ -249,6 +250,19 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
     float lst = (float)fmod(planets__gmst(jd_ut) + t->config.longitude,
                             360.0);
 
+    // The chart family's shared frame: how much of every shared
+    // element leans toward CAELVM's projection (wc), and the family's
+    // combined presence (fam) — shared elements draw at fam strength
+    // so nothing dips mid-handoff
+    float skw2 = (float)st->skb;
+    float wc = 0.0f;
+    float fam = (float)st->blend + skw2;
+    if (fam > 1.0f) fam = 1.0f;
+    if (st->skyv && skw2 > 0.001f) {
+        wc = skw2 / ((float)st->blend + skw2);
+        sky__set_center(st->skyv->view_az, st->skyv->view_alt);
+    }
+
     // The sun first — its altitude keys the whole plate's light
     float sun_dec, sun_ha, sun_alt, sx, sy;
     bool sun_on;
@@ -283,14 +297,6 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
         // the plate's stereographic one (rule 3: evaluate both live,
         // blend outputs). The wash strength rides the chart family's
         // combined presence, so the sky never dips mid-handoff.
-        float skw2 = (float)st->skb;
-        float wc = 0.0f;
-        float fam = (float)st->blend + skw2;
-        if (fam > 1.0f) fam = 1.0f;
-        if (st->skyv && skw2 > 0.001f) {
-            wc = skw2 / ((float)st->blend + skw2);
-            sky__set_center(st->skyv->view_az, st->skyv->view_alt);
-        }
         d->alpha = 0.94f * fam;
         float zx, zy;
         astro__project(lat, 0, &zx, &zy);
@@ -457,13 +463,24 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
         float px = 0, py = 0;
         bool pv = false;
         for (int i = 0; i <= 180; i++) {
-            float lam = (float)i / 180.0f * 360.0f * d2r;
+            float laml = (float)i / 180.0f * 360.0f;
+            float lam = laml * d2r;
             float dec = asinf(sinf(eps) * sinf(lam));
             float ra = atan2f(cosf(eps) * sinf(lam), cosf(lam)) / d2r;
             float x, y;
             bool v = astro__project(dec / d2r, lst - ra, &x, &y);
+            if (v && wc > 0.0f) {
+                double saz, salt2;
+                planets_sky_azalt(laml, 0.0, jd_ut,
+                                  t->config.latitude,
+                                  t->config.longitude, &saz, &salt2);
+                float cx2, cy2;
+                sky__project((float)saz, (float)salt2, &cx2, &cy2);
+                x = x * (1.0f - wc) + cx2 * wc;
+                y = y * (1.0f - wc) + cy2 * wc;
+            }
             if (v && pv) {
-                d->alpha = base_alpha * 0.50f;
+                d->alpha = fam * 0.50f;
                 draw_line(d, px, py, x, y, 1.3f);
             }
             px = x; py = y; pv = v;
@@ -476,11 +493,22 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
             float ra = atan2f(cosf(eps) * sinf(lam), cosf(lam)) / d2r;
             float x, y;
             if (!astro__project(dec / d2r, lst - ra, &x, &y)) continue;
-            if (x * x + y * y > ASTRO_R_CAP * ASTRO_R_CAP) continue;
+            if (wc > 0.0f) {
+                double saz, salt2;
+                planets_sky_azalt((float)sign * 30.0f + 15.0f, 0.0,
+                                  jd_ut, t->config.latitude,
+                                  t->config.longitude, &saz, &salt2);
+                float cx2, cy2;
+                sky__project((float)saz, (float)salt2, &cx2, &cy2);
+                x = x * (1.0f - wc) + cx2 * wc;
+                y = y * (1.0f - wc) + cy2 * wc;
+            }
+            if (x * x + y * y > ASTRO_R_CAP * ASTRO_R_CAP && wc < 0.5f)
+                continue;
             float rn = sqrtf(x * x + y * y);
             if (rn < 1) continue;
             float ux = x / rn, uy = y / rn;
-            d->alpha = base_alpha * 0.55f;
+            d->alpha = fam * 0.55f;
             draw_set_color(d, dca(0.70f, 0.54f, 0.24f, 0.85f));
             orr__zodiac_glyph(d, sign, x + ux * 13.0f, y + uy * 13.0f,
                               ux, uy, 13.0f);
@@ -496,24 +524,35 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
             float x, y;
             if (!astro__project(astro__stars[i].dec, ha, &x, &y))
                 continue;
-            if (x * x + y * y > ASTRO_R_CAP * ASTRO_R_CAP) continue;
+            if (wc > 0.0f) {
+                float saz, salt2;
+                planets_star_azalt(astro__stars[i].ra,
+                                   astro__stars[i].dec, lst, lat,
+                                   &saz, &salt2);
+                float cx2, cy2;
+                sky__project(saz, salt2, &cx2, &cy2);
+                x = x * (1.0f - wc) + cx2 * wc;
+                y = y * (1.0f - wc) + cy2 * wc;
+            }
+            if (x * x + y * y > ASTRO_R_CAP * ASTRO_R_CAP && wc < 0.5f)
+                continue;
             bool up = alt > 0.0f;
             float rn = sqrtf(x * x + y * y);
             float ux = rn > 1 ? x / rn : 0, uy = rn > 1 ? y / rn : -1;
             if (up) {
-                d->alpha = base_alpha;
+                d->alpha = fam;
                 draw_set_color(d, dca(0.92f, 0.88f, 0.76f, 1.0f));
                 draw_circle_filled(d, x, y, 3.0f);
-                d->alpha = base_alpha * 0.7f;
+                d->alpha = fam * 0.7f;
                 draw_line(d, x, y, x - ux * 16.0f, y - uy * 16.0f, 1.2f);
                 // Risen names in bright warm ink — they must read on
                 // the daylight blue as well as the night ink
-                d->alpha = base_alpha * 0.9f;
+                d->alpha = fam * 0.9f;
                 draw_set_color(d, dca(0.90f, 0.87f, 0.76f, 0.95f));
                 draw_text_ex(d, fw, 13.0f, x + 7.0f, y + 4.5f,
                              astro__stars[i].name);
             } else {
-                d->alpha = base_alpha * 0.28f;
+                d->alpha = fam * 0.28f;
                 draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.7f));
                 draw_circle_stroked(d, x, y, 2.2f, 1.0f);
             }

@@ -219,6 +219,43 @@ static inline int planets_body_pl(int body) {
     }
 }
 
+// The named stars of the rete — the classical pointer set (J2000),
+// shared by every chart that shows the fixed stars
+typedef struct { const char *name; float ra, dec; } PlanetStar;
+static const PlanetStar planets_stars[] = {
+    { "SIRIVS",     101.287f, -16.716f },
+    { "PROCYON",    114.825f,   5.225f },
+    { "REGVLVS",    152.093f,  11.967f },
+    { "SPICA",      201.298f, -11.161f },
+    { "ARCTVRVS",   213.915f,  19.182f },
+    { "ANTARES",    247.352f, -26.432f },
+    { "VEGA",       279.235f,  38.784f },
+    { "ALTAIR",     297.696f,   8.868f },
+    { "DENEB",      310.358f,  45.280f },
+    { "FOMALHAVT",  344.413f, -29.622f },
+    { "ALDEBARAN",   68.980f,  16.509f },
+    { "RIGEL",       78.634f,  -8.202f },
+    { "CAPELLA",     79.172f,  45.998f },
+    { "BETELGEVSE",  88.793f,   7.407f },
+    { "POLLVX",     116.329f,  28.026f },
+};
+#define PLANETS_NSTARS \
+    (int)(sizeof(planets_stars) / sizeof(planets_stars[0]))
+
+// (RA, dec) -> (az, alt) at local sidereal time lst (all degrees)
+static inline void planets_star_azalt(float ra, float dec, float lst,
+                                      float lat, float *az, float *alt) {
+    float d2r = (float)M_PI / 180.0f;
+    float H = (lst - ra) * d2r;
+    float sd = sinf(dec * d2r), cd = cosf(dec * d2r);
+    float sp = sinf(lat * d2r), cp = cosf(lat * d2r);
+    float sa = sp * sd + cp * cd * cosf(H);
+    if (sa > 1) sa = 1;
+    if (sa < -1) sa = -1;
+    *alt = asinf(sa) / d2r;
+    *az = atan2f(-cd * sinf(H), sd * cp - cd * sp * cosf(H)) / d2r;
+}
+
 // Geocentric ecliptic longitudes of every body at jd_ut (deg, BODY_* order)
 static inline void planets__geo_lons(double jd_ut, double out[BODY_COUNT]) {
     double e[3];
