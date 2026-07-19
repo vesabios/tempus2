@@ -594,13 +594,13 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // ---- Compass furniture (on the fixed midnight circle) ----
     if (fb > 0.001f) {
         d->alpha = base_alpha * fb;
-        int cw = _font_compat[FONT_month].weight;
-        // az 0/90/180/270 = N/E/S/W — pinned to the LIVE horizon,
-        // ticks pointing away from the zenith's projection
-        static const char *card[4] = { "N", "E", "S", "W" };
+        // Minor bearing ticks only — the CARDINALS are shared objects
+        // now, drawn by the one sky drawer and riding the rim between
+        // stations
         float zpx, zpy;
         sky__project(0.0f, 90.0f, &zpx, &zpy);
         for (int i = 0; i < 36; i++) {
+            if ((i % 9) == 0) continue;
             float az = (float)i * 10.0f;
             float bx, by;
             sky__project(az, 0.0f, &bx, &by);
@@ -608,21 +608,9 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             float dn = sqrtf(dx * dx + dy * dy);
             if (dn < 1.0e-3f) { dx = 0; dy = 1; dn = 1; }
             dx /= dn; dy /= dn;
-            bool major = (i % 9) == 0;
-            draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
-                                  major ? 0.6f : 0.25f));
-            draw_line(d, bx, by,
-                      bx + dx * (major ? 14.0f : 7.0f),
-                      by + dy * (major ? 14.0f : 7.0f), 1.0f);
-            if (major) {
-                float sz = _font_compat[FONT_month].size;
-                float tw2 = sdf_measure_width(cw, card[i / 9]) * sz;
-                draw_set_color(d, dca(0.66f, 0.63f, 0.57f, 0.75f));
-                draw_text_ex(d, cw, sz,
-                             bx + dx * 34.0f - tw2 * 0.5f,
-                             by + dy * 34.0f - sz * 0.5f,
-                             card[i / 9]);
-            }
+            draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.25f));
+            draw_line(d, bx, by, bx + dx * 7.0f, by + dy * 7.0f,
+                      1.0f);
         }
 
         // ---- The horizon calendar: the eight days as sightlines ----
