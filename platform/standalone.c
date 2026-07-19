@@ -219,9 +219,18 @@ static void set_worldview(Worldview wv) {
     // globe's radius blends against the moving base morph), so it rides
     // the same clock as the flight — a shorter tween finishes early and
     // drops the earth onto a base that hasn't arrived yet.
-    tween_start_delayed(&g_scene.tweens, &g_scene.orbis_blend,
-                        g_scene.orbis_blend, wv == WV_ORBIS ? 1.0 : 0.0,
-                        fly_delay, 3.5, EASE_IN_OUT_CUBIC);
+    // ABSENT-SEAT RULE: flying from ORBIS to a pure overlay station
+    // (no globe there), the closeup does NOT release — it would fly
+    // toward the 12-o'clock clock seat nobody is going to. It PARKS,
+    // fades with the machine, and snaps home only once hidden
+    // (set_view_opacities does the snap).
+    bool overlay_dst = (wv == WV_HORAE || wv == WV_ROTAE
+                     || wv == WV_SAECVLVM || wv == WV_OFFICIVM
+                     || wv == WV_DRACO);
+    if (!(overlay_dst && g_scene.orbis_blend > 0.5))
+        tween_start_delayed(&g_scene.tweens, &g_scene.orbis_blend,
+                            g_scene.orbis_blend, wv == WV_ORBIS ? 1.0 : 0.0,
+                            fly_delay, 3.5, EASE_IN_OUT_CUBIC);
     switch (wv) {
         case WV_HOROLOGIVM: fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
         case WV_HORAE:      fly_worldview(0.0, 0.0, 0.0, 3.5, fly_delay); break;
@@ -307,6 +316,14 @@ static void set_view_opacities(void) {
     // parameters for VIEW_LVMEN). Floor just above the render cutoff;
     // its vertex-heavy passes skip themselves below visibility.
     g_scene.views[VIEW_ORRERY].opacity = fade > 0.002 ? fade : 0.002;
+    // The parked ORBIS closeup snaps home UNSEEN once the machine is
+    // fully hidden at an overlay station (the absent-seat rule's
+    // second half: park, fade, then reset while nobody watches)
+    if (g_worldview != WV_ORBIS && g_scene.orbis_blend > 0.001
+        && fade < 0.004) {
+        tween_cancel_target(&g_scene.tweens, &g_scene.orbis_blend);
+        g_scene.orbis_blend = 0.0;
+    }
     // Clock face and hands exit in the first quarter of the transit (and
     // return in the last quarter coming home) — they're geocentric
     // furniture and have no business lingering over the flight
