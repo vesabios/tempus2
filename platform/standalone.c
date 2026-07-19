@@ -327,9 +327,14 @@ static void set_view_opacities(void) {
     g_scene.views[VIEW_ORRERY].opacity = fade > 0.002 ? fade : 0.002;
     // The parked ORBIS closeup snaps home UNSEEN once the machine is
     // fully hidden at an overlay station (the absent-seat rule's
-    // second half: park, fade, then reset while nobody watches)
+    // second half: park, fade, then reset while nobody watches).
+    // DRACO keeps the LUMINARIES visible through its flight and their
+    // base seats read orbis_blend — so there, wait for the chart to
+    // own them completely (blend at 1) before snapping, or the sun
+    // and moon jump mid-flight (Seren caught it on ORBIS -> DRACO).
     if (g_worldview != WV_ORBIS && g_scene.orbis_blend > 0.001
-        && fade < 0.004) {
+        && fade < 0.004
+        && (draco <= 0.001 || draco >= 0.999)) {
         tween_cancel_target(&g_scene.tweens, &g_scene.orbis_blend);
         g_scene.orbis_blend = 0.0;
     }
