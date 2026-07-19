@@ -423,12 +423,16 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                 bool lflip = (na2 > (float)M_PI * 0.5f
                               && na2 < (float)M_PI * 1.5f);
                 float nsz2 = h < 12 ? 15.0f : 12.5f;
-                float mid = HORAE_CLOCK_R - HORAE_CLOCK_W - 16.0f;
+                // Numerals ride ON the sky band itself: day hours in
+                // dark ink against the bright daylit sky, night hours
+                // in light against the dark — each half reads against
+                // its own ground
+                float mid = HORAE_CLOCK_R - HORAE_CLOCK_W * 0.5f;
                 float lr = mid - nsz2 * 0.5f
                          + nsz2 * (lflip ? 0.51f : 0.37f);
                 draw_set_color(d, h < 12
-                    ? dca(0.72f, 0.70f, 0.64f, 0.85f)
-                    : dca(0.55f, 0.53f, 0.49f, 0.55f));
+                    ? dca(0.05f, 0.06f, 0.09f, 0.90f)
+                    : dca(0.72f, 0.70f, 0.64f, 0.75f));
                 draw_text_curved(d, FONT_clock, 0, 0, lr, ang,
                                  horae__roman[h % 12], 0.25f,
                                  nsz2 / fsz);
