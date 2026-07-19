@@ -1120,8 +1120,6 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         bool chart3 = st->skyv && skw > 0.001f;
         float fin3 = (float)tempus_smoothstep(0.10, 0.75, skw);
         float a_pl3 = (float)tempus_smoothstep(0.20, 0.60, ss);
-        float wheel_Rc = s->calendar_base_radius
-                       * (float)tempus_wheel_scale(1.0);
         for (int p = 0; p < PL_COUNT; p++) {
             wpl->pl_ring_a[p] = 0;
             wpl->pl_stroke[p] = 0;
@@ -1145,10 +1143,21 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 const SkyViewState *sv = st->skyv;
                 int b = (p < PL_EARTH) ? BODY_MERCURY + p
                                        : BODY_MERCURY + p - 1;
+                // The machine seat is the LIVE morphing ring (base_w
+                // flies with the station), and its claim is the
+                // station weight x the machine's own bead presence
+                // (a_pl3). sys*(1-skw) pinned beads to the chart for
+                // most of a geo-parked flight to MVNDI and raced them
+                // home at the tail (Seren: HOROLOGIVM -> CAELVM ->
+                // MVNDI skipped into place); the bare station weight
+                // dragged them toward invisible dial-scale rings on
+                // flights where the machine shows no beads at all —
+                // a_pl3 keeps the born-in-place law for those, and
+                // saturates by sys 0.6 so real flights glide early.
                 float dx3, dy3;
                 orr__ecl_dir(pn3->helio_lon[p], &dx3, &dy3);
-                float orbr3 = orr__orbit_r(p, wheel_Rc);
-                float pw3 = ss * (1.0f - skw);
+                float orbr3 = orr__orbit_r(p, base_w);
+                float pw3 = (1.0f - skw) * a_pl3;
                 wpl->pl_cx[p] = dx3 * orbr3 * pw3
                               + sv->pl_x[b] * (1.0f - pw3);
                 wpl->pl_cy[p] = dy3 * orbr3 * pw3
