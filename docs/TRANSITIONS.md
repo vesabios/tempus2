@@ -1,0 +1,93 @@
+# The Transition Framework
+
+The design for the transitions-refactor branch, agreed 2026-07-19.
+The instrument is an homage to precision timepieces; transitions are
+part of the aesthetic and must be flawless. This document is the
+architecture that makes flawlessness structural instead of patched.
+
+## The model (the camera-manager pattern)
+
+Each **station** declares, per object, its full state — its
+**members**: position, orientation, scale, light, reference frame,
+and flags. A single **manager** interpolates between *state
+properties*, never between station pairs. Transitions are therefore
+authored generically; a new station is a column of members, not a row
+of pairwise special cases.
+
+## Weights, not blends
+
+One normalized **station weight vector** `w[ST_COUNT]` (sums to 1)
+replaces the nine independent blends. All mixing is barycentric over
+weights. Two-station flights are the special case; three-way
+crossings are automatically correct (the machine's weight pins to
+zero when two chart stations cross — the class of "object dips
+through an unrelated seat mid-flight" becomes unrepresentable).
+
+## Typed members
+
+The member's type carries its interpolation rule:
+
+- position in a shared polar frame → circular mean (never cartesian
+  lerp across a polar space)
+- scale → log-lerp
+- orientation → continuity-corrected slerp (pq state per object)
+- light → composed from live frames each frame; never baked vectors
+  (never nlerp of frame snapshots against a slerping rotation)
+
+## Frames: native vs private
+
+**Manager-native frames** — the manager blends *inside* them and
+evaluates them live every frame:
+
+- `WORLD` — screen-centered instrument space
+- `WHEEL` — the polar year/zodiac mapping (and its geo-flipped
+  variant, DRACO's `+180`)
+- `GLOBE_3D` — the live globe's center, radius, and rotation
+
+These preserve 3D relationships THROUGH a tween: the moon's member at
+TELLVS/MACHINA/ORBIS is `(frame: GLOBE_3D, bearing, reach, lat)` —
+the tween blends `reach` while position is derived from the live
+globe each frame, so the globe can fly, grow, and spin mid-transition
+and the moon rides it.
+
+**Station-private projections** — evaluate-only, opaque: CAELVM's
+azimuthal chart, the sky dome, any nonlinear lookup. The station
+evaluates privately and publishes results as coordinates in a native
+frame. Exotic coordinate systems are never tweened between — and
+never need to be.
+
+## The rule stack
+
+1. **Parents before children.** Frames form a small scene graph
+   (wheel → globe → moon; chart frames terminal). Children hold
+   coordinates, not results — staleness is unrepresentable (the
+   render-time-read law, made structural).
+2. **Same frame → blend local members**, evaluate against the live
+   parent.
+3. **Cross-frame → evaluate both sides live, then blend outputs**,
+   with typed geometry (polar about a shared center where one
+   exists). The aperture handoff is this rule.
+4. **Absent member → fade in place.** A station that declares no seat
+   for an object never inherits another station's; the object holds
+   and fades (the ORBIS-globe-to-HORAE fix, generalized; CAELVM's
+   machine-parking is the same rule).
+
+## Staging (each lands only when the flight matrix diffs clean)
+
+- **Stage 0 — done**: `TEMPUS_FLY` deterministic flight harness +
+  `scripts/flight_matrix.sh` / `flight_diff.py`; baseline baked.
+- **Stage 1**: station weight vector + station descriptor table
+  (fly targets, wheel radius, furniture scale, input policy, layer
+  dimming as table columns).
+- **Stage 2**: members + manager for the sun and moon; the orrery's
+  206-line moon composition dissolves into member rows. The old
+  behavior is the acceptance test.
+- **Stage 3**: planets onto the manager; `sky_owns` and coincidence
+  handoffs deleted.
+- **Stage 4**: ink staging table — the ~27 scattered smoothstep
+  windows become one declarative per-element table; entrance
+  choreography tuned globally.
+
+Baseline protection: tag `pre-refactor`, bundle at
+`~/claude/tempus2-pre-refactor.bundle`, private remote
+`github.com/vesabios/tempus2`. Master does not move until parity.
