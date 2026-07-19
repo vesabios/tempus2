@@ -736,7 +736,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 const Aspect *A = &st->aspects[i];
                 const AspectDef *def = &planets_aspect_defs[A->kind];
                 if (!def->major) continue;
-                const uint8_t *c = orr__aspect_col[A->kind];
+                // Quiet ink (Seren): the web is structure, not
+                // spectacle — uniform dark grey dots, meaning carried
+                // by orb tightness alone (sharp aspects draw darker
+                // and wider, loose ones barely whisper)
                 float sharp = A->strength * A->strength * A->strength;
                 if (A->kind == ASPECT_CONJUNCTION) {
                     double la = pn->geo_lon[A->a];
@@ -749,19 +752,17 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                                         * 2.0 * M_PI - M_PI * 0.5);
                     d->alpha = base_alpha * a_web
                              * (0.12f + 0.78f * sharp);
-                    draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
-                                          c[2] / 255.0f, 0.8f));
+                    draw_set_color(d, dca(0.42f, 0.42f, 0.42f, 0.8f));
                     draw_arc_filled(d, 0, 0, ORR_WEB_R + 10.0f,
                                     ORR_WEB_R + 11.5f, aa0, aa1, 10);
                 } else {
                     float wdt = 0.6f + 1.8f * sharp;
                     d->alpha = base_alpha * a_web
                              * (0.05f + 0.60f * sharp);
-                    draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
-                                          c[2] / 255.0f, 1.0f));
+                    draw_set_color(d, dca(0.42f, 0.42f, 0.42f, 1.0f));
                     orr__dashed_line(d, mpx[A->a], mpy[A->a],
                                      mpx[A->b], mpy[A->b], wdt,
-                                     6.0f, 10.0f);
+                                     4.0f, 10.0f);
                 }
             }
             d->alpha = base_alpha;
