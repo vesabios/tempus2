@@ -239,6 +239,7 @@ static void sky_exit(void *buf, const Tempus *t, Scene *sc) {
 // light aimed at the sun's chart position. Requires body_az/body_alt
 // already filled — call only after the ephemeris cache is valid.
 static void sky__lum_targets(SkyViewState *st) {
+
     float sx, sy, mx2, my2;
     sky__project(st->body_az[BODY_SUN], st->body_alt[BODY_SUN],
                  &sx, &sy);

@@ -67,6 +67,7 @@ struct OrreryViewState {
     double w_dial;      // station-weight sum of the dial family
     double w_globe;     // station-weight sum of the globe family
     double w_mach;      // luminary-seating machine stations only
+    double w_seat;      // ... as a fraction of ALL non-chart weight
 
     // Stage 3: the planets' composed member rows (PL_* index; Earth
     // unused), published for VIEW_LVMEN — the body renderer — and
@@ -389,6 +390,19 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     // SAECVLVM, OFFICIVM) own no seat — their weight must never pull
     // the sun or moon anywhere (the absent-seat rule).
     st->w_mach = sc->stw[ST_HOROLOGIVM] + st->w_globe;
+    // The machine's claim must live on the CHART blends' scale, not
+    // the station vector's: what fraction of the non-chart weight
+    // belongs to stations that actually seat a luminary. Overlay
+    // dials seat nothing (their share is dropped, so the luminaries
+    // fade in place); a PARKED machine keeps its seat, so a chart at
+    // full blend still takes them completely — CAELVM arriving from
+    // MVNDI left the machine parked at helio 1, which held a third
+    // of the normalized weight and stranded the sun at 2/3 of its
+    // true chart place, forever (Seren: 'rendering for 90 not 45').
+    {
+        double nonchart = st->w_dial + st->w_globe;
+        st->w_seat = nonchart > 1.0e-9 ? st->w_mach / nonchart : 0.0;
+    }
     st->geo_azimuth = sc->solar_state.azimuth;
     st->geo_zenith = sc->solar_state.zenith;
     st->solar = &sc->solar_state;
@@ -1426,14 +1440,16 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             // orbis); seats 1..3 are the chart stations' published
             // members — CAELVM, DRACO, and the astrolabe's plate.
             // Cross-frame outputs, so seat_mix_pos (rule 3).
-            // wB is the SEAT-OWNING machine weight, never the raw
-            // residual: an overlay's share must not drag the sun
-            // toward the hidden machine (Seren caught it on HORAE)
-            float wB = (float)st->w_mach;
+            // The machine's residual claim, scaled by how much of it
+            // seats a luminary at all (overlays seat nothing)
+            float wB = (1.0f - wS - wD - wA) * (float)st->w_seat;
             if (wB < 0.0f) wB = 0.0f;
             double wT = wB + wS + wD + wA;
-            if (wT < 1.0e-6) wT = 1.0;
-            double w[4] = { wB / wT, wS / wT, wD / wT, wA / wT };
+            double w[4] = { 1, 0, 0, 0 };
+            if (wT > 1.0e-6) {
+                w[0] = wB / wT; w[1] = wS / wT;
+                w[2] = wD / wT; w[3] = wA / wT;
+            }
             float mx[4] = { px, wS > 0 ? st->skyv->lum_sun_x : 0,
                             wD > 0 ? st->drav->lum_sun_x : 0,
                             wA > 0 ? st->astv->lum_sun_x : 0 };
@@ -1625,11 +1641,14 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 // MEMBER ROWS (Stage 2): seat 0 = the machine's composed
                 // moon; seats 1..3 = the chart stations' published
                 // members (CAELVM, DRACO, the astrolabe's plate).
-                float wB = (float)st->w_mach;
+                float wB = (1.0f - wS - wD - wA) * (float)st->w_seat;
                 if (wB < 0.0f) wB = 0.0f;
                 double wT = wB + wS + wD + wA;
-                if (wT < 1.0e-6) wT = 1.0;
-                double w[4] = { wB / wT, wS / wT, wD / wT, wA / wT };
+                double w[4] = { 1, 0, 0, 0 };
+                if (wT > 1.0e-6) {
+                    w[0] = wB / wT; w[1] = wS / wT;
+                    w[2] = wD / wT; w[3] = wA / wT;
+                }
                 float mx[4] = { mmx, wS > 0 ? st->skyv->lum_moon_x : 0,
                                 wD > 0 ? st->drav->lum_moon_x : 0,
                                 wA > 0 ? st->astv->lum_moon_x : 0 };
