@@ -69,38 +69,38 @@ static const float draco__sg_cauda[] = {
        0.11f,0.23f, 0.136f,0.294f, 0.20f,0.32f, 0.264f,0.294f,
        0.29f,0.23f, 0 };
 
-// The dragon itself, in figure: a manuscript serpent for the dial's
-// heart — S-coiled spine, open jaws, horns, dorsal spikes, barbed
-// tail. Head at the top of the unit box, so drawn with up = the
-// CAPVT direction it points at its own jaws.
-static const float draco__dragon[] = {
-    // spine: tail to neck, three bends
-    14, -0.10f,-0.48f, 0.10f,-0.44f, 0.26f,-0.34f, 0.30f,-0.20f,
-        0.22f,-0.06f, 0.02f,0.02f, -0.18f,-0.02f, -0.30f,-0.10f,
-        -0.34f,0.02f, -0.28f,0.16f, -0.12f,0.24f, 0.06f,0.26f,
-        0.20f,0.32f, 0.26f,0.42f,
-    // body volume: a parallel stroke shadowing the main coil
-    8, 0.24f,-0.32f, 0.245f,-0.20f, 0.16f,-0.09f, 0.02f,-0.04f,
-       -0.14f,-0.08f, -0.245f,-0.145f, -0.28f,-0.08f, -0.285f,0.02f,
-    // skull and brow to snout
-    3, 0.26f,0.42f, 0.34f,0.47f, 0.44f,0.44f,
-    // upper jaw back to the mouth's corner, lower jaw open
-    2, 0.44f,0.44f, 0.36f,0.40f,
-    2, 0.36f,0.40f, 0.44f,0.35f,
-    // forked tongue
-    2, 0.44f,0.40f, 0.50f,0.41f,
-    // horns
-    2, 0.31f,0.47f, 0.26f,0.54f,
-    2, 0.36f,0.46f, 0.33f,0.54f,
-    // eye
-    2, 0.335f,0.435f, 0.35f,0.435f,
-    // dorsal spikes on the outer bends
-    2, 0.30f,-0.20f, 0.37f,-0.21f,
-    2, -0.34f,0.02f, -0.41f,0.00f,
-    2, -0.12f,0.24f, -0.15f,0.31f,
-    // tail barb
-    2, -0.10f,-0.48f, -0.17f,-0.52f,
-    2, -0.10f,-0.48f, -0.06f,-0.55f, 0 };
+// The REAL dragon. The constellation Draco coils around the NORTH
+// ECLIPTIC POLE — and this dial's center IS the ecliptic pole (the
+// dial is the ecliptic seen face-on). So the dragon of the sky
+// belongs in the dial's heart, plotted honestly: principal stars in
+// ecliptic coordinates (J2000; lon, lat, magnitude), azimuthal-
+// equidistant about the pole. Thuban was the pyramid builders' pole
+// star; the moon's orbital pole rides through these coils once every
+// 18.6 years. One constellation, not a catalog — the dragon really
+// is there.
+static const float draco__stars[15][3] = {
+    { 130.33f, 57.24f, 3.84f },   // lambda — Giausar, the tail tip
+    { 136.27f, 61.76f, 3.87f },   // kappa
+    { 157.47f, 66.36f, 3.65f },   // alpha — THVBAN
+    { 184.95f, 71.09f, 3.29f },   // iota — Edasich
+    { 196.66f, 74.44f, 4.01f },   // theta
+    { 194.47f, 78.44f, 2.74f },   // eta
+    { 183.36f, 84.76f, 3.17f },   // zeta — almost on the pole
+    {  75.94f, 83.57f, 3.57f },   // chi
+    {  71.08f, 84.88f, 4.22f },   // phi
+    {  17.20f, 82.89f, 3.07f },   // delta
+    {  32.69f, 79.49f, 3.83f },   // epsilon
+    { 264.76f, 80.28f, 3.75f },   // xi — Grumium, the jaw
+    { 250.32f, 78.15f, 4.88f },   // nu — the faint nose
+    { 251.97f, 75.28f, 2.79f },   // beta — Rastaban, an eye
+    { 267.97f, 74.92f, 2.23f },   // gamma — Eltanin, an eye
+};
+static const uint8_t draco__edges[15][2] = {
+    { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 4 }, { 4, 5 }, { 5, 6 },
+    { 6, 7 }, { 7, 8 }, { 8, 9 }, { 9, 10 },           // body coils
+    { 9, 11 },                                          // the neck
+    { 11, 12 }, { 12, 13 }, { 13, 14 }, { 14, 11 },     // head lozenge
+};
 
 // Sign names in the ablative — "the head IN Leo" — dial order
 static const char *draco__sign_abl[12] = {
@@ -304,16 +304,41 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
     }
 
-    // ---- The dragon in figure, coiled in the dial's heart ----
-    // For the eye that hasn't fused wave and myth: the same creature
-    // the geometry draws around the rim, here as an engraved serpent.
-    // Its head aims at CAPVT, its tail at CAVDA, and it turns with
-    // the regressing nodes — once around in 18.6 years.
+    // ---- The dragon itself, coiled about the pole ----
+    // The real constellation, in the dial's own frame: each star at
+    // its ecliptic longitude on the wheel, its distance from center
+    // = its distance from the ecliptic pole. FIXED to the zodiac
+    // (the stars don't ride the nodes) — the mechanical jaws wheel
+    // around the rim while the old dragon holds the center.
     {
-        float hx, hy;
-        orr__ecl_dir(st->node_lon, &hx, &hy);
-        draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.30f));
-        orr__strokes(d, draco__dragon, 0, 0, hx, hy, 420.0f, 1.4f);
+        float sx2[15], sy2[15];
+        for (int i = 0; i < 15; i++) {
+            float dx, dy;
+            orr__ecl_dir(draco__stars[i][0], &dx, &dy);
+            // Pole distance exaggerated x2 (the station's habit — the
+            // wave wears x13.6), angles honest: the coil opens to
+            // fill the heart instead of knotting at the pole
+            float rr = DRACO_R * (90.0f - draco__stars[i][1]) / 90.0f
+                     * 2.0f;
+            sx2[i] = dx * rr;
+            sy2[i] = dy * rr;
+        }
+        draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.22f));
+        for (int e = 0; e < 15; e++)
+            draw_line(d, sx2[draco__edges[e][0]],
+                      sy2[draco__edges[e][0]],
+                      sx2[draco__edges[e][1]],
+                      sy2[draco__edges[e][1]], 1.0f);
+        for (int i = 0; i < 15; i++) {
+            float mr2 = 5.2f - draco__stars[i][2];
+            if (mr2 < 1.1f) mr2 = 1.1f;
+            if (mr2 > 3.2f) mr2 = 3.2f;
+            draw_set_color(d, dca(0.72f, 0.70f, 0.64f, 0.60f));
+            draw_circle_filled(d, sx2[i], sy2[i], mr2);
+        }
+        // Thuban, the pyramid builders' pole star, wears a ring
+        draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.40f));
+        draw_circle_stroked(d, sx2[2], sy2[2], 6.5f, 1.0f);
     }
 
     // ---- Head and tail at the crossings ----
