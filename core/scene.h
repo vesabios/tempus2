@@ -574,8 +574,11 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 c->drag_accum = 0;
                 // In HORAE, ORBIS, and at the main 12-hour face the
                 // band scrubs whole days (the clock's own hands and
-                // controls own the hours there); elsewhere fractional
-                c->fling_keep_time = sc->horae_blend > 0.5
+                // controls own the hours there); elsewhere fractional.
+                // DRACO scrubs TRUE time — the moon glides its 13
+                // degrees a day along the wave, and an eclipse is an
+                // HOUR, not a date: the hunt needs the hours to flow.
+                c->fling_keep_time = (sc->horae_blend > 0.5
                                   || sc->orbis_blend > 0.5
                                   || sc->offic_blend > 0.5
                                   || sc->sky_blend > 0.5
@@ -583,7 +586,8 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                                       && sc->system_blend <= 0.5
                                       && sc->sky_blend <= 0.5
                                       && sc->rotae_blend <= 0.5
-                                      && sc->saec_blend <= 0.5);
+                                      && sc->saec_blend <= 0.5))
+                                  && sc->draco_blend <= 0.5;
                 c->fling_week = sc->horae_blend > 0.5;
                 c->week_accum = 0.0;
                 scene__begin_override(t);
