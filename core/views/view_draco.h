@@ -37,8 +37,8 @@ struct DracoViewState {
 #if defined(SCENE_DEFINED) && !defined(VIEW_DRACO_IMPL)
 #define VIEW_DRACO_IMPL
 
-#define DRACO_R    370.0f   // the ecliptic circle
-#define DRACO_AMP   26.0f   // the wave's reach (5.145 deg, amplified)
+#define DRACO_R    330.0f   // the ecliptic circle
+#define DRACO_AMP   70.0f   // the wave's reach (5.145 deg, amplified)
 
 // The nodes' sigils: CAPVT (horseshoe opening down) and CAVDA
 // (opening up), each with its two feet — stroke tables in the
@@ -140,13 +140,13 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         float dx, dy;
         orr__ecl_dir(i * 30.0, &dx, &dy);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
-        draw_line(d, dx * (DRACO_R + 26.0f), dy * (DRACO_R + 26.0f),
-                  dx * (DRACO_R + 38.0f), dy * (DRACO_R + 38.0f), 1.0f);
+        draw_line(d, dx * 410.0f, dy * 410.0f,
+                  dx * 422.0f, dy * 422.0f, 1.0f);
         float mx, my;
         orr__ecl_dir(i * 30.0 + 15.0, &mx, &my);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.50f));
-        orr__zodiac_glyph(d, i, mx * (DRACO_R + 32.0f),
-                          my * (DRACO_R + 32.0f), mx, my, 22.0f);
+        orr__zodiac_glyph(d, i, mx * 428.0f,
+                          my * 428.0f, mx, my, 24.0f);
     }
 
     // ---- The dragon's body: the moon's orbit as a latitude wave ----
@@ -162,7 +162,7 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
             for (int i = 0; i <= N; i++) {
                 float lam = (float)i / N * 360.0f;
                 float ph = (lam - (float)st->node_lon) * d2r;
-                float body = 2.6f * fabsf(sinf(ph));   // girth
+                float body = 4.0f * fabsf(sinf(ph));   // girth
                 float rr = DRACO_R + DRACO_AMP * sinf(ph) + side * body;
                 float dx, dy;
                 orr__ecl_dir(lam, &dx, &dy);
@@ -185,10 +185,10 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         float ta = 0.55f + (!head_near ? 0.40f * season : 0.0f);
         draw_set_color(d, dca(0.72f, 0.70f, 0.64f, ha));
         orr__strokes(d, draco__sg_caput, hx * DRACO_R, hy * DRACO_R,
-                     hx, hy, 34.0f, 1.3f);
+                     hx, hy, 48.0f, 1.3f);
         draw_set_color(d, dca(0.72f, 0.70f, 0.64f, ta));
         orr__strokes(d, draco__sg_cauda, tx * DRACO_R, ty * DRACO_R,
-                     tx, ty, 34.0f, 1.3f);
+                     tx, ty, 48.0f, 1.3f);
     }
 
     // ---- The travelers: sun on the road, moon on the wave ----
@@ -217,15 +217,15 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
             draw_set_color(d, g);
             draw_circle_filled(d, solar ? spx : mpx,
                                solar ? spy : mpy,
-                               28.0f + 12.0f * glow);
+                               34.0f + 14.0f * glow);
         }
 
         draw_set_color(d, dca(0.85f, 0.62f, 0.18f, 0.95f));
-        draw_circle_filled(d, spx, spy, 22.0f);
+        draw_circle_filled(d, spx, spy, 28.0f);
         draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
-        draw_circle_stroked(d, spx, spy, 27.0f, 1.0f);
+        draw_circle_stroked(d, spx, spy, 34.0f, 1.0f);
 
-        GlobeCmd *gm = draw_globe_slot(d, mpx, mpy, 22.0f);
+        GlobeCmd *gm = draw_globe_slot(d, mpx, mpy, 28.0f);
         if (gm) {
             // The clock aperture's own dress: PHASE-FRAME light, the
             // canonical pure lune (bright limb to screen-right), not
