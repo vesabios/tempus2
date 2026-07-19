@@ -44,6 +44,7 @@ struct CalendarViewState {
     float   sky_a, sky_wc;
     double  skyb_l, astb_l;   // raw blends (bezel growth, clip)
     const AstroViewState *astv;
+    const SkyViewState   *skyv2;  // the LIVE look (pitch deforms)
 
     // Wheel dragging (see scene_pointer): film-strip time scrubbing,
     // incremental (finger deltas projected onto the band tangent), with
@@ -184,6 +185,7 @@ static void calendar_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->skyb = sc->sky_blend;
     st->orbb = sc->orbis_wheel;
     st->astv = &sc->astro_state;
+    st->skyv2 = &sc->sky_state;
     st->skyb_l = sc->sky_blend;
     st->astb_l = sc->astro_blend;
     {
@@ -425,67 +427,9 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
     cal__hour_ring(st, d, s);
 }
 
-// ---- THE SKY CIRCLE: one shape, every station ----
-static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
-                            const RenderStyle *s) {
-    float fam = st->sky_a;
-    if (fam < 0.004f || !st->astv) return;
-    const AstroViewState *av = st->astv;
-    float base_alpha = d->alpha;
-    float wc = st->sky_wc;
-    // CAELVM's seat: centered, radius growing off the live bezel as
-    // the chart forms (the old bowl's own law)
-    float bez = (float)tempus_wheel_radius(s->calendar_base_radius,
-                                           st->sys, st->skyb_l,
-                                           st->orbb);
-    float r_cael = bez + (280.0f - bez)
-                 * (float)tempus_smoothstep(0.0, 1.0, st->skyb_l);
-    float cy = av->sky_hyc * (1.0f - wc);
-    float cr = av->sky_hr + (r_cael - av->sky_hr) * wc;
-    // The plate's limb clips the circle; at CAELVM the circle never
-    // reaches it, so one clip serves every station
-    float clip = 400.0f;
-    // The dark earth under CAELVM's whole chart, beneath the circle
-    if (wc > 0.004f) {
-        d->alpha = base_alpha * fam * wc;
-        draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
-        draw_circle_filled(d, 0, 0, 560.0f);
-    }
-    int prev[48 + 1], curv[48 + 1];
-    d->alpha = base_alpha * 0.94f * fam;
-    draw_set_color(d, dca(av->sky_cols[0][0], av->sky_cols[0][1],
-                          av->sky_cols[0][2], 1.0f));
-    int cvi = draw__push_vert(d, 0, cy, d->white_u, d->white_v);
-    static const float alts[8] = { 75, 60, 45, 30, 18, 8, 3, 0 };
-    for (int ri = 0; ri < 8; ri++) {
-        float rr2 = cr * (90.0f - alts[ri]) / 90.0f;
-        for (int si = 0; si <= 48; si++) {
-            const float *c = av->sky_cols[1 + ri * 49 + si];
-            draw_set_color(d, dca(c[0], c[1], c[2], 1.0f));
-            float az = (float)si / 48.0f * 2.0f * (float)M_PI;
-            float x = -sinf(az) * rr2;
-            float y = cy + cosf(az) * rr2;
-            float pr2 = sqrtf(x * x + y * y);
-            if (pr2 > clip) {
-                x *= clip / pr2;
-                y *= clip / pr2;
-            }
-            int vi = draw__push_vert(d, x, y, d->white_u,
-                                     d->white_v);
-            curv[si] = vi;
-            if (si > 0) {
-                if (ri == 0) {
-                    draw__tri(d, cvi, curv[si - 1], vi);
-                } else {
-                    draw__tri(d, prev[si - 1], curv[si - 1], vi);
-                    draw__tri(d, prev[si - 1], vi, prev[si]);
-                }
-            }
-        }
-        memcpy(prev, curv, sizeof(prev));
-    }
-    d->alpha = base_alpha;
-}
+// (cal__sky_circle is DEFINED in view_astro.h's impl — the one
+// place that sees BOTH stations' projections. Forward-declared
+// above; the calendar calls it, the chart stations shape it.)
 
 // ---- The 24-hour ring: the rendering-time control, one object ----
 // CAELVM's dial and the astrolabe's share one body: hairlines, 24

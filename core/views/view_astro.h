@@ -601,6 +601,92 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
     d->alpha = base_alpha;
 }
 
+// ---- THE SKY CIRCLE: one shape, deformed by both stations ----
+// Called by the calendar view (the drawer that rides every station).
+// Each seat's vertices come from that station's OWN projection, live:
+// CAELVM's through the pitched sky projection (drag the look and the
+// interior follows, the old bowl's law), the astrolabe's as the polar
+// disc about its horizon circle. Positions blend by the family
+// share; the plate's limb clips the blended result — the circle
+// rises, meets the plate, and is eaten by it.
+static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
+                            const RenderStyle *s) {
+    float fam = st->sky_a;
+    if (fam < 0.004f || !st->astv) return;
+    const AstroViewState *av = st->astv;
+    const SkyViewState *sv = st->skyv2;
+    float base_alpha = d->alpha;
+    float wc = st->sky_wc;
+    // CAELVM's growth off the live bezel (the old bowl's law)
+    float bez = (float)tempus_wheel_radius(s->calendar_base_radius,
+                                           st->sys, st->skyb_l,
+                                           st->orbb);
+    float r_cael = bez + (280.0f - bez)
+                 * (float)tempus_smoothstep(0.0, 1.0, st->skyb_l);
+    float mk = r_cael / SKY_HOR;
+    if (wc > 0.001f && sv)
+        sky__set_center(sv->view_az, sv->view_alt);
+    float clip = 400.0f;
+    // The dark earth under CAELVM's whole chart, beneath the circle
+    if (wc > 0.004f) {
+        d->alpha = base_alpha * fam * wc;
+        draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
+        draw_circle_filled(d, 0, 0, 560.0f * mk / (280.0f / SKY_HOR));
+    }
+    int prev[ASTRO_SKY_SEC + 1], curv[ASTRO_SKY_SEC + 1];
+    d->alpha = base_alpha * 0.94f * fam;
+    draw_set_color(d, dca(av->sky_cols[0][0], av->sky_cols[0][1],
+                          av->sky_cols[0][2], 1.0f));
+    float zx = 0, zy = av->sky_hyc * (1.0f - wc);
+    if (wc > 0.001f && sv) {
+        float czx, czy;
+        sky__project(0.0f, 90.0f, &czx, &czy);
+        zx = av->sky_hyc * 0 * (1.0f - wc) + czx * mk * wc;
+        zy = av->sky_hyc * (1.0f - wc) + czy * mk * wc;
+    }
+    int cvi = draw__push_vert(d, zx, zy, d->white_u, d->white_v);
+    for (int ri = 0; ri < ASTRO_SKY_RINGS; ri++) {
+        float altv = astro__sky_alts[ri];
+        float rr2 = av->sky_hr * (90.0f - altv) / 90.0f;
+        for (int si = 0; si <= ASTRO_SKY_SEC; si++) {
+            const float *c =
+                av->sky_cols[1 + ri * (ASTRO_SKY_SEC + 1) + si];
+            draw_set_color(d, dca(c[0], c[1], c[2], 1.0f));
+            float azd = (float)si / ASTRO_SKY_SEC * 360.0f;
+            float az = azd * (float)M_PI / 180.0f;
+            // the astrolabe's seat: polar about its horizon circle
+            float ax = -sinf(az) * rr2;
+            float ay = av->sky_hyc + cosf(az) * rr2;
+            float x = ax, y = ay;
+            if (wc > 0.001f && sv) {
+                // CAELVM's seat: the LIVE pitched projection
+                float cx1, cy1;
+                sky__project(azd, altv, &cx1, &cy1);
+                x = ax * (1.0f - wc) + cx1 * mk * wc;
+                y = ay * (1.0f - wc) + cy1 * mk * wc;
+            }
+            float pr2 = sqrtf(x * x + y * y);
+            if (pr2 > clip) {          // the plate eats the circle
+                x *= clip / pr2;
+                y *= clip / pr2;
+            }
+            int vi = draw__push_vert(d, x, y, d->white_u,
+                                     d->white_v);
+            curv[si] = vi;
+            if (si > 0) {
+                if (ri == 0) {
+                    draw__tri(d, cvi, curv[si - 1], vi);
+                } else {
+                    draw__tri(d, prev[si - 1], curv[si - 1], vi);
+                    draw__tri(d, prev[si - 1], vi, prev[si]);
+                }
+            }
+        }
+        memcpy(prev, curv, sizeof(prev));
+    }
+    d->alpha = base_alpha;
+}
+
 static const ViewVtable astro_vtable = {
     .init   = astro_init,
     .enter  = astro_enter,
