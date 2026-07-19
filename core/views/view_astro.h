@@ -21,10 +21,20 @@
 #include "../view.h"
 #include "../planets.h"
 
+// The wash mesh: the visible sky, colored by the real atmosphere
+#define ASTRO_SKY_RINGS 8
+#define ASTRO_SKY_SEC   48
+
 struct AstroViewState {
     TimeView tv;  // must be first field
     double opacity;
     double blend;     // mirrored scene astro_blend
+
+    // Rayleigh-Mie sky colors for the wash, cached on the minute
+    // (and on the latitude — the ORBIS drag re-lights the plate)
+    double sky_jd;
+    float  sky_lat;
+    float  sky_cols[1 + ASTRO_SKY_RINGS * (ASTRO_SKY_SEC + 1)][3];
 };
 
 #endif // VIEW_ASTRO_H
@@ -114,10 +124,60 @@ static void astro_exit(void *buf, const Tempus *t, Scene *sc) {
     (void)buf; (void)t; (void)sc;
 }
 
+// Ring altitudes, zenith-first mesh below
+static const float astro__sky_alts[ASTRO_SKY_RINGS] = {
+    75, 60, 45, 30, 18, 8, 3, 0
+};
+
 static void astro_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     AstroViewState *st = (AstroViewState *)buf;
-    (void)t; (void)dt;
+    (void)dt;
     st->blend = sc->astro_blend;
+    if (st->blend <= 0.001) return;
+
+    // The wash: true single-scattering per vertex, cached on the
+    // minute and the latitude. The sun's az/alt come from the same
+    // dec/H the rule uses — one sky, one sun.
+    double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
+                 - t->config.timezone / 24.0;
+    double key = floor(jd_ut * 1440.0);
+    float lat = (float)t->config.latitude;
+    if (key == st->sky_jd && lat == st->sky_lat) return;
+    st->sky_jd = key;
+    st->sky_lat = lat;
+
+    float d2r = (float)M_PI / 180.0f;
+    float sp = sinf(lat * d2r), cp = cosf(lat * d2r);
+    float lst = (float)fmod(planets__gmst(jd_ut) + t->config.longitude,
+                            360.0);
+    float eps = ASTRO_OBL * d2r;
+    double slon, slat;
+    planets__body_lonlat(BODY_SUN, jd_ut, &slon, &slat);
+    float lam = (float)slon * d2r;
+    float sdec = asinf(sinf(eps) * sinf(lam));
+    float ra = atan2f(cosf(eps) * sinf(lam), cosf(lam)) / d2r;
+    float H = (lst - ra) * d2r;
+    float salt = asinf(sp * sinf(sdec) + cp * cosf(sdec) * cosf(H));
+    float saz = atan2f(-cosf(sdec) * sinf(H),
+                       sinf(sdec) * cp - cosf(sdec) * sp * cosf(H));
+    float sd[3];
+    atmo_dir(saz / d2r, salt / d2r, sd);
+    static const float wash_base[3] = { 0.020f, 0.022f, 0.035f };
+    for (int vi = 0;
+         vi < 1 + ASTRO_SKY_RINGS * (ASTRO_SKY_SEC + 1); vi++) {
+        float az, altv;
+        if (vi == 0) { az = 0; altv = 90; }
+        else {
+            int ri = (vi - 1) / (ASTRO_SKY_SEC + 1);
+            int si = (vi - 1) % (ASTRO_SKY_SEC + 1);
+            az = (float)si / ASTRO_SKY_SEC * 360.0f;
+            altv = astro__sky_alts[ri];
+        }
+        float rd[3], col[3];
+        atmo_dir(az, altv, rd);
+        atmo_scatter(rd, sd, col);
+        atmo_tone(col, 0.95f, wash_base, st->sky_cols[vi]);
+    }
 }
 
 static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
@@ -158,37 +218,47 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
     float dayk = (float)tempus_smoothstep(-12.0, 6.0, sun_alt);
 
     // ---- The sky itself: the region above YOUR horizon ----
-    // The one shape that says what the instrument is: everything
-    // inside this wash is UP right now; everything outside is under
-    // the earth. Filled as a fan about the zenith, the horizon
-    // clamped to the limb where it runs off the plate (exactly the
-    // limb arc — the clamp radius IS the limb).
+    // The one shape that says what the instrument is — and it wears
+    // the real atmosphere: single-scattered Rayleigh blue and Mie
+    // sunset fire, the same light CAELVM breathes, flattened through
+    // the stereographic projection. Everything inside is UP now;
+    // everything outside is under the earth. The horizon clamps to
+    // the limb where it runs off the plate.
     {
+        int prev[ASTRO_SKY_SEC + 1], curv[ASTRO_SKY_SEC + 1];
+        d->alpha = base_alpha * 0.94f;
         float zx, zy;
         astro__project(lat, 0, &zx, &zy);
-        DrawColor sky = dca(0.045f + 0.075f * dayk,
-                            0.055f + 0.085f * dayk,
-                            0.085f + 0.095f * dayk, 1.0f);
-        draw_set_color(d, sky);
-        d->alpha = base_alpha * 0.9f;
-        float px = 0, py = 0;
-        for (int i = 0; i <= 144; i++) {
-            float az = (float)i / 144.0f * 360.0f;
-            float x, y;
-            astro__project_altaz(0.0f, az, lat, &x, &y);
-            float r = sqrtf(x * x + y * y);
-            if (r > ASTRO_R_CAP) {
-                x *= ASTRO_R_CAP / r;
-                y *= ASTRO_R_CAP / r;
+        draw_set_color(d, dca(st->sky_cols[0][0], st->sky_cols[0][1],
+                              st->sky_cols[0][2], 1.0f));
+        int cvi = draw__push_vert(d, zx, zy, d->white_u, d->white_v);
+        for (int ri = 0; ri < ASTRO_SKY_RINGS; ri++) {
+            float altv = astro__sky_alts[ri];
+            for (int si = 0; si <= ASTRO_SKY_SEC; si++) {
+                const float *c =
+                    st->sky_cols[1 + ri * (ASTRO_SKY_SEC + 1) + si];
+                draw_set_color(d, dca(c[0], c[1], c[2], 1.0f));
+                float az = (float)si / ASTRO_SKY_SEC * 360.0f;
+                float x, y;
+                astro__project_altaz(altv, az, lat, &x, &y);
+                float r = sqrtf(x * x + y * y);
+                if (r > ASTRO_R_CAP) {
+                    x *= ASTRO_R_CAP / r;
+                    y *= ASTRO_R_CAP / r;
+                }
+                int vi = draw__push_vert(d, x, y,
+                                         d->white_u, d->white_v);
+                curv[si] = vi;
+                if (si > 0) {
+                    if (ri == 0) {
+                        draw__tri(d, cvi, curv[si - 1], vi);
+                    } else {
+                        draw__tri(d, prev[si - 1], curv[si - 1], vi);
+                        draw__tri(d, prev[si - 1], vi, prev[si]);
+                    }
+                }
             }
-            if (i > 0) {
-                int vb = d->num_verts;
-                draw__push_vert(d, zx, zy, d->white_u, d->white_v);
-                draw__push_vert(d, px, py, d->white_u, d->white_v);
-                draw__push_vert(d, x, y, d->white_u, d->white_v);
-                draw__tri(d, vb, vb + 1, vb + 2);
-            }
-            px = x; py = y;
+            memcpy(prev, curv, sizeof(prev));
         }
         d->alpha = base_alpha;
     }
