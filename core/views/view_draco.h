@@ -125,8 +125,13 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
     float syz_new  = 1.0f - (float)tempus_smoothstep(0.0, 10.0, el);
     float syz_full = 1.0f - (float)tempus_smoothstep(0.0, 10.0,
                                                      180.0 - el);
-    float syz = syz_new > syz_full ? syz_new : syz_full;
-    float glow = season * syz;
+    // Two different meals: SOLAR = new moon at the sun's own jaw
+    // (the lune slides over the bead), LVNAR = full moon devoured at
+    // the OPPOSITE jaw while the sun stands at this one
+    float glow_sol = season * syz_new;
+    float glow_lun = season * syz_full;
+    bool  solar = glow_sol >= glow_lun;
+    float glow = solar ? glow_sol : glow_lun;
 
     // ---- The ecliptic: the sun's road, and the zodiac around it ----
     draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.30f));
@@ -178,10 +183,12 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         orr__ecl_dir(st->node_lon + 180.0, &tx, &ty);
         float ha = 0.55f + (head_near ? 0.40f * season : 0.0f);
         float ta = 0.55f + (!head_near ? 0.40f * season : 0.0f);
-        // The feeding: a soft gold halo swells at the near jaw as the
-        // moon closes on syzygy in season
+        // The feeding: a soft gold halo swells at the jaw where the
+        // meal happens — the sun's jaw for a solar eclipse, the
+        // opposite one (where the full moon stands) for a lunar
         if (glow > 0.01f) {
-            float gx = head_near ? hx : tx, gy = head_near ? hy : ty;
+            bool at_head = solar ? head_near : !head_near;
+            float gx = at_head ? hx : tx, gy = at_head ? hy : ty;
             DrawColor g = dc_scale(s->sunrise_handle, 1.0f);
             g.a = 0.30f * glow;
             draw_set_color(d, g);
@@ -264,8 +271,15 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
             DrawColor g = dc_scale(s->sunrise_handle, 1.0f);
             g.a = 0.45f + 0.50f * season;
             draw_set_color(d, g);
+            // The season names its meal once a syzygy closes in:
+            // solis (the sun eaten at its jaw) or lunae (the full
+            // moon at the opposite one); before that, just "a time
+            // of eclipses"
             draw_text_centered(d, FONT_date, 0, 48.0f,
-                               "TEMPVS ECLIPSIVM");
+                               glow > 0.10f
+                                   ? (solar ? "ECLIPSIS SOLIS"
+                                            : "ECLIPSIS LVNAE")
+                                   : "TEMPVS ECLIPSIVM");
         }
     }
 
