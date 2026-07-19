@@ -48,8 +48,8 @@ struct SkyViewState {
     bool  chart_dragging;
 
     // The dome's vertex colors, computed by true single-scattering in
-    // update (minute-gated): zenith vertex + 6 rings x 65 sectors
-    float dome[1 + 6 * 65][3];
+    // update (minute-gated): zenith vertex + rings x sectors
+    float dome[1 + 9 * 97][3];
 
     // Luminary chart targets, published for the orrery's composition:
     // the sun and moon are SINGLE objects — the orrery composes their
@@ -151,9 +151,14 @@ static inline void sky_view_pan(SkyViewState *st, float dx, float dy) {
     nx /= nn; ny /= nn; nz /= nn;
     if (nz > 1.0f) nz = 1.0f;
     float alt = asinf(nz) * 180.0f / (float)M_PI;
-    if (alt < 89.9f)
+    // Hold short of the pole: crossing the exact zenith flips the
+    // azimuth frame 180 degrees in a frame — the whole chart would
+    // spin. Panning stops at 89; the azimuth only updates below it.
+    if (alt > 89.0f) {
+        alt = 89.0f;
+    } else {
         st->view_az = atan2f(nx, ny) * 180.0f / (float)M_PI;
-    if (alt > 90.0f) alt = 90.0f;
+    }
     if (alt < 10.0f) alt = 10.0f;   // the pitch clamp: no digging
     st->view_alt = alt;
 }
@@ -208,9 +213,10 @@ static const char *sky__body_name[BODY_COUNT] = {
 
 // Dome sampling grid (shared by the update-side scattering pass and
 // the render-side mesh)
-#define SKY_DOME_SEC 64
-static const float sky__dome_alts[6] = { 68.0f, 47.0f, 29.0f, 14.0f,
-                                         5.0f, 0.0f };
+#define SKY_DOME_SEC 96
+#define SKY_DOME_RINGS 9
+static const float sky__dome_alts[SKY_DOME_RINGS] = {
+    75.0f, 60.0f, 47.0f, 35.0f, 24.0f, 15.0f, 8.0f, 3.0f, 0.0f };
 
 static void sky_init(void *buf, const Tempus *t, const RenderStyle *s) {
     SkyViewState *st = (SkyViewState *)buf;
@@ -243,6 +249,33 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     // the fixed circle, and the hour ring scrubs the display time —
     // bodies wheel along their diurnal arcs across the chart, and the
     // bowl wears the sky's own color for that instant.
+    // Luminary chart targets — refreshed EVERY update, before the
+    // time gate: they depend on the LOOK as much as the clock, and
+    // the look can move while time stands still.
+    // Positions on this chart, arrival sizes,
+    // and the moon's phase light aimed at the sun's chart position
+    {
+        float sx, sy, mx2, my2;
+        sky__project(st->body_az[BODY_SUN], st->body_alt[BODY_SUN],
+                     &sx, &sy);
+        sky__project(st->body_az[BODY_MOON], st->body_alt[BODY_MOON],
+                     &mx2, &my2);
+        st->lum_sun_x = sx;
+        st->lum_sun_y = sy;
+        st->lum_sun_r = orr__pip_r(st->now.mag[BODY_SUN]);
+        st->lum_moon_x = mx2;
+        st->lum_moon_y = my2;
+        st->lum_moon_r = orr__pip_r(st->now.mag[BODY_MOON]) + 12.0f;
+        double phb = globe_moon_phase(st->cache_jd);
+        float bb = (float)(phb * 2.0 * M_PI);
+        float ux = sx - mx2, uy = sy - my2;
+        float un = sqrtf(ux * ux + uy * uy);
+        if (un > 1.0e-4f) { ux /= un; uy /= un; }
+        st->lum_moon_light[0] = ux * sinf(bb);
+        st->lum_moon_light[1] = uy * sinf(bb);
+        st->lum_moon_light[2] = -cosf(bb);
+    }
+
     double jd_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
                  - t->config.timezone / 24.0;
     if (fabs(jd_ut - st->cache_jd) <= 1.0 / 1440.0) return;
@@ -279,7 +312,8 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         float sd[3];
         atmo_dir(st->body_az[BODY_SUN], st->body_alt[BODY_SUN],
                       sd);
-        for (int vi2 = 0; vi2 < 1 + 6 * (SKY_DOME_SEC + 1); vi2++) {
+        for (int vi2 = 0;
+             vi2 < 1 + SKY_DOME_RINGS * (SKY_DOME_SEC + 1); vi2++) {
             float az, altv;
             if (vi2 == 0) {
                 az = 0.0f;
@@ -314,29 +348,6 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         st->sign_alt[i] = (float)alt;
     }
 
-    // Luminary chart targets: positions on this chart, arrival sizes,
-    // and the moon's phase light aimed at the sun's chart position
-    {
-        float sx, sy, mx2, my2;
-        sky__project(st->body_az[BODY_SUN], st->body_alt[BODY_SUN],
-                     &sx, &sy);
-        sky__project(st->body_az[BODY_MOON], st->body_alt[BODY_MOON],
-                     &mx2, &my2);
-        st->lum_sun_x = sx;
-        st->lum_sun_y = sy;
-        st->lum_sun_r = orr__pip_r(st->now.mag[BODY_SUN]);
-        st->lum_moon_x = mx2;
-        st->lum_moon_y = my2;
-        st->lum_moon_r = orr__pip_r(st->now.mag[BODY_MOON]) + 12.0f;
-        double phb = globe_moon_phase(st->cache_jd);
-        float bb = (float)(phb * 2.0 * M_PI);
-        float ux = sx - mx2, uy = sy - my2;
-        float un = sqrtf(ux * ux + uy * uy);
-        if (un > 1.0e-4f) { ux /= un; uy /= un; }
-        st->lum_moon_light[0] = ux * sinf(bb);
-        st->lum_moon_light[1] = uy * sinf(bb);
-        st->lum_moon_light[2] = -cosf(bb);
-    }
 }
 
 // Alias kept for the morph call sites: the full-sphere projection
@@ -403,7 +414,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         sky__project(0.0f, 90.0f, &zx0, &zy0);
         int cvi = draw__push_vert(d, zx0 * mk, zy0 * mk,
                                   d->white_u, d->white_v);
-        for (int ri = 0; ri < 6; ri++) {
+        for (int ri = 0; ri < SKY_DOME_RINGS; ri++) {
             float alt = sky__dome_alts[ri];
             for (int si = 0; si <= SEC; si++) {
                 const float *dc2 =
@@ -439,8 +450,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
                                   ci < 2 ? 0.10f : 0.06f));
             float px2 = 0, py2 = 0;
-            for (int i = 0; i <= 72; i++) {
-                float az = (float)i / 72.0f * 360.0f;
+            for (int i = 0; i <= 96; i++) {
+                float az = (float)i / 96.0f * 360.0f;
                 float cx2, cy2;
                 sky__project(az, circ_alt[ci], &cx2, &cy2);
                 if (i > 0)
@@ -572,8 +583,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                                                          st->blend);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.55f));
         float px2 = 0, py2 = 0;
-        for (int i = 0; i <= 96; i++) {
-            float az = (float)i / 96.0f * 360.0f;
+        for (int i = 0; i <= 144; i++) {
+            float az = (float)i / 144.0f * 360.0f;
             float hx2, hy2;
             sky__project(az, 0.0f, &hx2, &hy2);
             hx2 *= mk; hy2 *= mk;
