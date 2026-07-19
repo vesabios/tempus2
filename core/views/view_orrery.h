@@ -1157,7 +1157,9 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 float dx3, dy3;
                 orr__ecl_dir(pn3->helio_lon[p], &dx3, &dy3);
                 float orbr3 = orr__orbit_r(p, base_w);
-                float pw3 = (1.0f - skw) * a_pl3;
+                float pw3 = (float)tempus_smoothstep(0.0, 1.0,
+                                                     1.0 - skw)
+                          * ink_in(INK_BEAD_CLAIM, ss);
                 wpl->pl_cx[p] = dx3 * orbr3 * pw3
                               + sv->pl_x[b] * (1.0f - pw3);
                 wpl->pl_cy[p] = dy3 * orbr3 * pw3
