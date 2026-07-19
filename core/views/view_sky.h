@@ -561,26 +561,8 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         }
     }
 
-    // ---- The horizon: Earth's orbit becomes Earth's ground ----
-    // Sampled through the projection: pitched toward a horizon, the
-    // near rim draws close while the far side recedes.
-    {
-        float rim_r = bez_R + (SKY_HOR - bez_R) * mb;
-        float mk = rim_r / SKY_HOR;
-        d->alpha = base_alpha * ink_in(INK_HORIZON, st->blend);
-        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.55f));
-        float px2 = 0, py2 = 0;
-        for (int i = 0; i <= 144; i++) {
-            float az = (float)i / 144.0f * 360.0f;
-            float hx2, hy2;
-            sky__project(az, 0.0f, &hx2, &hy2);
-            hx2 *= mk; hy2 *= mk;
-            if (i > 0)
-                draw_line(d, px2, py2, hx2, hy2, 1.0f);
-            px2 = hx2; py2 = hy2;
-        }
-        d->alpha = base_alpha;
-    }
+    // (The horizon rim is stroked by the shared sky drawer — the
+    // same boundary the circle itself renders, no drift possible.)
 
     // ---- The bodies themselves ----
     // Beads leave their orbit rings and fly to where they truly hang in

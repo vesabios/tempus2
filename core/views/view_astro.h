@@ -638,6 +638,7 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
         draw_circle_filled(d, 0, 0, 560.0f * mk / (280.0f / SKY_HOR));
     }
     int prev[ASTRO_SKY_SEC + 1], curv[ASTRO_SKY_SEC + 1];
+    float rimx[ASTRO_SKY_SEC + 1], rimy[ASTRO_SKY_SEC + 1];
     d->alpha = base_alpha * 0.94f * fam;
     draw_set_color(d, dca(av->sky_cols[0][0], av->sky_cols[0][1],
                           av->sky_cols[0][2], 1.0f));
@@ -677,6 +678,10 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
             int vi = draw__push_vert(d, x, y, d->white_u,
                                      d->white_v);
             curv[si] = vi;
+            if (ri == ASTRO_SKY_RINGS - 1) {
+                rimx[si] = x;
+                rimy[si] = y;
+            }
             if (si > 0) {
                 if (ri == 0) {
                     draw__tri(d, cvi, curv[si - 1], vi);
@@ -688,6 +693,14 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
         }
         memcpy(prev, curv, sizeof(prev));
     }
+    // The RIM: the circle strokes its own boundary — the hairline is
+    // the mesh's edge, so it can never drift from it (Seren caught
+    // the old station-owned rim shearing off during the blend)
+    d->alpha = base_alpha * fam * (0.55f + 0.35f * (1.0f - wc));
+    draw_set_color(d, dca(0.60f, 0.58f, 0.52f, 0.75f));
+    for (int si = 1; si <= ASTRO_SKY_SEC; si++)
+        draw_line(d, rimx[si - 1], rimy[si - 1], rimx[si], rimy[si],
+                  1.0f + 0.5f * (1.0f - wc));
     d->alpha = base_alpha;
 }
 
