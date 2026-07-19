@@ -79,11 +79,24 @@ never need to be.
 - **Stage 1**: station weight vector + station descriptor table
   (fly targets, wheel radius, furniture scale, input policy, layer
   dimming as table columns).
-- **Stage 2**: members + manager for the sun and moon; the orrery's
-  206-line moon composition dissolves into member rows. The old
-  behavior is the acceptance test.
+- **Stage 2 — done**: members + manager for the sun and moon; the
+  orrery's moon composition dissolved into member rows
+  (`seat_mix_pos` / `seat_mix_dir3`), and the aperture's claim moved
+  onto the station weight vector (dial family vs globe family,
+  normalized within the machine's seat) — the moon glides across the
+  whole flight instead of welding at the first quarter. Acceptance:
+  interleaved arbitration under the pinned observer, drift confined
+  to the two intended buckets.
 - **Stage 3**: planets onto the manager; `sky_owns` and coincidence
-  handoffs deleted.
+  handoffs deleted. Shape: the sky publishes per-body chart members
+  (position, pip radius, alpha policy, style) exactly as it already
+  publishes the luminaries' targets; the orrery renders every bead at
+  every station, composing machine seat -> chart target by the weight
+  vector; the sky's mover loop and the orrery's `sky_owns` abdication
+  are both deleted. The seven planets only — the sun and moon are
+  already VIEW_LVMEN's. Layer question to resolve: beads stay in the
+  orrery's layer (under the charts' furniture) vs join the luminaries
+  above; start with the orrery layer for pixel parity at rest.
 - **Stage 4**: ink staging table — the ~27 scattered smoothstep
   windows become one declarative per-element table; entrance
   choreography tuned globally.
