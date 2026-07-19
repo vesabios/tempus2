@@ -197,19 +197,44 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
     }
 
     // ---- The travelers: sun on the road, moon on the wave ----
+    // Full presence, equal size — when they meet at a jaw, the
+    // occlusion IS the eclipse. The moon wears the clock face's own
+    // dress: the phase-lit globe, its bright limb aimed at the sun.
     {
         float sx, sy;
         orr__ecl_dir(st->sun_lon, &sx, &sy);
+        float spx = sx * DRACO_R, spy = sy * DRACO_R;
         draw_set_color(d, dca(0.85f, 0.62f, 0.18f, 0.95f));
-        draw_circle_filled(d, sx * DRACO_R, sy * DRACO_R, 7.0f);
+        draw_circle_filled(d, spx, spy, 15.0f);
+        draw_set_color(d, dca(0.77f, 0.49f, 0.06f, 0.35f));
+        draw_circle_stroked(d, spx, spy, 19.0f, 1.0f);
 
         float mx, my;
         orr__ecl_dir(st->moon_lon, &mx, &my);
         // The moon sits at its TRUE latitude, scaled by the wave's
         // own exaggeration — it rides the dragon's back exactly
         float mr = DRACO_R + DRACO_AMP / 5.145f * (float)st->moon_lat;
-        draw_set_color(d, dca(0.82f, 0.81f, 0.78f, 0.95f));
-        draw_circle_filled(d, mx * mr, my * mr, 6.0f);
+        float mpx = mx * mr, mpy = my * mr;
+        GlobeCmd *gm = draw_globe_slot(d, mpx, mpy, 15.0f);
+        if (gm) {
+            double phb = globe_moon_phase(st->cache_jd);
+            float bb = (float)(phb * 2.0 * M_PI);
+            float ux = spx - mpx, uy = spy - mpy;
+            float un = sqrtf(ux * ux + uy * uy);
+            if (un > 1.0e-4f) { ux /= un; uy /= un; }
+            globe_rotation(0, 0, gm->rot);
+            gm->light[0] = ux * sinf(bb);
+            gm->light[1] = uy * sinf(bb);
+            gm->light[2] = -cosf(bb);
+            gm->land = true;
+            gm->tex_id = 1;
+            gm->grid_boost = 0.0f;
+            gm->obs_lat = 999.0f;
+            gm->day_col[0] = 0.58f; gm->day_col[1] = 0.55f;
+            gm->day_col[2] = 0.49f; gm->day_col[3] = 1.0f;
+            gm->night_col[0] = 0.10f; gm->night_col[1] = 0.105f;
+            gm->night_col[2] = 0.23f; gm->night_col[3] = 1.0f;
+        }
     }
 
     // ---- The reading ----
