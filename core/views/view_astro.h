@@ -94,6 +94,24 @@ static inline bool astro__project(float dec_deg, float ha_deg,
     return true;
 }
 
+// The horizon circle, ANALYTICALLY: the north point sits at
+// Req tan(lat/2), the south at -Req / tan(lat/2). Valid at any
+// latitude — the projector's off-plate clamp must never feed this
+// geometry (at 51.8N the south point falls just past the clamp and
+// the circle came back as stack garbage; Seren's plate sank low).
+static inline void astro__horizon_circle(float lat_deg,
+                                         float *cy, float *r) {
+    float phi = fabsf(lat_deg);
+    if (phi < 4.0f) phi = 4.0f;
+    if (phi > 88.0f) phi = 88.0f;
+    float tn = tanf(phi * 0.5f * (float)M_PI / 180.0f);
+    float Req = astro__req();
+    float yn = Req * tn, ys = -Req / tn;
+    if (lat_deg < 0) { float sw = yn; yn = -ys; ys = -sw; }
+    *cy = (yn + ys) * 0.5f;
+    *r = (yn - ys) * 0.5f;
+}
+
 // (altitude, azimuth) at latitude phi -> (dec, H), then project.
 // The almucantar sampler: the tympan's whole geometry comes through
 // here, so the plate is correct at ANY latitude by construction.
@@ -210,13 +228,7 @@ static void astro_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         }
     }
 
-    {
-        float hxn, hyn, hxs, hys;
-        astro__project_altaz(0.0f, 0.0f, lat, &hxn, &hyn);
-        astro__project_altaz(0.0f, 180.0f, lat, &hxs, &hys);
-        st->sky_hyc = (hyn + hys) * 0.5f;
-        st->sky_hr = fabsf(hyn - hys) * 0.5f;
-    }
+    astro__horizon_circle(lat, &st->sky_hyc, &st->sky_hr);
 
     double key = floor(jd_ut * 1440.0);
     if (key == st->sky_jd && lat == st->sky_lat) return;
@@ -360,11 +372,8 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
         // this projection, so its center and radius come free from
         // the two meridian crossings.
         {
-            float hxn, hyn, hxs, hys;
-            astro__project_altaz(0.0f, 0.0f, lat, &hxn, &hyn);
-            astro__project_altaz(0.0f, 180.0f, lat, &hxs, &hys);
-            float hyc = (hyn + hys) * 0.5f;
-            float hr = fabsf(hyn - hys) * 0.5f;
+            float hyc, hr;
+            astro__horizon_circle(lat, &hyc, &hr);
             const struct { float az; const char *name; } card[3] = {
                 { 90.0f, "ORIENS" }, { 270.0f, "OCCIDENS" },
                 { 0.0f, "SEPTENTRIO" },
