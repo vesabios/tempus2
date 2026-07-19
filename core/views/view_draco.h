@@ -102,6 +102,15 @@ static const uint8_t draco__edges[15][2] = {
     { 11, 12 }, { 12, 13 }, { 13, 14 }, { 14, 11 },     // head lozenge
 };
 
+
+// DRACO's own frame: the zodiac rotated 180 from MACHINA's. The
+// machine anchors HELIOCENTRICALLY (Earth's bead rides the calendar
+// date); a geocentric dial must anchor the SUN to today — July's sun
+// stands over the JULY band, the season where you feel it.
+static inline void draco__dir(double lon, float *dx, float *dy) {
+    orr__ecl_dir(lon + 180.0, dx, dy);
+}
+
 // Sign names in the ablative — "the head IN Leo" — dial order
 static const char *draco__sign_abl[12] = {
     "ARIETE", "TAVRO", "GEMINIS", "CANCRO", "LEONE", "VIRGINE",
@@ -207,10 +216,10 @@ static void draco_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     // station is anywhere in play — the movers need live endpoints
     {
         float sx, sy, mx, my;
-        orr__ecl_dir(st->sun_lon, &sx, &sy);
+        draco__dir(st->sun_lon, &sx, &sy);
         st->lum_sun_x = sx * DRACO_R;
         st->lum_sun_y = sy * DRACO_R;
-        orr__ecl_dir(st->moon_lon, &mx, &my);
+        draco__dir(st->moon_lon, &mx, &my);
         float mr = DRACO_R + DRACO_AMP / 5.145f * (float)st->moon_lat;
         st->lum_moon_x = mx * mr;
         st->lum_moon_y = my * mr;
@@ -257,12 +266,12 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
     draw_circle_stroked(d, 0, 0, DRACO_R, 1.0f);
     for (int i = 0; i < 12; i++) {
         float dx, dy;
-        orr__ecl_dir(i * 30.0, &dx, &dy);
+        draco__dir(i * 30.0, &dx, &dy);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
         draw_line(d, dx * 410.0f, dy * 410.0f,
                   dx * 422.0f, dy * 422.0f, 1.0f);
         float mx, my;
-        orr__ecl_dir(i * 30.0 + 15.0, &mx, &my);
+        draco__dir(i * 30.0 + 15.0, &mx, &my);
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.50f));
         orr__zodiac_glyph(d, i, mx * 428.0f,
                           my * 428.0f, mx, my, 24.0f);
@@ -284,7 +293,7 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
             float body = 4.0f * fabsf(sinf(ph));   // girth
             float rbase = DRACO_R + DRACO_AMP * sinf(ph);
             float dx, dy;
-            orr__ecl_dir(lam, &dx, &dy);
+            draco__dir(lam, &dx, &dy);
             float ox = dx * (rbase + body), oy = dy * (rbase + body);
             float ix = dx * (rbase - body), iy = dy * (rbase - body);
             if (i) {
@@ -314,7 +323,7 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         float sx2[15], sy2[15];
         for (int i = 0; i < 15; i++) {
             float dx, dy;
-            orr__ecl_dir(draco__stars[i][0], &dx, &dy);
+            draco__dir(draco__stars[i][0], &dx, &dy);
             // Pole distance exaggerated x2 (the station's habit — the
             // wave wears x13.6), angles honest: the coil opens to
             // fill the heart instead of knotting at the pole
@@ -344,8 +353,8 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
     // ---- Head and tail at the crossings ----
     {
         float hx, hy, tx, ty;
-        orr__ecl_dir(st->node_lon, &hx, &hy);
-        orr__ecl_dir(st->node_lon + 180.0, &tx, &ty);
+        draco__dir(st->node_lon, &hx, &hy);
+        draco__dir(st->node_lon + 180.0, &tx, &ty);
         float ha = 0.55f + (head_near ? 0.40f * season : 0.0f);
         float ta = 0.55f + (!head_near ? 0.40f * season : 0.0f);
         draw_set_color(d, dca(0.72f, 0.70f, 0.64f, ha));
@@ -362,10 +371,10 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
     // dress: the phase-lit globe, its bright limb aimed at the sun.
     {
         float sx, sy;
-        orr__ecl_dir(st->sun_lon, &sx, &sy);
+        draco__dir(st->sun_lon, &sx, &sy);
         float spx = sx * DRACO_R, spy = sy * DRACO_R;
         float mx, my;
-        orr__ecl_dir(st->moon_lon, &mx, &my);
+        draco__dir(st->moon_lon, &mx, &my);
         // The moon sits at its TRUE latitude, scaled by the wave's
         // own exaggeration — it rides the dragon's back exactly
         float mr = DRACO_R + DRACO_AMP / 5.145f * (float)st->moon_lat;
@@ -452,7 +461,7 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         // the lune (the globe pass renders beneath later pushes).
         if (glow_lun > 0.005f) {
             float ax, ay;
-            orr__ecl_dir(st->sun_lon + 180.0, &ax, &ay);
+            draco__dir(st->sun_lon + 180.0, &ax, &ay);
             float ucx = ax * DRACO_R, ucy = ay * DRACO_R;
             const int SEG = 40;
             float r_umb = 74.0f;
