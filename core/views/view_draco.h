@@ -359,9 +359,9 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
             // top: entering Earth's shadow, the disc reddens to the
             // umbral copper of refracted sunset light
             float es = 0.5f * (1.0f + cosf(bb));
-            float nr = 0.10f + 0.17f * es;
-            float ng = 0.105f + 0.175f * es;
-            float nb2 = 0.23f + 0.12f * es;
+            float nr = 0.10f + 0.075f * es;
+            float ng = 0.105f + 0.078f * es;
+            float nb2 = 0.23f + 0.055f * es;
             float bl = glow_lun;
             gm->day_col[0] = 0.58f - 0.08f * bl;
             gm->day_col[1] = 0.55f - 0.33f * bl;
