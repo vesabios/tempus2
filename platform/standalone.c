@@ -1181,7 +1181,16 @@ static void frame(void) {
             float wv_sz = 21.0f;
             float x_r = half_w - 42.0f;
             float y = -640.0f + 46.0f;
-            for (int i = 0; i < WV_COUNT; i++) {
+            // Display order (Seren): the physical instruments first —
+            // clock, globe, sun, system, plate, sky, dragon — then a
+            // rule, then the cycle dials
+            static const int wv_order[WV_COUNT] = {
+                WV_HOROLOGIVM, WV_ORBIS, WV_TELLVS, WV_MACHINA,
+                WV_ASTROLAB, WV_CAELVM, WV_DRACO,
+                WV_HORAE, WV_SAECVLVM, WV_ROTAE, WV_OFFICIVM,
+            };
+            for (int k = 0; k < WV_COUNT; k++) {
+                int i = wv_order[k];
                 float tw = sdf_measure_width(wv_w, g_worldview_names_at(i))
                          * wv_sz;
                 draw_set_color(&g_draw, (int)g_worldview == i
@@ -1194,6 +1203,13 @@ static void frame(void) {
                 g_wv_btn[i][2] = x_r + 10.0f;
                 g_wv_btn[i][3] = y + wv_sz + 6.0f;
                 y += 34.0f;
+                if (k == 6) {   // the rule between worlds and wheels
+                    draw_set_color(&g_draw,
+                                   dca(0.50f, 0.49f, 0.46f, 0.30f));
+                    draw_line(&g_draw, x_r - 96.0f, y + 2.0f,
+                              x_r, y + 2.0f, 1.0f);
+                    y += 18.0f;
+                }
             }
         }
 
