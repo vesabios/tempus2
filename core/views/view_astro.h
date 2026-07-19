@@ -572,12 +572,14 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
     // to the calendar wheel's live edge (Seren) — the sky may fill
     // everything inside the band
     float clip = 400.0f + (bez - 400.0f) * wc;
-    // The dark earth under CAELVM's whole chart, beneath the circle
-    if (wc > 0.004f) {
-        d->alpha = base_alpha * fam * wc;
-        draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
-        draw_circle_filled(d, 0, 0, 560.0f * mk / (280.0f / SKY_HOR));
-    }
+    // The dark earth under CAELVM's whole chart — retired for now
+    // (Seren), kept for one relaunch if the void feels too empty
+    // if (wc > 0.004f) {
+    //     d->alpha = base_alpha * fam * wc;
+    //     draw_set_color(d, dca(0.055f, 0.038f, 0.030f, 1.0f));
+    //     draw_circle_filled(d, 0, 0,
+    //                        560.0f * mk / (280.0f / SKY_HOR));
+    // }
     int prev[ASTRO_SKY_SEC + 1], curv[ASTRO_SKY_SEC + 1];
     float rimx[ASTRO_SKY_SEC + 1], rimy[ASTRO_SKY_SEC + 1];
     d->alpha = base_alpha * 0.94f * fam;
