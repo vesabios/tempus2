@@ -56,10 +56,19 @@ struct HoraeViewState {
 // Gear geometry (world units; the eccentric ring's farthest sweep,
 // HORAE_ECC + HORAE_RING_OUT + labels, must clear the calendar wheel
 // at 434)
-#define HORAE_CLOCK_R   230.0f   // the fixed day clock, center stage
-#define HORAE_CLOCK_W    28.0f   // its sky band depth
-#define HORAE_RING_IN   296.0f   // week ring inner (touches the clock)
-#define HORAE_RING_OUT  364.0f   // week ring outer
+#define HORAE_CLOCK_R   221.0f   // the fixed day clock, center stage
+#define HORAE_CLOCK_W    27.0f   // its sky band depth
+#define HORAE_RING_IN   284.0f   // week ring inner (touches the clock)
+#define HORAE_RING_OUT  350.0f   // week ring outer
+// The assembly steps down only ~4% (230/296/364 -> 221/284/350): the
+// 24-hour ring hugs the YEAR WHEEL'S INNER RIM at 424-442 rather than
+// sitting midway, so the disc keeps nearly all its size (Seren). Its
+// furthest reach is ECC + RING_OUT = 413, clearing the ring by 11,
+// and the ring clears the wheel at 450 by 8. The design law holds:
+// ECC = RING_IN - CLOCK_R, so the ring's inner edge still touches the
+// clock's rim at the contact, and the pinion's rp = (CLOCK_R - W)*7/24
+// scales with it — the gear ratio IS the radius, so the tooth pitch
+// stays equal.
 #define HORAE_ECC (HORAE_RING_IN - HORAE_CLOCK_R)   // eccentricity
 
 // Chaldean order, slowest to fastest; colors borrowed from the orrery
@@ -476,7 +485,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             const uint8_t *c = horae__metal_col[horae__day_ruler[i]];
             bool today = i == w;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
-                                  c[2] / 255.0f, today ? 0.16f : 0.06f));
+                                  c[2] / 255.0f, today ? 0.21f : 0.09f));
             horae__cell(d, rcx, rcy, HORAE_RING_IN, HORAE_RING_OUT,
                         q0, q0 + 1.0f / 7.0f);
 
@@ -484,7 +493,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             {
                 float ab = (q0 - floorf(q0)) * 2.0f * (float)M_PI;
                 float sx = sinf(ab), sy = -cosf(ab);
-                draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.30f));
+                draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.46f));
                 draw_line(d, rcx + sx * (HORAE_RING_IN - 4.0f),
                           rcy + sy * (HORAE_RING_IN - 4.0f),
                           rcx + sx * (HORAE_RING_OUT + 4.0f),
@@ -503,9 +512,11 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                           + 12.0f;   // clear of the meshing ticks
                 float lr = mid - lsz * 0.5f
                          + lsz * (lflip ? 0.51f : 0.37f);
+                // The quiet days were 0.55 grey at 0.45 alpha — barely
+                // there against the band they sit on (Seren)
                 draw_set_color(d, today
-                    ? dca(0.80f, 0.77f, 0.70f, 0.95f)
-                    : dca(0.55f, 0.53f, 0.49f, 0.45f));
+                    ? dca(0.88f, 0.85f, 0.78f, 0.98f)
+                    : dca(0.74f, 0.72f, 0.66f, 0.74f));
                 draw_text_curved(d, FONT_date, rcx, rcy, lr, ang,
                                  horae__dies[i], 0.8f, 1.0f);
             }
@@ -514,9 +525,11 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
         // (The 168-hour chemin de fer is retired — the ring reads as
         // its day regions alone, and the drag still speaks in weeks.)
 
-        draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.35f));
-        draw_circle_stroked(d, rcx, rcy, HORAE_RING_IN, 1.0f);
-        draw_circle_stroked(d, rcx, rcy, HORAE_RING_OUT, 1.0f);
+        // The rims carried the whole disc's shape at 0.35 and read as
+        // a smudge; they are the disc's drawing, so they lead now.
+        draw_set_color(d, dca(0.66f, 0.64f, 0.58f, 0.62f));
+        draw_circle_stroked(d, rcx, rcy, HORAE_RING_IN, 1.2f);
+        draw_circle_stroked(d, rcx, rcy, HORAE_RING_OUT, 1.2f);
     }
 
     // ---- The rulers' pinion ----
@@ -622,7 +635,12 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
 
         char db[24];
         snprintf(db, sizeof(db), "%s", horae__english[w]);
-        float nsz = _font_compat[FONT_month].size;
+        // Larger and TIGHTER (Seren): the day is the one word on this
+        // face and it was set wide and small, reading as a caption
+        // rather than the answer. Waist compensation takes the SCALED
+        // size or the arc sits off the band it was measured against.
+        const float nscale = 1.15f;
+        float nsz = _font_compat[FONT_month].size * nscale;
         // Baseline arc CONCENTRIC WITH THE WEEK DISC, not the clock:
         // the words ride the wheel they name. Same contact point —
         // the ring center sits ECC behind the origin along the hand,
@@ -631,7 +649,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
                  + nsz * (lflip ? 0.51f : 0.37f);
         draw_set_color(d, dca(0.80f, 0.77f, 0.70f, 0.95f));
         draw_text_curved(d, FONT_month, rcx, rcy, rn, ah, db,
-                         1.2f, 1.0f);
+                         0.7f, nscale);
 
         // (The ruler's pip is retired — the pinion's metal cell and
         // sigil at the mesh already name the ruler; the outer rim

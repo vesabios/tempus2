@@ -30,6 +30,14 @@ struct OrbisViewState {
     bool  dragging;   // turning the globe under the reticle
     float last_wx, last_wy;
 
+    // THE GLOBE'S FLYWHEEL: release mid-turn and the planet keeps
+    // spinning, decaying like the calendar band's. Screen-space rate
+    // (world units/sec) rather than degrees, so the coast runs through
+    // the same trackball mapping the drag does and the longitude
+    // widening stays honest as the latitude drifts.
+    float acc_x, acc_y;   // drag delta since the last update tick
+    float vel_x, vel_y;   // units/sec; nonzero = coasting
+
     // The orrery's state — its published globe (position, radius, live
     // rotation) is read at render time so the pips ride the same object
     // with zero lag, immune to update pacing

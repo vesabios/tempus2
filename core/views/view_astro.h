@@ -90,13 +90,22 @@ static inline float astro__req(void) {
 // Project (dec, hour angle H): the meridian stands vertical, the
 // upper culmination (H = 0) toward the TOP of the plate — the
 // classical face, south up in the northern signs.
+//
+// HANDEDNESS (Seren, 2026-07-21): x is NEGATED against the brass. A
+// real plate is projected from the south pole and read from OUTSIDE
+// the sphere, so its east and west are swapped relative to the naked
+// eye. CAELVM must look like the sky looks when you stand and look
+// up, and the two charts share one blended map (chart__project) — a
+// mirror between them cannot be interpolated through, it folds. So
+// the whole chart family takes the naked-eye handedness and the plate
+// gives up its outside-view convention. TEMPUS_CHARTTEST guards it.
 static inline bool astro__project(float dec_deg, float ha_deg,
                                   float *x, float *y) {
     float r = astro__req()
             * tanf((90.0f - dec_deg) * 0.5f * (float)M_PI / 180.0f);
     if (r > ASTRO_R_CAP * 1.35f) return false;   // deep south: off plate
     float h = ha_deg * (float)M_PI / 180.0f;
-    *x = r * sinf(h);
+    *x = -r * sinf(h);
     *y = -r * cosf(h);
     return true;
 }
@@ -697,7 +706,14 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
     // the limb (400) eats the circle; at CAELVM it opens ALL the way
     // to the calendar wheel's live edge (Seren) — the sky may fill
     // everything inside the band
-    float clip = 400.0f + (bez - 400.0f) * wc;
+    // THE CLIP FOLLOWS THE LOUPE. At CAELVM the sky used to be held
+    // inside the calendar band ("the sky may fill everything inside
+    // the band") — written when the bowl could never exceed the wheel.
+    // The loupe now grows it straight past, and the wheel renders on
+    // top as the frame, so the clip has to open with it or the wash
+    // and the cardinals stay pinned to the rim while the stars fly out
+    // beyond them.
+    float clip = 400.0f + (bez * sky__loupe - 400.0f) * wc;
     // The dark earth under CAELVM's whole chart — retired for now
     // (Seren), kept for one relaunch if the void feels too empty
     // if (wc > 0.004f) {
@@ -729,7 +745,14 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
             float azd = (float)si / ASTRO_SKY_SEC * 360.0f;
             float az = azd * (float)M_PI / 180.0f;
             // the astrolabe's seat: polar about its horizon circle
-            float ax = -sinf(az) * rr2;
+            // +sin, not -sin: this is the plate's own polar layout,
+            // written inline rather than through astro__project, so it
+            // does NOT inherit that function's handedness flip and has
+            // to carry it explicitly. Left at -sin it kept the old
+            // east-left sense while the CAELVM side flipped, and the
+            // per-vertex lerp between them folded through a mirror —
+            // the wash visibly turning over mid-flight (Seren).
+            float ax = sinf(az) * rr2;
             float ay = av->sky_hyc + cosf(az) * rr2;
             float x = ax, y = ay;
             if (wc > 0.001f && sv) {
@@ -841,10 +864,12 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
         int cw = _font_compat[FONT_month].weight;
         for (int i = 0; i < 4; i++) {
             float ax, ay;
+            // E/W follow the plate's flipped handedness (see
+            // astro__project): +Req is east now, -Req west.
             if (i == 0) { ax = 0; ay = av->sky_hyc + av->sky_hr; }
-            else if (i == 1) { ax = -Req; ay = 0; }
+            else if (i == 1) { ax = Req; ay = 0; }
             else if (i == 2) { ax = 0; ay = av->sky_hyc - av->sky_hr; }
-            else { ax = Req; ay = 0; }
+            else { ax = -Req; ay = 0; }
             float x = ax, y = ay;
             if (wc > 0.001f && sv) {
                 float bx, by;

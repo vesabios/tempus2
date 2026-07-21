@@ -276,6 +276,27 @@ static inline void scene__advance_override_days(Tempus *t, double dv,
 static inline void scene__advance_override_weeks(CalendarViewState *c,
                                                  Tempus *t, double dv);
 
+// The trackball step: surface follows the finger, home follows the
+// reticle. Near center one world unit = 1/R radians; longitude widened
+// by the shrinking parallels. Shared by the live drag and the coast so
+// a flick continues exactly the motion it was released from.
+static inline void scene__orbis_turn(const Scene *sc, Tempus *t,
+                                     float ddx, float ddy) {
+    if (ddx == 0.0f && ddy == 0.0f) return;
+    float R = sc->orrery_state.glob_r > 1.0f
+            ? sc->orrery_state.glob_r : 355.0f;
+    double k = (180.0 / M_PI) / R;
+    double lat = t->config.latitude + (double)ddy * k;
+    if (lat > 85.0) lat = 85.0;
+    if (lat < -85.0) lat = -85.0;
+    double cl = cos(lat * M_PI / 180.0);
+    if (cl < 0.15) cl = 0.15;
+    double lon = t->config.longitude - (double)ddx * k / cl;
+    while (lon > 180.0) lon -= 360.0;
+    while (lon < -180.0) lon += 360.0;
+    tempus_set_location(t, lat, lon);
+}
+
 static inline void scene_update(Scene *sc, Tempus *t, double dt) {
     tween_update_all(&sc->tweens, dt);
 
@@ -315,6 +336,33 @@ static inline void scene_update(Scene *sc, Tempus *t, double dt) {
             // v * 0.7/ln2 ~= v days, so letting it run costs nothing.
         } else {
             c->fling_vel = 0.0;
+        }
+
+        // THE GLOBE'S FLYWHEEL, the band's law applied to the trackball:
+        // a smoothed rate while the finger is down, a free coast after
+        // it lifts, and NO SNAP TO ZERO — pacing decides when the spin
+        // is over. Dead away from ORBIS, so a turn cannot outlive the
+        // station and move the observer from somewhere else.
+        {
+            OrbisViewState *ov = &sc->orbis_state;
+            if (sc->orbis_blend <= 0.5) {
+                ov->vel_x = ov->vel_y = 0.0f;
+                ov->acc_x = ov->acc_y = 0.0f;
+            } else if (ov->dragging) {
+                if (dt > 1e-4) {
+                    float ix = ov->acc_x / (float)dt;
+                    float iy = ov->acc_y / (float)dt;
+                    ov->vel_x = ov->vel_x * 0.65f + ix * 0.35f;
+                    ov->vel_y = ov->vel_y * 0.65f + iy * 0.35f;
+                }
+                ov->acc_x = ov->acc_y = 0.0f;
+            } else if (ov->vel_x != 0.0f || ov->vel_y != 0.0f) {
+                scene__orbis_turn(sc, t, ov->vel_x * (float)dt,
+                                         ov->vel_y * (float)dt);
+                float decay = (float)exp2(-dt / 0.7);   // the band's
+                ov->vel_x *= decay;                     // half-life
+                ov->vel_y *= decay;
+            }
         }
     }
 
@@ -567,38 +615,19 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         // HORAE's week ring: grab the eccentric ring itself for fine
         // scrubbing — one revolution is 7/6 of a day (the ring turns
         // 6/7 rev per day), against the calendar band's year
-        if (sc->horae_blend > 0.5) {
-            float ha = (float)(t->percent_of_day * 2.0 * M_PI);
-            float rcx = -sinf(ha) * HORAE_ECC;
-            float rcy = cosf(ha) * HORAE_ECC;
-            float dxr = wx - rcx, dyr = wy - rcy;
-            float rr = sqrtf(dxr * dxr + dyr * dyr);
-            // The whole disc turns the week: grab anywhere inside the
-            // ring's outer edge, inner dial included
-            if (rr < HORAE_RING_OUT + 40.0f) {
-                ho->ring_dragging = true;
-                ho->last_wx = wx;
-                ho->last_wy = wy;
-                c->fling_vel = 0;
-                c->drag_accum = 0;
-                // A band grab at HORAE leaves fling_week=true behind;
-                // the ring's own flings must clear it or they get
-                // week-quantized into apparent deadness (Seren: the
-                // flywheel stops working after touching the band)
-                c->fling_week = false;
-                c->week_accum = 0.0;
-                c->fling_keep_time = false;   // the ring scrubs hours
-                scene__begin_override(t);
-                return;
-            }
-        }
+        // THE WEEK DISC NO LONGER SCRUBS (Seren): HORAE takes the
+        // 24-hour ring instead, like the chart stations, so the disc
+        // is a reading and not a handle. The whole-disc grab that used
+        // to turn a week per contact revolution is gone; ring_dragging
+        // survives only as inert state.
 
-        // Calendar wheel: draggable at EVERY station — the band is the
-        // instrument's one universal time control. Fixed-wheel 1:1
-        // mapping everywhere the wheel holds still (the main 12-hour
-        // face included); the film-strip rule only where it pans
-        // (TELLVS). The globe's interior stays excluded.
-        {
+        // Calendar wheel: draggable at every station THAT SHOWS IT —
+        // the band is the instrument's one universal time control, but
+        // ORBIS hides the wheel entirely and hands its radius to the
+        // planet, so there is nothing out there to grab. Dragging the
+        // empty space around the globe used to scrub the date invisibly
+        // (Seren). The globe's interior stays excluded everywhere.
+        if (sc->orbis_blend <= 0.5) {
             float base_w = (float)tempus_wheel_radius(
                 sc->style.calendar_base_radius, sc->system_blend,
                 sc->sky_blend, sc->orbis_wheel);
@@ -683,18 +712,10 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         // Trackball: the surface follows the finger, home follows the
         // reticle. Near center one world unit = 1/R radians; longitude
         // widened by the shrinking parallels.
-        float R = o->glob_r > 1.0f ? o->glob_r : 355.0f;
         float ddx = wx - ob->last_wx, ddy = wy - ob->last_wy;
-        double k = (180.0 / M_PI) / R;
-        double lat = t->config.latitude + (double)ddy * k;
-        if (lat > 85.0) lat = 85.0;
-        if (lat < -85.0) lat = -85.0;
-        double cl = cos(lat * M_PI / 180.0);
-        if (cl < 0.15) cl = 0.15;
-        double lon = t->config.longitude - (double)ddx * k / cl;
-        while (lon > 180.0) lon -= 360.0;
-        while (lon < -180.0) lon += 360.0;
-        tempus_set_location(t, lat, lon);
+        scene__orbis_turn(sc, t, ddx, ddy);
+        ob->acc_x += ddx;   // the update tick turns this into a rate
+        ob->acc_y += ddy;
         ob->last_wx = wx;
         ob->last_wy = wy;
     } else if (phase == 1 && sk->chart_dragging) {
@@ -796,7 +817,9 @@ static inline double scene_desired_fps(const Scene *sc) {
     // hold the full frame rate for it. Purely a rate question; the
     // velocity itself keeps decaying underneath.
     if (sc->transitioning || tween_any_active(&sc->tweens)
-        || fabs(sc->calendar_state.fling_vel) > 0.0002)
+        || fabs(sc->calendar_state.fling_vel) > 0.0002
+        || fabsf(sc->orbis_state.vel_x) > 0.4f
+        || fabsf(sc->orbis_state.vel_y) > 0.4f)
         return sc->pace.animate_fps;
 
     double fps = sc->pace.ambient_fps;

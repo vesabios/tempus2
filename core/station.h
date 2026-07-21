@@ -61,7 +61,7 @@ typedef struct {
 static const StationDesc station_table[ST_COUNT] = {
     //                 name            helio zoom sys  park   wheel furn  keep  week
     [ST_HOROLOGIVM] = { "HOROLOGIVM",    0,   0,   0,  false,  450, 1.0f, true,  false, 0,0, true },
-    [ST_HORAE]      = { "HORAE",         0,   0,   0,  false,  450, 1.0f, true,  true , 0,0 },
+    [ST_HORAE]      = { "HORAE",         0,   0,   0,  false,  450, 1.0f, true,  false, 424, 18, true },
     [ST_ROTAE]      = { "ROTAE",         0,   0,   0,  false,  450, 1.0f, false, false, 0,0 },
     [ST_SAECVLVM]   = { "SAECVLVM",      0,   0,   0,  false,  450, 1.0f, false, false, 0,0 },
     [ST_TELLVS]     = { "TELLVS",        1,   1,   0,  false,  450, 1.0f, false, false, 380, 18, true },

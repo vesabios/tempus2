@@ -111,9 +111,13 @@ static float sky__vc[3], sky__vr[3], sky__vd[3];
 //   1.00  the whole sphere, nadir at the rim (SKY_R)
 //   2.18  the horizon circle out on the calendar wheel; the visible
 //         hemisphere alone, the unseen half bled off the frame
+//   6.00  a ~34 degree field — constellations at reading size, the
+//         horizon itself off the frame. Past the 2.18 landmark the
+//         wheel stops being a boundary and becomes what it is: a
+//         frame the sky passes under.
 static float sky__loupe = 1.0f;
 
-#define SKY_LOUPE_MAX 2.18f
+#define SKY_LOUPE_MAX 6.0f
 
 static void sky__set_center(float az0_deg, float alt0_deg) {
     float a = az0_deg * (float)M_PI / 180.0f;
@@ -129,9 +133,9 @@ static void sky__set_center(float az0_deg, float alt0_deg) {
     // EAST LEFT (Seren): this is a sky seen looking UP facing north,
     // not a map looked down upon — the right-hand basis is negated,
     // matching the astrolabe's plate and every planisphere
-    sky__vr[0] = -(sky__vd[1] * sky__vc[2] - sky__vd[2] * sky__vc[1]);
-    sky__vr[1] = -(sky__vd[2] * sky__vc[0] - sky__vd[0] * sky__vc[2]);
-    sky__vr[2] = -(sky__vd[0] * sky__vc[1] - sky__vd[1] * sky__vc[0]);
+    sky__vr[0] = (sky__vd[1] * sky__vc[2] - sky__vd[2] * sky__vc[1]);
+    sky__vr[1] = (sky__vd[2] * sky__vc[0] - sky__vd[0] * sky__vc[2]);
+    sky__vr[2] = (sky__vd[0] * sky__vc[1] - sky__vd[1] * sky__vc[0]);
 }
 
 // The azimuth the projection should actually use. It EASES BACK TO
@@ -145,7 +149,17 @@ static void sky__set_center(float az0_deg, float alt0_deg) {
 static inline float sky__az(const SkyViewState *st) {
     float fam = (float)st->blend + (float)st->astb;
     float wc = fam > 1.0e-6f ? (float)st->blend / fam : 1.0f;
-    return st->view_az * wc;
+    // AZIMUTH IS CIRCULAR: fold to the signed shortest arc before
+    // scaling, or the ease home is a plain scalar lerp toward zero and
+    // takes the LONG way round — a chart swung to 250 walks down
+    // through 180 instead of up through 360 (Seren). Folding to
+    // [-180, 180) makes 250 read as -110 and the wc scaling then
+    // shortens the near side. The result may be negative; the basis
+    // builder takes any angle.
+    float a = fmodf(st->view_az + 180.0f, 360.0f);
+    if (a < 0.0f) a += 360.0f;
+    a -= 180.0f;
+    return a * wc;
 }
 
 // Both update and render arm the projection through here. The loupe
@@ -198,7 +212,10 @@ static inline void sky__project(float az_deg, float alt_deg,
 // wraps freely — at the zenith it simply turns the chart, which is
 // well-defined, so there is still no pole to mishandle.
 static inline void sky_view_pan(SkyViewState *st, float dx, float dy) {
-    float az = st->view_az + dx / SKY_R * 180.0f;
+    // NEGATED against dx: the chart handedness flip mirrored screen-x
+    // (see sky__set_center), so the drag had to mirror with it or the
+    // sky swings away from the finger.
+    float az = st->view_az - dx / SKY_R * 180.0f;
     az = fmodf(az, 360.0f);
     if (az < 0.0f) az += 360.0f;
     st->view_az = az;
@@ -527,7 +544,10 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         // The chart's edge: the point opposite the look, stretched
         // into the outermost rim
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.20f));
-        draw_circle_stroked(d, 0, 0, SKY_R, 1.0f);
+        // The antipode of the look sits at SKY_R * loupe by the
+        // projection's own law — a literal SKY_R here left the rim
+        // behind as the sky grew past it.
+        draw_circle_stroked(d, 0, 0, SKY_R * sky__loupe, 1.0f);
         // The zenith cross rides the look
         {
             float zx2, zy2;

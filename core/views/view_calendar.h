@@ -36,6 +36,11 @@ struct CalendarViewState {
     // flight GLIDES the ring between its two seats
     float   hr_a, hr_r, hr_w;
 
+    // HOROLOGIVM's own weight: the pointer's day numeral belongs to
+    // the clock alone (Seren), and rides this so it eases with the
+    // station instead of popping on arrival.
+    float   horo;
+
     // THE SKY CIRCLE — one shape, one drawer, every station. Seat
     // and radius blend between CAELVM's bowl (centered, growing off
     // the bezel) and the astrolabe's horizon circle; the plate's
@@ -194,6 +199,7 @@ static void calendar_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         st->sky_wc = fam > 1.0e-6
                    ? (float)(sc->sky_blend / fam) : 0.0f;
     }
+    st->horo = (float)sc->stw[ST_HOROLOGIVM];
     {
         double a = 0, r = 0, w = 0;
         for (int i = 0; i < ST_COUNT; i++) {
@@ -252,16 +258,29 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
     float save_tx = d->tx, save_ty = d->ty;
     draw_translate(d, -offx, -offy);
 
-    // Event names
-    float label_vis = (float)tempus_smoothstep(600, 1200, radius);
-    if (label_vis > 0.01f) {
-        float event_vis = (float)tempus_smoothstep(1000, 1500, radius) * 0.7f;
-        draw_set_color(d, dc(event_vis, event_vis, event_vis));
-        for (int i = 0; i < 8; i++) {
-            float ef = (float)tempus_jd_to_wheel_pct(t, t->jd_events[i]);
-            float angle = ef * 2.0f * (float)M_PI;
-            draw_text_curved(d, FONT_event, 0, 0, radius - 58.0f,
-                           angle, tempus_event_name(t, i), 1.8f, 1.0f);
+    // Event names. ONE curve decides both presence and ink — there
+    // used to be two that disagreed, and the ink's ran 1000..1500 of
+    // radius, which is zoom 0.076..0.146: under a tenth of the tween,
+    // some 70ms, so the names snapped off instead of fading (Seren).
+    // Widened to a quarter of the zoom's travel, settled before the
+    // date numerals begin their own reveal at 2200.
+    {
+        float event_vis = (float)tempus_smoothstep(700, 2600, radius);
+        if (event_vis > 0.004f) {
+            float ink = event_vis * 0.7f;
+            draw_set_color(d, dc(ink, ink, ink));
+            // Tracking CLOSES as the wheel shrinks: the letterforms
+            // keep their size while the arc they sit on gets shorter,
+            // so a fixed em spread swallows more and more of the
+            // circle on the way out. Same shape as the month names'.
+            float ev_track = (float)tempus_mix(0.4, 1.8, blend);
+            for (int i = 0; i < 8; i++) {
+                float ef = (float)tempus_jd_to_wheel_pct(t, t->jd_events[i]);
+                float angle = ef * 2.0f * (float)M_PI;
+                draw_text_curved(d, FONT_event, 0, 0, radius - 58.0f,
+                               angle, tempus_event_name(t, i),
+                               ev_track, 1.0f);
+            }
         }
     }
 
@@ -430,6 +449,54 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
         draw_line(d, ax, ay, b1x, b1y, 2.2f);
         draw_line(d, b1x, b1y, b2x, b2y, 2.2f);
         draw_line(d, b2x, b2y, ax, ay, 2.2f);
+
+        // THE DAY, in numerals, at the pointer (Seren). Zoomed out the
+        // wheel names no days at all — the per-day numerals only fade
+        // in from radius 2200 — so the mark says WHICH day it is and
+        // the month name outside it says which month. Set ON THE BAND,
+        // baseline following the circle, just inside the tick ring; it
+        // fades exactly as the per-day numerals arrive, so the two
+        // never both name the same date.
+        {
+            // THE CLOCK'S ALONE (Seren): every other station has its
+            // own reading of the date, so the numeral answers to
+            // HOROLOGIVM's weight as well as the zoom.
+            float dnum = (1.0f - (float)tempus_smoothstep(800, 2200, radius))
+                       * st->horo;
+            if (dnum > 0.004f) {
+                char db[4];
+                int dd = tv->day;
+                if (dd >= 10) { db[0] = (char)('0' + dd / 10);
+                                db[1] = (char)('0' + dd % 10); db[2] = 0; }
+                else          { db[0] = (char)('0' + dd); db[1] = 0; }
+                DrawColor dc2 = s->month_text_color;
+                dc2.a = dnum;
+                draw_set_color(d, dc2);
+                // Flip compensation, as the per-day numerals use: the
+                // two branches put glyphs on opposite sides of the
+                // baseline circle, so the radius has to answer or the
+                // numerals ride at different depths top and bottom.
+                float na = fmodf(angle, 2.0f * (float)M_PI);
+                if (na < 0) na += 2.0f * (float)M_PI;
+                bool nflip = (na > (float)M_PI * 0.5f
+                              && na < (float)M_PI * 1.5f);
+                const float dscale = 2.25f;   // 3x the first pass
+                // 6 off the tick ring's inner edge: the numerals sit
+                // right under the band they mark, not adrift inside it.
+                // The FLIP SHIFT comes from the font's own metrics, not
+                // a guessed fraction — Seren caught the numeral
+                // stepping 30 units inward between Sept 20 and Sept 21,
+                // which is exactly the 9 o'clock flip boundary.
+                float dsh = draw_text_curved_flip_shift(FONT_date, db,
+                                                        dscale);
+                // Shared base, so both flip cases move together; dsh
+                // alone is the difference between them.
+                const float dbase = radius + 1.0f;
+                float dr = nflip ? dbase : (dbase - dsh);
+                draw_text_curved(d, FONT_date, -offx, -offy, dr,
+                                 angle, db, 0.10f, dscale);
+            }
+        }
     }
 
     d->sx = save_sx;

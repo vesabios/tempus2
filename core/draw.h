@@ -483,6 +483,38 @@ static inline void draw_text_radial(DrawCtx *d, int font_id,
     }
 }
 
+// The RADIAL SHIFT between draw_text_curved's two branches. The flip
+// branch drops gy by exactly one em AND rotates the frame 180, so the
+// glyph lands on the other side of the baseline circle. A caller that
+// wants curved text to sit at a CONSTANT DEPTH all the way round must
+// move the unflipped baseline inward by this much:
+//
+//   non-flip glyph spans inward [gy, gy+gh]
+//   flip     glyph spans inward [sz-gy-gh, sz-gy]
+//   equal depth  =>  shift = sz - 2*gy - gh
+//
+// Derived from the same metrics the drawer uses, so it tracks the font
+// rather than being a fitted constant. (Callers used to guess: the
+// per-day numerals used 0.8*size, which is ~4x too much and threw the
+// numerals 30 units inward every time they crossed 3 or 9 o'clock.)
+static inline float draw_text_curved_flip_shift(int font_id, const char *s,
+                                                float scale) {
+    int w_id = _font_compat[font_id].weight;
+    float sz = _font_compat[font_id].size * scale;
+    float ascent = sdf_nascent[w_id] * sz;
+    float gy = 0, gh = 0;
+    bool any = false;
+    for (const char *p = s; *p; p++) {
+        int ci = *p - SDF_FIRST_CHAR;
+        if (ci < 0 || ci >= SDF_NUM_CHARS) continue;
+        const SdfGlyph *g = &sdf_glyphs[w_id][ci];
+        if (g->nh <= 0) continue;
+        float h = g->nh * sz;
+        if (!any || h > gh) { gh = h; gy = ascent + g->nyoff * sz; any = true; }
+    }
+    return any ? (sz - 2.0f * gy - gh) : 0.0f;
+}
+
 static inline void draw_text_curved(DrawCtx *d, int font_id,
                                     float cx, float cy, float radius,
                                     float center_angle,

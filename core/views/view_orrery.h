@@ -36,6 +36,10 @@ struct OrreryViewState {
     // grows out under the calendar wheel, which is fine now that the
     // wheel renders on top of everything (see tempus2 layer law).
     float  orbis_loupe;
+
+    // MACHINA's scale morph: 0 = the tempo scale, 1 = true AU
+    // (Earth-anchored). See orr__true_mix.
+    float  true_mix;
     double geo_azimuth; // live sun az/zen from the solar view, for the
     double geo_zenith;  // geocentric endpoint of the morph
     const SolarViewState *solar;  // solar data + sun-path caches
@@ -136,12 +140,127 @@ struct OrreryViewState {
 // geocentric dial, crossed only by the sight-lines.
 static const float orr__inner_frac[2] = { 0.36f, 0.782f };
 
+// TRUE semi-major axes, AU. The other scale this dial could have had.
+static const float orr__au[9] = {
+    0.387f, 0.723f, 1.000f, 1.524f,
+    5.203f, 9.537f, 19.191f, 30.07f, 39.48f };
+
+// THE SCALE MORPH (Seren): 0 = the TEMPO scale, the instrument's own
+// designed lie — radius linear in log of orbital period, so every
+// planet has a legible ring. 1 = the TRUTH, radius linear in AU,
+// ANCHORED AT EARTH. Because Earth holds, the inner four barely stir
+// (130->139, 282->260, 510->549) while the outer five hurl outward
+// (567->1873 ... 660->14213) and leave the frame entirely. The dial
+// keeps its readable heart and shows you what it has been hiding —
+// the gesture is an argument, not a magnifier. The zodiac band and
+// the calendar moat do NOT move: they are the frame the planets fly
+// past.
+static float orr__true_mix = 0.0f;
+
+// Projected (ecliptic-plane) heliocentric position in AU, of-date, with
+// the mean anomaly displaced by dM degrees. dM = 0 is the planet's own
+// place; sweeping dM 0..360 traces its TRUE ELLIPSE. Projected, not 3D:
+// the dial is a flat ecliptic picture and geocentric longitude is the
+// longitude of the projected difference, so only x/y may be used or the
+// sight-lines never close.
+static inline void orr__helio_xy(int pl, double jd_ut, double dM_deg,
+                                 float *ox, float *oy) {
+    const double *el = planets__elem[pl];
+    double T = (jd_ut - 2451545.0) / 36525.0;
+    double a     = el[0] + el[1] * T;
+    double e     = el[2] + el[3] * T;
+    double I     = (el[4] + el[5] * T) * M_PI / 180.0;
+    double L     = el[6] + el[7] * T;
+    double varpi = el[8] + el[9] * T;
+    double Omega = (el[10] + el[11] * T) * M_PI / 180.0;
+    double w = (varpi - (el[10] + el[11] * T)) * M_PI / 180.0;
+    double M = planets__wrap360(L - varpi + dM_deg) * M_PI / 180.0;
+    double E = planets__kepler(M, e);
+    double xp = a * (cos(E) - e);
+    double yp = a * sqrt(1.0 - e * e) * sin(E);
+    double cw = cos(w), sw = sin(w);
+    double cO = cos(Omega), sO = sin(Omega);
+    double cI = cos(I);
+    double X = (cw * cO - sw * sO * cI) * xp + (-sw * cO - cw * sO * cI) * yp;
+    double Y = (cw * sO + sw * cO * cI) * xp + (-sw * sO + cw * cO * cI) * yp;
+    // of-date: the same precession the longitudes carry
+    double pr = planets__precession(jd_ut) * M_PI / 180.0;
+    double cp2 = cos(pr), sp2 = sin(pr);
+    *ox = (float)(X * cp2 - Y * sp2);
+    *oy = (float)(X * sp2 + Y * cp2);
+}
+
+// The planets' TRUE projected heliocentric distances, AU, refreshed
+// each frame (orr__rproj_set). Zero until filled, in which case the
+// mean semi-major axes stand in.
+static float orr__rproj[PL_COUNT];
+
+// Units per AU at full true scale: JUPITER's mean orbit holds the seat
+// Saturn used to (wheel_R + 235), and everything else is measured
+// against that. Jupiter itself now wanders slightly about the ring,
+// because its orbit is an ellipse and this scale is honest.
+#define ORR_TRUE_GAIN 1.15f     /* overall lift of the true-scale view */
+
+static inline float orr__true_k(float wheel_R) {
+    return (wheel_R + 235.0f) * ORR_TRUE_GAIN / orr__au[4];
+}
+
+// The ring's own radius at a given ecliptic longitude — what a label
+// or any furniture sitting BESIDE the planet must use. The planet's
+// instantaneous distance only serves the planet itself; on an ellipse
+// the ring is a different distance a few degrees away, so anchoring
+// off-planet furniture to the planet's radius makes it drift off the
+// ring and breathe over the orbit (Seren caught Mercury, e = 0.206,
+// swinging +/-20%). Scans the parametric orbit and interpolates.
+static inline float orr__ring_r_at(int pl, double jd_ut, double lon_deg) {
+    const int NS = 72;
+    float bx = 0, by = 0, bd = 1.0e9f;
+    float px2 = 0, py2 = 0;
+    double want = fmod(lon_deg + 360.0, 360.0);
+    for (int k = 0; k < NS; k++) {
+        float hx, hy;
+        orr__helio_xy(pl, jd_ut, (double)k / NS * 360.0, &hx, &hy);
+        double lam = fmod(atan2((double)hy, (double)hx) * 180.0 / M_PI
+                          + 360.0, 360.0);
+        double dd = fabs(lam - want);
+        if (dd > 180.0) dd = 360.0 - dd;
+        if (dd < bd) { bd = (float)dd; bx = hx; by = hy; }
+        px2 = hx; py2 = hy;
+    }
+    (void)px2; (void)py2;
+    return sqrtf(bx * bx + by * by);
+}
+
 static inline float orr__orbit_r(int p, float wheel_R) {
     static const float outer_off[6] = {
         150.0f, 207.0f, 235.0f, 267.0f, 287.0f, 300.0f };
-    if (p < PL_EARTH) return wheel_R * orr__inner_frac[p];
-    if (p == PL_EARTH) return wheel_R;
-    return wheel_R + outer_off[p - PL_MARS];
+    float tempo;
+    if (p < PL_EARTH)       tempo = wheel_R * orr__inner_frac[p];
+    else if (p == PL_EARTH) tempo = wheel_R;
+    else                    tempo = wheel_R + outer_off[p - PL_MARS];
+    if (orr__true_mix <= 0.0f) return tempo;
+    // TRUE SCALE MEANS TRULY TRUE (Seren): the planet's own projected
+    // distance at this instant, not the mean semi-major axis. The mean
+    // left every sight-line a few units shy of closing — the residual
+    // WAS the eccentricity — and it made the orbits perfect circles
+    // they are not. Projected (x,y only), because the dial is a flat
+    // ecliptic picture and geocentric longitude is the longitude of the
+    // PROJECTED difference; using the 3D distance would reintroduce the
+    // very miss this removes.
+    float au = orr__rproj[p] > 0.0f ? orr__rproj[p] : orr__au[p];
+    float truth = orr__true_k(wheel_R) * au;
+    return tempo + (truth - tempo) * orr__true_mix;
+}
+
+// Scroll the scale open. MACHINA's gesture alone — the wheel's own
+// zoom is forced to 0 here (the band would run off the frame at this
+// radius), so nothing collides.
+static inline void machina_view_scale(OrreryViewState *st, float dy) {
+    if (st->sys < 0.5) return;
+    float m = st->true_mix + dy * 0.02f;
+    if (m < 0.0f) m = 0.0f;
+    if (m > 1.0f) m = 1.0f;
+    st->true_mix = m;
 }
 
 // The picker globe takes the radius the calendar wheel used to hold
@@ -182,6 +301,18 @@ orr__planet[PL_COUNT] = {
     { "NEPTUNE",  9.0f,  98, 128, 188 },
     { "PLUTO",    3.5f, 138, 128, 132 },
 };
+
+// TRUE equatorial radii, Earth = 1. The other size table this dial
+// could have had — see orr__true_mix, which morphs the beads onto it.
+// The bead size at full true-scale: cube-root of the real radius ratio
+// times this. Jupiter lands ~3.5, Earth ~1.6, Mercury ~1.2 — small,
+// ordered, and all still on screen.
+#define ORR_TRUE_BEAD 1.6f
+#define ORR_SUN_REL   109.2f   /* the sun, in Earth radii */
+
+static const float orr__body_rel[PL_COUNT] = {
+    0.383f, 0.949f, 1.000f, 0.532f,
+    11.21f, 9.45f, 4.01f, 3.88f, 0.186f };
 
 // Geocentric marker colors, BODY_* order (luminaries + the planets)
 static const uint8_t orr__body_col[BODY_COUNT][3] = {
@@ -398,6 +529,27 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->sys = sc->system_blend;
     st->skyb = sc->sky_blend;
     st->orbisb = sc->orbis_blend;
+    // CUBED on the way in: with the outermost ring pinned, the thing
+    // the eye reads is a 21x compression of the inner system, which is
+    // perceptually logarithmic — driven linearly, the whole change
+    // happened in the first quarter turn and the rest of the wheel was
+    // dead. The stored value stays linear 0..1; the curve is only how
+    // it is spent.
+    // SQUARED, not cubed: with SATURN pinned the inner system only
+    // compresses ~5.8x (360 -> 62), not the ~21x that pinning Pluto
+    // would give, so the curve needs less easing to spend the wheel's
+    // travel evenly.
+    float tm = st->true_mix;
+    // EASE IT OUT WITH THE STATION, never threshold it. A hard cut at
+    // sys 0.5 collapsed the whole true-scale geometry — radii, ellipses
+    // AND the geocentric recentre — in a single frame partway through
+    // any flight off MACHINA, which is what broke the clock transition
+    // (Seren). Riding the system stage means the dial unwinds back to
+    // the tempo layout as the machine leaves, and arrives already
+    // unwound wherever it is going.
+    orr__true_mix = tm * tm
+                  * (float)tempus_smoothstep(0.35, 0.95, st->sys);
+    if (st->sys < 0.001) st->true_mix = 0.0f;   // rests when left
     // Once the station is fully behind us the zoom returns to rest, so
     // the next arrival is always at 1x (the eased term above has
     // already carried it there smoothly).
@@ -523,29 +675,71 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // At every flight endpoint za and z agree, so the flights are
     // unchanged; they part only when the wheel is zoomed by hand.
     float za = 1.0f - (float)st->sys;
+    // EARTH RIDES THE SCALE MORPH TOO (Seren). Its seat comes from here
+    // rather than orr__orbit_r, so it alone stayed parked on the old
+    // ring while every other planet collapsed inward — the one body
+    // that must move, since the whole point is where WE really sit.
+    // esc is Earth's own normalised radius over its tempo radius.
+    // Refresh the true projected distances BEFORE anything reads a
+    // radius. esc just below is the first consumer, and with the fill
+    // sitting further down it was reading a stale (or zero) array and
+    // silently falling back to the mean semi-major axis.
+    if (orr__true_mix > 0.0f) {
+        double jd_orb = tv->jd_current + tv->percent_of_day - 0.5
+                      - t->config.timezone / 24.0;
+        for (int q = 0; q < PL_COUNT; q++) {
+            float hx, hy;
+            orr__helio_xy(q, jd_orb, 0.0, &hx, &hy);
+            orr__rproj[q] = sqrtf(hx * hx + hy * hy);
+        }
+    }
+    float esc = base_w > 1.0f
+              ? orr__orbit_r(PL_EARTH, base_w) / base_w : 1.0f;
+    // EARTH'S HELIO SEAT, computed ONCE and shared by both branches.
+    // The true-scale corrections used to live only in the settled
+    // branch, so the instant a flight began (m dropping under 0.999)
+    // the radius, bearing and size all reverted in a single frame and
+    // the globe snapped — the broken HOROLOGIVM transition (Seren).
+    // The mid-morph path lerps this same seat toward the dial.
+    float ehx = sphi * base_w * (1.0f - za) * esc;
+    float ehy = -cphi * base_w * (1.0f - za) * esc;
+    float ehr = 42.0f + za * 198.0f;     // full-zoom helio size: 240
+    if (orr__true_mix > 0.0f) {
+        ehr += (ORR_TRUE_BEAD - ehr) * orr__true_mix;
+        // BEARING ONLY — esc already carries the radius (it IS
+        // orr__orbit_r(PL_EARTH)/base_w, the ring's own radius), so
+        // touching the radius here would apply the morph twice and
+        // pull Earth inside its own orbit. The tempo seat is bearing
+        // -by-year-percentage, the true seat bearing-by-heliocentric
+        // -longitude; rotate along the shortest arc, leave r alone.
+        double jd_e = tv->jd_current + tv->percent_of_day - 0.5
+                    - t->config.timezone / 24.0;
+        float hxe, hye;
+        orr__helio_xy(PL_EARTH, jd_e, 0.0, &hxe, &hye);
+        double lam_e = atan2((double)hye, (double)hxe) * 180.0 / M_PI;
+        float ux, uy;
+        orr__ecl_dir(lam_e, &ux, &uy);
+        float a0 = atan2f(ehy, ehx), a1 = atan2f(uy, ux);
+        float rr = sqrtf(ehx * ehx + ehy * ehy);
+        float da = a1 - a0;
+        while (da >  (float)M_PI) da -= 2.0f * (float)M_PI;
+        while (da < -(float)M_PI) da += 2.0f * (float)M_PI;
+        float aa = a0 + da * orr__true_mix;
+        ehx = cosf(aa) * rr;
+        ehy = sinf(aa) * rr;
+    }
     if (m >= 0.999f) {
         memcpy(rot, helio_rot, sizeof(rot));
-        ex = sphi * base_w * (1.0f - za);
-        ey = -cphi * base_w * (1.0f - za);
-        earth_r = 42.0f + za * 198.0f;   // full-zoom helio size: 240
+        ex = ehx;
+        ey = ehy;
+        earth_r = ehr;
     } else {
         float geo_rot[16];
         globe_rotation(t->config.latitude, t->config.longitude, geo_rot);
-
-        // Mid-morph target: the helio arrangement THE STATION WANTS —
-        // za, the same value the settled branch above uses, never the
-        // wheel's zoom. It has to match, or the globe jumps the moment
-        // a flight begins: with the band zoomed out at TELLVS the
-        // settled branch holds the planet centered (za = 1) while this
-        // one would send it to the bead seat (z = 0), so leaving for
-        // HOROLOGIVM snapped it small and out before flying home.
-        float hx = sphi * base_w * (1.0f - za);
-        float hy = -cphi * base_w * (1.0f - za);
-        float hr = 42.0f + za * 198.0f;
-        ex = hx * m;
-        ey = dial_y * (1 - m) + hy * m;
-        earth_r = dial_r * (1 - m) + hr * m;
-
+        // Mid-morph: the SAME seat, lerped toward the dial.
+        ex = ehx * m;
+        ey = dial_y * (1 - m) + ehy * m;
+        earth_r = dial_r * (1 - m) + ehr * m;
         globe_rot_slerp_cont(geo_rot, helio_rot, m,
                              stw->earth_pq, &stw->earth_pq_valid, rot);
     }
@@ -616,6 +810,35 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // the planets, the zodiac, the sight-lines, and finally the web — the
     // astrology arrives after the astronomy that explains it.
     float ss = (float)st->sys;
+    // THE FRAME GOES GEOCENTRIC AS THE SCALE GOES TRUE (Seren): at the
+    // tempo scale the dial is heliocentric, sun at the centre; wind the
+    // scale open and the whole machine slides until EARTH holds the
+    // middle. The zodiac ring does NOT move — so at full travel the
+    // band is centred on Earth after all, and the sight-lines come out
+    // straight because the planets have become honest geocentric
+    // vectors from the screen's centre. It costs nothing visually
+    // because true scale puts Earth only 62 units off the sun; doing
+    // the same at the tempo scale would swing it 360.
+    // THE SUN'S DISTANCE FROM CENTRE MUST BE MONOTONIC. This was
+    // -Earth x mix: a SHRINKING radius times a GROWING weight, whose
+    // product peaks at mix 0.80 (141.8) and falls back to 131.5 — the
+    // sun sails past its final seat by ~8% and returns (Seren). The
+    // two motions were never correlated; one is the scale collapsing,
+    // the other the frame recentring, and multiplying them is not the
+    // same as sequencing them. Drive the recentre by the sun's OWN
+    // target instead — Earth's final true orbital radius, lerped
+    // straight in — and take only the DIRECTION from Earth. Earth's
+    // own distance is then r(m) - r_final*m, which falls at a constant
+    // rate and lands on zero.
+    float er_now = sqrtf(ex * ex + ey * ey);
+    float r_fin = orr__true_k(base_w)
+                * (orr__rproj[PL_EARTH] > 0.0f ? orr__rproj[PL_EARTH]
+                                               : 1.0f);
+    float d_sun = r_fin * orr__true_mix;
+    float gox = er_now > 1.0e-4f ? -ex / er_now * d_sun : 0.0f;
+    float goy = er_now > 1.0e-4f ? -ey / er_now * d_sun : 0.0f;
+    ex += gox;   // Earth to the middle; the globe, its moon, the
+    ey += goy;   // tether and every sight-line origin follow from here
     // Declutter for the system stage: zoomed out, the emphasis is
     // celestial geometry — the globe keeps only its lit-ness (terminator).
     // Everything painted ON it (continents, latitude ring, city marker,
@@ -646,8 +869,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         for (int p = 0; p < PL_COUNT; p++) {
             float dx, dy;
             orr__ecl_dir(pn->helio_lon[p], &dx, &dy);
-            ppx[p] = dx * orr__orbit_r(p, wheel_R);
-            ppy[p] = dy * orr__orbit_r(p, wheel_R);
+            ppx[p] = gox + dx * orr__orbit_r(p, wheel_R);
+            ppy[p] = goy + dy * orr__orbit_r(p, wheel_R);
         }
         ppx[PL_EARTH] = ex;
         ppy[PL_EARTH] = ey;
@@ -677,42 +900,102 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             // moved out to the moat and no longer marks the orbit.
             // The HOME orbit reads a clear step above the others: this
             // is the ring the whole instrument turns on.
+            // Brought up from 0.22 / 0.34 (Seren): the rings ARE the
+            // dial's drawing — the beads only mark places on them —
+            // and they were reading as barely-there scratches. Home
+            // keeps its clear step above the rest.
+            double jd_orb2 = tv->jd_current + tv->percent_of_day - 0.5
+                           - t->config.timezone / 24.0;
+            float k_au = orr__true_k(wheel_R);
             for (int p = 0; p < PL_COUNT; p++) {
                 bool home = (p == PL_EARTH);
-                draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
-                                      home ? 0.34f : 0.22f));
-                draw_circle_stroked(d, 0, 0,
-                                    orr__orbit_r(p, wheel_R),
-                                    home ? 1.3f : 1.0f);
+                draw_set_color(d, dca(0.60f, 0.58f, 0.54f,
+                                      home ? 0.62f : 0.44f));
+                float lw = home ? 1.5f : 1.15f;
+                if (orr__true_mix <= 0.0f) {
+                    draw_circle_stroked(d, gox, goy,
+                                        orr__orbit_r(p, wheel_R), lw);
+                    continue;
+                }
+                // AN ELLIPSE, NOT A CIRCLE (Seren): sweep the mean
+                // anomaly right round and let the orbit be the shape it
+                // actually is. Each sample blends against the tempo
+                // circle by the same weight the beads use, so the bead
+                // always sits ON its ring.
+                float tr = orr__orbit_r(p, wheel_R);   // tempo blend end
+                (void)tr;
+                float tempo_r;
+                {   static const float off6[6] = {150.0f, 207.0f, 235.0f,
+                                                  267.0f, 287.0f, 300.0f};
+                    tempo_r = (p < PL_EARTH) ? wheel_R * orr__inner_frac[p]
+                            : (p == PL_EARTH) ? wheel_R
+                            : wheel_R + off6[p - PL_MARS];
+                }
+                const int NS = 128;
+                float px0 = 0, py0 = 0;
+                for (int k = 0; k <= NS; k++) {
+                    float hx, hy;
+                    orr__helio_xy(p, jd_orb2,
+                                  (double)k / NS * 360.0, &hx, &hy);
+                    // Ecliptic (x,y) is NOT screen (x,y) — the dial
+                    // maps longitude through orr__ecl_dir. Go through
+                    // it, or the ellipse comes out rotated off its
+                    // own beads.
+                    double lam = atan2((double)hy, (double)hx)
+                               * 180.0 / M_PI;
+                    float bl = sqrtf(hx * hx + hy * hy);
+                    float ux, uy;
+                    orr__ecl_dir(lam, &ux, &uy);
+                    float ex2 = ux * k_au * bl, ey2 = uy * k_au * bl;
+                    float cxp = ux * tempo_r, cyp = uy * tempo_r;
+                    float qx = gox + cxp + (ex2 - cxp) * orr__true_mix;
+                    float qy = goy + cyp + (ey2 - cyp) * orr__true_mix;
+                    if (k > 0) draw_line(d, px0, py0, qx, qy, lw);
+                    px0 = qx; py0 = qy;
+                }
             }
         }
 
-        // Zodiac dial: 30-degree signs, 10-degree ticks, engraved names
+        // Zodiac dial: 30-degree signs, 10-degree ticks, engraved names.
+        // SUN-CENTRED ring carrying GEOCENTRIC longitudes — the marks
+        // read as they should ("Jupiter in Libra" is the direction from
+        // Earth); only the circle they sit on is drawn about the sun.
+        // Centring it on Earth was tried and reverted (Seren): it makes
+        // the sight-lines exactly straight, but swings the band 38% of
+        // its own radius off frame at the tempo scale.
         if (a_zod > 0.001f) {
             d->alpha = base_alpha * a_zod;
-            draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.22f));
-            draw_circle_stroked(d, 0, 0, ORR_ZODIAC_IN, 1.0f);
-            draw_circle_stroked(d, 0, 0, ORR_ZODIAC_OUT, 1.0f);
+            // Band rims and ticks lifted (Seren): the zodiac is the
+            // dial's outer reading and was drawn at the same near
+            // -invisible weight as the old orbit rings.
+            draw_set_color(d, dca(0.60f, 0.58f, 0.54f, 0.42f));
+            draw_circle_stroked(d, 0, 0, ORR_ZODIAC_IN, 1.15f);
+            draw_circle_stroked(d, 0, 0, ORR_ZODIAC_OUT, 1.15f);
             for (int i = 0; i < 36; i++) {
                 float dx, dy;
                 orr__ecl_dir(i * 10.0, &dx, &dy);
                 bool cusp = (i % 3) == 0;
                 float r1 = cusp ? ORR_ZODIAC_OUT : ORR_ZODIAC_IN + 12.0f;
-                draw_set_color(d, cusp ? dca(0.55f, 0.53f, 0.49f, 0.50f)
-                                       : dca(0.55f, 0.53f, 0.49f, 0.25f));
+                draw_set_color(d, cusp ? dca(0.60f, 0.58f, 0.54f, 0.72f)
+                                       : dca(0.60f, 0.58f, 0.54f, 0.42f));
                 draw_line(d, dx * ORR_ZODIAC_IN, dy * ORR_ZODIAC_IN,
                           dx * r1, dy * r1, 1.0f);
             }
             // Sigils on the band's waist, feet toward the center all
             // the way around — engraved glyphs, not letters, so no
             // readability flip on the lower half
-            draw_set_color(d, dc_scale(s->medium_grey, 0.72f));
+            // Sigils DOUBLED to 56 and brightened (Seren). At that
+            // size they no longer fit inside the 34-wide band, so they
+            // ride its waist and overhang both rims — the band reads as
+            // their rule rather than their box, which is how engraved
+            // sigils sit on a real dial anyway.
+            draw_set_color(d, dc_scale(s->medium_grey, 1.15f));
             for (int i = 0; i < 12; i++) {
                 float dx, dy;
                 orr__ecl_dir(i * 30.0 + 15.0, &dx, &dy);
                 float gr = 0.5f * (ORR_ZODIAC_IN + ORR_ZODIAC_OUT);
                 orr__zodiac_glyph(d, i, dx * gr, dy * gr, dx, dy,
-                                  28.0f);
+                                  56.0f);
             }
 
             // ---- The local horizon, cut through the zodiac ----
@@ -791,18 +1074,59 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 // tempo rings) — the line left on the wrong side and
                 // hairpinned back. Clamped off the ends: a bead at the
                 // extremes would launch the control point instead.
-                float d0 = sqrtf((bx2 - ex) * (bx2 - ex)
-                               + (by2 - ey) * (by2 - ey));
+                // NO ROLE SWAP (Seren): choosing the endpoint by
+                // whichever of bead/mark is farther makes the far end
+                // change IDENTITY the instant a planet crosses the
+                // ring — and at that moment the two sit at the same
+                // distance but different bearings, so the line's end
+                // jumps along an arc and the bend inverts. Saturn
+                // crosses around mix 0.75, where it is still ~27 units
+                // off collinear, so the jump is plainly visible.
+                //
+                // Instead the line ALWAYS runs Earth -> the zodiac
+                // mark, and the "pass through the bead" constraint
+                // FADES OUT as the bead nears the ring. Beyond it, a
+                // straight continuation carries on out to the planet,
+                // growing from zero length at the crossing. Everything
+                // is continuous: no term changes identity, and the
+                // only cost is that a planet sitting right on the ring
+                // no longer has the curve bent to touch it — by then
+                // it is a few units from the mark anyway.
+                if (getenv("TEMPUS_SIGHTTEST")) {
+                    float vx = mpx[b] - ex, vy = mpy[b] - ey;
+                    float L = sqrtf(vx*vx + vy*vy);
+                    float wx2 = bx2 - ex, wy2 = by2 - ey;
+                    float perp = L > 1e-6f
+                               ? fabsf(wx2*vy - wy2*vx) / L : 0.0f;
+                    fprintf(stderr, "SIGHT mix=%.2f %-8s perp=%8.2f  "
+                            "d(E-bead)=%8.1f  chord=%8.1f\n",
+                            orr__true_mix, orr__planet[p].name,
+                            perp, sqrtf(wx2*wx2+wy2*wy2), L);
+                }
+                float dbe = sqrtf((bx2 - ex) * (bx2 - ex)
+                                + (by2 - ey) * (by2 - ey));
+                float dme = sqrtf((mpx[b] - ex) * (mpx[b] - ex)
+                                + (mpy[b] - ey) * (mpy[b] - ey));
+                float w_thru = (float)tempus_smoothstep(0.0, 120.0,
+                                                        dme - dbe);
+                float endx = mpx[b], endy = mpy[b];
+                float d0 = dbe;
                 float d1 = sqrtf((mpx[b] - bx2) * (mpx[b] - bx2)
                                + (mpy[b] - by2) * (mpy[b] - by2));
+                float ts_lo = 0.12f * (1.0f - orr__true_mix);
+                if (ts_lo < 0.02f) ts_lo = 0.02f;
                 float ts = d0 / (d0 + d1 + 1.0e-6f);
-                if (ts < 0.12f) ts = 0.12f;
-                if (ts > 0.88f) ts = 0.88f;
+                if (ts < ts_lo) ts = ts_lo;
+                if (ts > 1.0f - ts_lo) ts = 1.0f - ts_lo;
                 float tw = 2.0f * ts * (1.0f - ts);
-                float p1x = (bx2 - (1.0f - ts) * (1.0f - ts) * ex
-                                 - ts * ts * mpx[b]) / tw;
-                float p1y = (by2 - (1.0f - ts) * (1.0f - ts) * ey
-                                 - ts * ts * mpy[b]) / tw;
+                float thx = (bx2 - (1.0f - ts) * (1.0f - ts) * ex
+                                 - ts * ts * endx) / tw;
+                float thy = (by2 - (1.0f - ts) * (1.0f - ts) * ey
+                                 - ts * ts * endy) / tw;
+                float cmx = 0.5f * (ex + endx);
+                float cmy = 0.5f * (ey + endy);
+                float p1x = cmx + (thx - cmx) * w_thru;
+                float p1y = cmy + (thy - cmy) * w_thru;
                 draw_set_color(d, dca(orr__body_col[b][0] / 255.0f,
                                       orr__body_col[b][1] / 255.0f,
                                       orr__body_col[b][2] / 255.0f, 0.62f));
@@ -811,12 +1135,17 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 for (int k = 1; k <= SEG; k++) {
                     float tt = (float)k / SEG, omt = 1.0f - tt;
                     float qx = omt * omt * ex + 2.0f * omt * tt * p1x
-                             + tt * tt * mpx[b];
+                             + tt * tt * endx;
                     float qy = omt * omt * ey + 2.0f * omt * tt * p1y
-                             + tt * tt * mpy[b];
+                             + tt * tt * endy;
                     draw_line(d, lx0, ly0, qx, qy, 1.0f);
                     lx0 = qx; ly0 = qy;
                 }
+                // ...and on out to the planet if it lies beyond the
+                // ring. Zero length at the crossing, so it opens
+                // continuously rather than appearing.
+                if (dbe > dme)
+                    draw_line(d, mpx[b], mpy[b], bx2, by2, 1.0f);
             }
         }
 
@@ -952,10 +1281,31 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 if (na < 0) na += 2.0f * (float)M_PI;
                 bool lflip = (na > (float)M_PI * 0.5f
                               && na < (float)M_PI * 1.5f);
-                float lr = orbr + lsz * (lflip ? 0.51f : 0.37f);
+                // Radius of the RING at the label's own longitude, not
+                // the planet's distance — see orr__ring_r_at.
+                float lorb = orbr;
+                if (orr__true_mix > 0.0f) {
+                    double jd_l = tv->jd_current + tv->percent_of_day
+                                - 0.5 - t->config.timezone / 24.0;
+                    double lam_l = pn->helio_lon[p]
+                                 + ang_off * 180.0 / M_PI;
+                    float rt = orr__ring_r_at(p, jd_l, lam_l);
+                    static const float off6b[6] = {150.0f, 207.0f, 235.0f,
+                                                   267.0f, 287.0f, 300.0f};
+                    float tmp_r = (p < PL_EARTH)
+                                    ? wheel_R * orr__inner_frac[p]
+                                : (p == PL_EARTH) ? wheel_R
+                                : wheel_R + off6b[p - PL_MARS];
+                    float tru = orr__true_k(wheel_R) * rt;
+                    lorb = tmp_r + (tru - tmp_r) * orr__true_mix;
+                }
+                float lr = lorb + lsz * (lflip ? 0.51f : 0.37f);
                 d->alpha = base_alpha * a_name * 0.85f;
                 draw_set_color(d, dca(0.62f, 0.60f, 0.55f, 0.85f));
-                draw_text_curved(d, FONT_date, 0, 0, lr, lth,
+                // Centred on the MACHINE, not the origin: the ring
+                // names ride their own rings, and those slide with the
+                // geocentric recentre (gox/goy).
+                draw_text_curved(d, FONT_date, gox, goy, lr, lth,
                                  orr__planet[p].name, ltrack, lscale);
             }
             d->alpha = base_alpha;
@@ -1343,7 +1693,28 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             if (!chart3) {
                 wpl->pl_cx[p] = wpl->pl_mx[p];
                 wpl->pl_cy[p] = wpl->pl_my[p];
-                wpl->pl_cr[p] = orr__planet[p].size;
+                // THE BODIES GO TRUE TOO (Seren): the bead table is
+                // "ordered by real size but nowhere near to scale", so
+                // the morph carries it onto true relative radii,
+                // anchored on Saturn exactly as the orbits are. Jupiter
+                // swells past Saturn, the rocky four shrink to specks.
+                // Floored at 0.5 so the smallest stay visible rather
+                // than vanishing into nothing.
+                {
+                    // SMALL, NOT TRUE (Seren): the POSITIONS are what
+                    // matter — they are what straightens the sight
+                    // lines. Sizes only have to stay out of the way.
+                    // True relative radii would put the sun at 109
+                    // Earths (comically large, swallowing Mercury's
+                    // orbit); a true COMMON scale with the positions
+                    // puts every body under a fifth of a pixel. So the
+                    // beads take a CUBE-ROOT compression of the real
+                    // ratios: ordered correctly, all still visible,
+                    // none of them shouting.
+                    float truth = ORR_TRUE_BEAD * cbrtf(orr__body_rel[p]);
+                    wpl->pl_cr[p] = orr__planet[p].size
+                        + (truth - orr__planet[p].size) * orr__true_mix;
+                }
                 // The machine's own view fade rides IN the row (the
                 // renderer draws at absolute alpha): a DRACO flight
                 // holds VIEW_LVMEN's opacity high for the luminaries,
@@ -1381,11 +1752,25 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 float pw3 = (float)tempus_smoothstep(0.0, 1.0,
                                                      1.0 - chf)
                           * ink_in(INK_BEAD_CLAIM, ss);
-                wpl->pl_cx[p] = dx3 * orbr3 * pw3
+                // The machine seat must be the seat the machine is
+                // ACTUALLY DRAWING: orr__orbit_r carries the true-scale
+                // radius, but the geocentric RECENTRE (gox/goy) lives
+                // outside it, so this recomputed seat sat at the old
+                // heliocentric spot and the planets flew to CAELVM from
+                // positions the dial had already left (Seren). Same for
+                // the size — the beads compress at true scale and this
+                // was handing over the uncompressed figure.
+                float msz3 = orr__planet[p].size;
+                if (orr__true_mix > 0.0f) {
+                    float truth3 = ORR_TRUE_BEAD
+                                 * cbrtf(orr__body_rel[p]);
+                    msz3 += (truth3 - msz3) * orr__true_mix;
+                }
+                wpl->pl_cx[p] = (gox + dx3 * orbr3) * pw3
                               + cx3 * (1.0f - pw3);
-                wpl->pl_cy[p] = dy3 * orbr3 * pw3
+                wpl->pl_cy[p] = (goy + dy3 * orbr3) * pw3
                               + cy3 * (1.0f - pw3);
-                wpl->pl_cr[p] = orr__planet[p].size * pw3
+                wpl->pl_cr[p] = msz3 * pw3
                               + sv->pl_r[b] * (1.0f - pw3);
                 wpl->pl_ca[p] = sv->pl_ba[b]
                               * (ss + (1.0f - ss) * fin3);
@@ -1443,12 +1828,18 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // globe-follow term additionally damped so it cannot inject
         // the sideways swing.
         float retr = cosf((float)M_PI * 0.5f * ss);
-        float px = (ex * (1.0f - ss) + lx * earth_r * lift) * retr;
-        float py = (ey * (1.0f - ss) + ly * earth_r * lift) * retr;
+        float px = (ex * (1.0f - ss) + lx * earth_r * lift) * retr + gox;
+        float py = (ey * (1.0f - ss) + ly * earth_r * lift) * retr + goy;
         float msz = s->sun_size * earth_r / dial_r;
         msz *= 1.0f - 0.55f * ob;   // the closeup reads it as the
                                     // subsolar point, not a body
         float sz = msz + (32.0f - msz) * ss;
+        // The sun scales down too (Seren) — on the same compressed law,
+        // so it stays the largest body without dwarfing the orbits.
+        if (orr__true_mix > 0.0f) {
+            float st_true = ORR_TRUE_BEAD * cbrtf(ORR_SUN_REL);
+            sz += (st_true - sz) * orr__true_mix;
+        }
         sun_c.r = sun_c.r + (196.0f / 255.0f - sun_c.r) * ss;
         sun_c.g = sun_c.g + (126.0f / 255.0f - sun_c.g) * ss;
         sun_c.b = sun_c.b + (16.0f / 255.0f - sun_c.b) * ss;

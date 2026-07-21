@@ -789,6 +789,8 @@ static void init(void) {
         g_scene.style.globe_overlay = atoi(overlay) % GLOBE_OVERLAY_COUNT;
 
     // Dev: pin the calendar zoom for screenshots
+    { const char *z = getenv("TEMPUS_MACHINASCALE");
+      if (z) g_scene.orrery_state.true_mix = (float)atof(z); }
     { const char *z = getenv("TEMPUS_ORBISZOOM");
       if (z) g_scene.orrery_state.orbis_loupe = (float)atof(z); }
     const char *zoom = getenv("TEMPUS_ZOOM");
@@ -928,13 +930,26 @@ static void frame(void) {
             float y = -640.0f + 46.0f;
             // Display order (Seren): the physical instruments first —
             // clock, globe, sun, system, plate, sky, dragon — then a
-            // rule, then the cycle dials
-            static const int wv_order[WV_COUNT] = {
+            // rule, then the cycle dials.
+            // ROTAE, SAECVLVM and OFFICIVM are BUILT BUT UNLISTED
+            // (Seren): the stations live on and still fly, they simply
+            // have no door in the annunciator. Reachable by the debug
+            // combo and the TEMPUS_* pins.
+            static const int wv_order[] = {
                 WV_HOROLOGIVM, WV_ORBIS, WV_TELLVS, WV_MACHINA,
                 WV_ASTROLAB, WV_CAELVM, WV_DRACO,
-                WV_HORAE, WV_SAECVLVM, WV_ROTAE, WV_OFFICIVM,
+                WV_HORAE,
             };
-            for (int k = 0; k < WV_COUNT; k++) {
+            const int wv_shown = (int)(sizeof wv_order / sizeof *wv_order);
+            // Every rect starts IMPOSSIBLE. g_wv_btn is static, so an
+            // unlisted station would otherwise keep an all-zero rect —
+            // and chrome space is centred on the screen, so a click at
+            // dead centre would satisfy 0 <= x <= 0 and silently fly.
+            for (int i = 0; i < WV_COUNT; i++) {
+                g_wv_btn[i][0] = 1.0f; g_wv_btn[i][2] = -1.0f;
+                g_wv_btn[i][1] = 1.0f; g_wv_btn[i][3] = -1.0f;
+            }
+            for (int k = 0; k < wv_shown; k++) {
                 int i = wv_order[k];
                 float tw = sdf_measure_width(wv_w, g_worldview_names_at(i))
                          * wv_sz;
@@ -1127,6 +1142,7 @@ static void event(const sapp_event *e) {
         // its globe, CAELVM its sky. Each gate is its own blend, so
         // they can never both claim a notch.
         scene_band_zoom(&g_scene, e->scroll_y);
+        machina_view_scale(&g_scene.orrery_state, e->scroll_y);
         orbis_view_loupe(&g_scene.orrery_state, e->scroll_y);
         sky_view_loupe(&g_scene.sky_state, e->scroll_y);
     }
