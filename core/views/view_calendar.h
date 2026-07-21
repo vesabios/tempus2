@@ -198,9 +198,18 @@ static void calendar_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         double a = 0, r = 0, w = 0;
         for (int i = 0; i < ST_COUNT; i++) {
             if (station_table[i].hour_r <= 0) continue;
-            a += sc->stw[i];
-            r += sc->stw[i] * station_table[i].hour_r;
-            w += sc->stw[i] * station_table[i].hour_w;
+            double sw = sc->stw[i];
+            // Where the wheel has two states, the hour ring belongs to
+            // the ZOOMED-OUT one (Seren): zoomed out the band clicks
+            // whole days and the ring carries the hour; zoomed in the
+            // band already scrubs true time and the ring would only
+            // say the same thing twice. It fades on the zoom's own
+            // tween, so the two states hand the hour back and forth.
+            if (station_table[i].band_zoom) sw *= (1.0 - st->zoom);
+            if (sw <= 0.0) continue;
+            a += sw;
+            r += sw * station_table[i].hour_r;
+            w += sw * station_table[i].hour_w;
         }
         st->hr_a = (float)a;
         st->hr_r = a > 1.0e-6 ? (float)(r / a) : 0.0f;
@@ -360,36 +369,39 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
 
     int cur_month = tv->month - 1;
 
-    // Month names
+    // The month name — ONE name only, the current month's, riding the
+    // pointer. The other eleven are gone: they read as a dim smear at
+    // the rim and the pointer already says which month is meant.
     {
         float text_r = radius + (float)tempus_mix(s->month_text_radius_a, s->month_text_radius_b, blend);
         // additive tracking (em): letterspacing widens as the ring zooms
         float text_mix = (float)tempus_mix(0.6, 2.4, blend);
-        float outer_mix = (float)tempus_mix(0.1, 0.6, blend);
 
         float stx = d->tx, sty = d->ty;
         draw_translate(d, -offx, -offy);
 
-        for (int i = 0; i < 12; i++) {
-            draw_set_color(d, (i == cur_month)
-                ? s->month_text_color : dc_scale(s->medium_grey, outer_mix));
-            double mid_jd = (t->jd_months[i] + t->jd_months[i + 1]) / 2.0;
-            float mf = (float)tempus_jd_to_wheel_pct(t, mid_jd);
-            float angle = mf * 2.0f * (float)M_PI;
-            // Waist-centered on the nominal radius: without the flip
-            // compensation, top-half names ride farther out than
-            // bottom-half ones (the original's renderer centered the
-            // letterform band)
-            float na = fmodf(angle, 2.0f * (float)M_PI);
-            if (na < 0) na += 2.0f * (float)M_PI;
-            bool mflip = (na > (float)M_PI * 0.5f
-                          && na < (float)M_PI * 1.5f);
-            float msz = _font_compat[FONT_month].size;
-            float mr = text_r - msz * 0.5f
-                     + msz * (mflip ? 0.51f : 0.37f);
-            draw_text_curved(d, FONT_month, 0, 0, mr,
-                           angle, tempus_month_name(t, i), text_mix, 1.0f);
-        }
+        draw_set_color(d, s->month_text_color);
+        const char *mname = tempus_month_name(t, cur_month);
+        double name_jd = tv->jd_current + tv->percent_of_day;
+        // No clamp to the band's ends: the name simply rides the day
+        // mark, so a month boundary changes the LETTERING and nothing
+        // else — the label never jumps position
+        float angle = (float)tempus_jd_to_wheel_pct(t, name_jd)
+                    * 2.0f * (float)M_PI;
+
+        // Waist-centered on the nominal radius: without the flip
+        // compensation, top-half names ride farther out than
+        // bottom-half ones (the original's renderer centered the
+        // letterform band)
+        float na = fmodf(angle, 2.0f * (float)M_PI);
+        if (na < 0) na += 2.0f * (float)M_PI;
+        bool mflip = (na > (float)M_PI * 0.5f
+                      && na < (float)M_PI * 1.5f);
+        float msz = _font_compat[FONT_month].size;
+        float mr = text_r - msz * 0.5f
+                 + msz * (mflip ? 0.51f : 0.37f);
+        draw_text_curved(d, FONT_month, 0, 0, mr,
+                       angle, mname, text_mix, 1.0f);
         d->tx = stx; d->ty = sty;
     }
 
@@ -423,8 +435,19 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
     d->sx = save_sx;
     d->sy = save_sy;
 
-    cal__sky_circle(st, d, t, s);
     cal__hour_ring(st, d, s);
+}
+
+// The SHARED SKY WASH is not instrument furniture — it is the chart's
+// own ground, and every planet, star name and ecliptic the sky draws
+// must land ON it. So it renders in its own pass (VIEW_CALBACK) at the
+// BOTTOM of the stack, while the wheel above it rides at the top.
+// Drawn here only because this is where the two chart stations' shared
+// geometry is reachable; see cal__sky_circle in view_astro.h.
+static void calback_render(const void *buf, DrawCtx *d, const Tempus *t,
+                           const RenderStyle *s) {
+    const CalendarViewState *st = (const CalendarViewState *)buf;
+    cal__sky_circle(st, d, t, s);
 }
 
 // (cal__sky_circle is DEFINED in view_astro.h's impl — the one
@@ -443,6 +466,15 @@ static void cal__hour_ring(const CalendarViewState *st, DrawCtx *d,
     float base_alpha = d->alpha;
     float r0 = st->hr_r, r1 = st->hr_r + st->hr_w;
     d->alpha = base_alpha * a;
+    // The ring carries its OWN GROUND — a dark plate cut through
+    // whatever it rides over, the rulers' pinion law (HORAE) applied
+    // here: the hour marks are faint strokes and the loupe can bring
+    // the noon limb up underneath them. Over the black of every other
+    // station the plate costs nothing; over the sky it reads as a
+    // groove. Margin covers the now-mark's overhang (r0-3 .. r1+3).
+    draw_set_color(d, dca(0.03f, 0.03f, 0.035f, 0.55f));
+    draw_arc_filled(d, 0, 0, r1 + 4.0f, r0 - 4.0f,
+                    0.0f, 2.0f * (float)M_PI, 96);
     draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.22f));
     draw_circle_stroked(d, 0, 0, r0, 1.0f);
     draw_circle_stroked(d, 0, 0, r1, 1.0f);
@@ -455,13 +487,29 @@ static void cal__hour_ring(const CalendarViewState *st, DrawCtx *d,
         float t0 = major ? r0 : r0 + st->hr_w * 0.25f;
         draw_line(d, sx * t0, sy * t0, sx * r1, sy * r1, 1.0f);
     }
+    // The rendering instant: a HOLLOW TRIANGLE in the sun's own gold —
+    // the wheel's teal pointer spoken at TWO THIRDS (30x28 -> 20x18.7)
+    // and riding ON the ring rather than outside it (Seren). Centered
+    // on the band, so it clears the calendar wheel at every station
+    // that declares an hour ring, whatever radius the ring takes.
+    // Apex inward, flat base outward, three strokes: the same grammar
+    // as the day pointer, so the two marks read as one family.
     float an = (float)st->tv.percent_of_day * 2.0f * (float)M_PI;
-    float sx = sinf(an), sy = -cosf(an);
-    draw_set_color(d, dc_scale(s->sunrise_handle, 1.05f));
-    draw_line(d, sx * (r0 - 3.0f), sy * (r0 - 3.0f),
-              sx * (r1 + 3.0f), sy * (r1 + 3.0f), 1.8f);
-    draw_circle_filled(d, sx * (r0 + st->hr_w * 0.5f),
-                       sy * (r0 + st->hr_w * 0.5f), 4.5f);
+    float cs = sinf(an), sn = -cosf(an);   // radial out
+    float tx = -sn, ty = cs;               // tangent
+    const float TRI_H = 28.0f * 2.0f / 3.0f;   // 18.67
+    const float TRI_W = 30.0f * 2.0f / 3.0f;   // 20 across
+    float mid = (r0 + r1) * 0.5f;
+    float rin = mid - TRI_H * 0.5f, rout = mid + TRI_H * 0.5f;
+    draw_set_color(d, dc_u8(196, 126, 16));   // the instrument's gold
+    float ax = cs * rin, ay = sn * rin;
+    float b1x = cs * rout + tx * TRI_W * 0.5f;
+    float b1y = sn * rout + ty * TRI_W * 0.5f;
+    float b2x = cs * rout - tx * TRI_W * 0.5f;
+    float b2y = sn * rout - ty * TRI_W * 0.5f;
+    draw_line(d, ax, ay, b1x, b1y, 1.8f);
+    draw_line(d, b1x, b1y, b2x, b2y, 1.8f);
+    draw_line(d, b2x, b2y, ax, ay, 1.8f);
     d->alpha = base_alpha;
 }
 
@@ -471,6 +519,12 @@ static const ViewVtable calendar_vtable = {
     .exit   = calendar_exit,
     .update = calendar_update,
     .render = calendar_render,
+};
+
+// The under-layer: render only (state, lifecycle and update belong to
+// VIEW_CALENDAR; this shares its state buffer)
+static const ViewVtable calback_vtable = {
+    .render = calback_render,
 };
 
 #endif // SCENE_DEFINED && !VIEW_CALENDAR_IMPL

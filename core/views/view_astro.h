@@ -101,6 +101,94 @@ static inline bool astro__project(float dec_deg, float ha_deg,
     return true;
 }
 
+// ---- THE CHART PROJECTION: one map blended, not two lerped ----
+//
+// The plate and the bowl are BOTH azimuthal maps about a center
+// direction — a radial law r(c) in the angular distance c, and a
+// bearing off a basis. They differ in exactly two terms:
+//
+//   plate  center = the CELESTIAL POLE (az 0, alt = lat)
+//          r(c)   = R_CAP tan(c/2) / tan(p_cap/2)      [stereographic]
+//   bowl   center = the LOOK (view_az, view_alt)
+//          r(c)   = (c/pi) SKY_R (x loupe)             [equidistant]
+//
+// so the honest morph blends the MAP and projects each thing ONCE.
+// The old code projected twice and lerped the two SCREEN POINTS; the
+// centers are ~38 degrees apart at Berlin, so that chord cut across
+// the sphere and the rete sheared — stars swung, crossed, and figures
+// came apart mid-flight (Seren caught it). A blended map is valid at
+// every instant: nothing crosses, and a star holds its true place the
+// whole way.
+//
+// chart__wc: 1 = pure bowl, 0 = pure plate. At both ends this
+// reproduces the original projections exactly (TEMPUS_CHARTTEST).
+static float chart__wc = 1.0f;
+
+static inline float chart__cap_k(void) {
+    return 1.0f / tanf((90.0f + ASTRO_OBL) * 0.5f * (float)M_PI / 180.0f);
+}
+
+// Arm the blended map: SLERP the center from the pole to the look
+// (both are directions in the observer frame, so this is one
+// great-circle walk) and hand the result to the bowl's basis builder,
+// which both ends already agree on.
+static inline void chart__set(float wc, float lat_deg,
+                              float look_az, float look_alt) {
+    chart__wc = wc;
+    float pv[3], lv[3];
+    sky__vec(0.0f, lat_deg, pv);          // the celestial pole
+    sky__vec(look_az, look_alt, lv);      // the bowl's look
+    float dot = pv[0]*lv[0] + pv[1]*lv[1] + pv[2]*lv[2];
+    if (dot > 1.0f) dot = 1.0f;
+    if (dot < -1.0f) dot = -1.0f;
+    float om = acosf(dot);
+    float cv[3];
+    if (om < 1.0e-4f) {
+        for (int i = 0; i < 3; i++) cv[i] = lv[i];
+    } else {
+        float so = sinf(om);
+        float a = sinf((1.0f - wc) * om) / so;
+        float b = sinf(wc * om) / so;
+        for (int i = 0; i < 3; i++) cv[i] = a * pv[i] + b * lv[i];
+    }
+    float n = sqrtf(cv[0]*cv[0] + cv[1]*cv[1] + cv[2]*cv[2]);
+    if (n > 1.0e-6f) { cv[0] /= n; cv[1] /= n; cv[2] /= n; }
+    float alt = asinf(cv[2]) * 180.0f / (float)M_PI;
+    float az  = atan2f(cv[0], cv[1]) * 180.0f / (float)M_PI;
+    sky__set_center(az, alt);
+}
+
+// Project a horizon direction through the blended map.
+// Returns false only where the PLATE would have culled (deep south,
+// past the limb clamp) and the plate still owns the map. Past that
+// the plate term is CLAMPED rather than culled: r_plate runs to
+// infinity at the projection's antipode, and an unclamped blend would
+// hand billion-unit coordinates to the vertex buffer.
+static inline bool chart__project(float az_deg, float alt_deg,
+                                  float *x, float *y) {
+    float v[3];
+    sky__vec(az_deg, alt_deg, v);
+    float cosc = v[0]*sky__vc[0] + v[1]*sky__vc[1] + v[2]*sky__vc[2];
+    if (cosc > 1.0f) cosc = 1.0f;
+    if (cosc < -1.0f) cosc = -1.0f;
+    float c = acosf(cosc);
+    float r_plate = ASTRO_R_CAP * tanf(c * 0.5f) * chart__cap_k();
+    const float plate_max = ASTRO_R_CAP * 1.35f;
+    if (!(r_plate <= plate_max)) {          // NaN-safe
+        if (chart__wc < 0.5f) return false;
+        r_plate = plate_max;
+    }
+    float r_bowl  = c / (float)M_PI * SKY_R * sky__loupe;
+    float rr = r_plate + (r_bowl - r_plate) * chart__wc;
+    float px = v[0]*sky__vr[0] + v[1]*sky__vr[1] + v[2]*sky__vr[2];
+    float py = v[0]*sky__vd[0] + v[1]*sky__vd[1] + v[2]*sky__vd[2];
+    float len = sqrtf(px * px + py * py);
+    if (len < 1.0e-5f) { *x = 0.0f; *y = (cosc > 0.0f) ? 0.0f : rr; return true; }
+    *x = px / len * rr;
+    *y = py / len * rr;
+    return true;
+}
+
 // The horizon circle, ANALYTICALLY: the north point sits at
 // Req tan(lat/2), the south at -Req / tan(lat/2). Valid at any
 // latitude — the projector's off-plate clamp must never feed this
@@ -139,6 +227,35 @@ static inline bool astro__project_altaz(float alt_deg, float az_deg,
     if (cd < 1.0e-5f) H = 0;
     else H = atan2f(-sA * ca / cd, (sa - sp * sd) / (cp * cd)) / d2r;
     return astro__project(dec, H, x, y);
+}
+
+// Dev: TEMPUS_CHARTTEST — prove the blended map reproduces BOTH
+// original projections exactly at its endpoints.
+static void chart__selftest(float lat) {
+    float maxp = 0, maxb = 0;
+    for (int ai = 0; ai < 72; ai++) {
+        for (int li = 0; li < 35; li++) {
+            float az = ai * 5.0f, alt = -85.0f + li * 5.0f;
+            float ex, ey, gx, gy;
+            // plate end
+            chart__set(0.0f, lat, 0.0f, 45.0f);
+            bool ok = chart__project(az, alt, &gx, &gy);
+            if (ok && astro__project_altaz(alt, az, lat, &ex, &ey)) {
+                float e = fabsf(gx-ex) + fabsf(gy-ey);
+                if (e > maxp) maxp = e;
+            }
+            // bowl end
+            chart__set(1.0f, lat, 0.0f, 45.0f);
+            sky__set_center(0.0f, 45.0f);
+            sky__project(az, alt, &ex, &ey);
+            chart__set(1.0f, lat, 0.0f, 45.0f);
+            chart__project(az, alt, &gx, &gy);
+            float e2 = fabsf(gx-ex) + fabsf(gy-ey);
+            if (e2 > maxb) maxb = e2;
+        }
+    }
+    fprintf(stderr, "CHARTTEST lat=%.2f  plate-end max err %.5f  bowl-end max err %.5f\n",
+            lat, maxp, maxb);
 }
 
 // The stars live in planets.h now — one table, every chart
@@ -422,24 +539,27 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
         // Star pointers: risen stars burn with their names; set stars
         // are ghosts — the plate always says WHICH sky you own now
         int fw = _font_compat[FONT_date].weight;
+        // The rete rides the BLENDED MAP: one projection, armed once,
+        // every star placed through it exactly once. (It used to
+        // project twice and lerp the screen points, which sheared the
+        // figures mid-flight — see chart__project.) Armed only for
+        // this loop and stood back down after, since the rest of the
+        // view still reads sky__project's own centering.
+        chart__set(wc, lat,
+                   st->skyv ? sky__az(st->skyv) : 0.0f,
+                   st->skyv ? st->skyv->view_alt : 45.0f);
         for (int i = 0; i < ASTRO_NSTARS; i++) {
             float ha = lst - astro__stars[i].ra;
             float sd = sinf(astro__stars[i].dec * d2r);
             float cd = cosf(astro__stars[i].dec * d2r);
             float alt = asinf(sp * sd + cp * cd * cosf(ha * d2r)) / d2r;
+            float saz, salt2;
+            planets_star_azalt(astro__stars[i].ra,
+                               astro__stars[i].dec, lst, lat,
+                               &saz, &salt2);
             float x, y;
-            if (!astro__project(astro__stars[i].dec, ha, &x, &y))
+            if (!chart__project(saz, salt2, &x, &y))
                 continue;
-            if (wc > 0.0f) {
-                float saz, salt2;
-                planets_star_azalt(astro__stars[i].ra,
-                                   astro__stars[i].dec, lst, lat,
-                                   &saz, &salt2);
-                float cx2, cy2;
-                sky__project(saz, salt2, &cx2, &cy2);
-                x = x * (1.0f - wc) + cx2 * wc;
-                y = y * (1.0f - wc) + cy2 * wc;
-            }
             if (x * x + y * y > ASTRO_R_CAP * ASTRO_R_CAP && wc < 0.5f)
                 continue;
             bool up = alt > 0.0f;
@@ -463,6 +583,10 @@ static void astro_render(const void *buf, DrawCtx *d, const Tempus *t,
                 draw_circle_stroked(d, x, y, 2.2f, 1.0f);
             }
         }
+        // Stand the bowl's own centering back up: everything below
+        // still reads sky__project directly.
+        if (wc > 0.001f && st->skyv)
+            sky__set_center(sky__az(st->skyv), st->skyv->view_alt);
     }
 
     // ---- The rule and the sun: the observable state, stated ----
@@ -565,8 +689,10 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
     float r_cael = bez + (280.0f - bez)
                  * (float)tempus_smoothstep(0.0, 1.0, st->skyb_l);
     float mk = r_cael / SKY_HOR;
+    // Through sky__az, not the raw look: the bowl's azimuth eases back
+    // to north as this plate takes the wash over (see view_sky.h)
     if (wc > 0.001f && sv)
-        sky__set_center(sv->view_az, sv->view_alt);
+        sky__set_center(sky__az(sv), sv->view_alt);
     // The clip is the PLATE's want, not the sky's: at the astrolabe
     // the limb (400) eats the circle; at CAELVM it opens ALL the way
     // to the calendar wheel's live edge (Seren) — the sky may fill

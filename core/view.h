@@ -206,6 +206,7 @@ typedef enum {
     VIEW_DRACO,
     VIEW_ASTRO,
     VIEW_CLOCKBACK,   // the clock's face furniture, under the globes
+    VIEW_CALBACK,     // the shared sky wash, under the chart stations
     VIEW_COUNT,
 } ViewId;
 

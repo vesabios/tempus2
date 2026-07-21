@@ -49,6 +49,10 @@ struct SkyViewState {
     float view_az, view_alt;
     bool  chart_dragging;
 
+    // The LOUPE: 1 = whole sphere, SKY_LOUPE_MAX = horizon circle on
+    // the calendar wheel. Station-local; see sky__loupe.
+    float loupe;
+
     // The dome's vertex colors, computed by true single-scattering in
     // update (minute-gated): zenith vertex + rings x sectors
     float dome[1 + 9 * 97][3];
@@ -99,6 +103,18 @@ struct SkyViewState {
 // update and render.
 static float sky__vc[3], sky__vr[3], sky__vd[3];
 
+// THE LOUPE. A pure multiplier on the projection's radius — not a
+// magnifier: the mapping stays azimuthal-equidistant with the same
+// distortion law, so this only chooses how much of the sphere the
+// disc spends itself on. Expanding SPACE, not the image (Seren) —
+// body radii are deliberately untouched.
+//   1.00  the whole sphere, nadir at the rim (SKY_R)
+//   2.18  the horizon circle out on the calendar wheel; the visible
+//         hemisphere alone, the unseen half bled off the frame
+static float sky__loupe = 1.0f;
+
+#define SKY_LOUPE_MAX 2.18f
+
 static void sky__set_center(float az0_deg, float alt0_deg) {
     float a = az0_deg * (float)M_PI / 180.0f;
     float l = alt0_deg * (float)M_PI / 180.0f;
@@ -118,6 +134,28 @@ static void sky__set_center(float az0_deg, float alt0_deg) {
     sky__vr[2] = -(sky__vd[0] * sky__vc[1] - sky__vd[1] * sky__vc[0]);
 }
 
+// The azimuth the projection should actually use. It EASES BACK TO
+// NORTH as the astrolabe takes the shared wash over (Seren): the wash
+// blends per-vertex between this bowl and the plate, and the plate's
+// frame is fixed north-up, so a swung bowl twists against it and the
+// sky deforms mid-flight. Weighted by the wash's own mix (wc), so a
+// departure to any OTHER station — where nothing blends against the
+// bowl's geometry — leaves the azimuth alone and does not spin the
+// chart on the way out.
+static inline float sky__az(const SkyViewState *st) {
+    float fam = (float)st->blend + (float)st->astb;
+    float wc = fam > 1.0e-6f ? (float)st->blend / fam : 1.0f;
+    return st->view_az * wc;
+}
+
+// Both update and render arm the projection through here. The loupe
+// RELAXES TO 1 as the station is left, so every flight — and the
+// bowl the astrolabe's wash blends against — sees the unscaled sphere.
+static inline void sky__arm(const SkyViewState *st) {
+    sky__set_center(sky__az(st), st->view_alt);
+    sky__loupe = 1.0f + (st->loupe - 1.0f) * (float)st->blend;
+}
+
 // Azimuthal-equidistant about the LIVE view center: angular distance
 // maps to radius, bearing to screen direction. At the zenith this is
 // exactly the old chart (north bottom, east right); pitched toward a
@@ -133,30 +171,53 @@ static inline void sky__project(float az_deg, float alt_deg,
     float cosc = v[0]*sky__vc[0] + v[1]*sky__vc[1] + v[2]*sky__vc[2];
     if (cosc > 1.0f) cosc = 1.0f;
     if (cosc < -1.0f) cosc = -1.0f;
-    float rr = acosf(cosc) / (float)M_PI * SKY_R;
+    float rr = acosf(cosc) / (float)M_PI * SKY_R * sky__loupe;
     float px = v[0]*sky__vr[0] + v[1]*sky__vr[1] + v[2]*sky__vr[2];
     float py = v[0]*sky__vd[0] + v[1]*sky__vd[1] + v[2]*sky__vd[2];
     float len = sqrtf(px * px + py * py);
     if (len < 1.0e-5f) {
         *x = 0.0f;
-        *y = cosc > 0.0f ? 0.0f : SKY_R;
+        *y = cosc > 0.0f ? 0.0f : SKY_R * sky__loupe;
         return;
     }
     *x = px / len * rr;
     *y = py / len * rr;
 }
 
-// Pan the look: PITCH ONLY — the azimuth is fixed, so the drag's
-// vertical component tips the view between the zenith and the faced
-// horizon and nothing else moves. Drag down = look up (the content
-// follows the finger). With the yaw frozen there is no pole to
-// mishandle: alt runs the full clamp to 90.
+// Pan the look. Vertical tips the PITCH between the zenith and the
+// faced horizon; horizontal swings the AZIMUTH around.
+//
+// The azimuth rate is FLAT — a fixed degrees-per-pixel, the same
+// whether the grab is at the rim or on the zenith (Seren). The
+// tempting reading of a horizontal drag is a torque about the
+// center, but that rate goes as 1/radius and a grab near the middle
+// spins the whole sky at absurd speed. A flat rate has no such
+// singularity and needs no dead zone around the center.
+//
+// The pitch keeps its clamp (no digging below 5 degrees); the azimuth
+// wraps freely — at the zenith it simply turns the chart, which is
+// well-defined, so there is still no pole to mishandle.
 static inline void sky_view_pan(SkyViewState *st, float dx, float dy) {
-    (void)dx;
+    float az = st->view_az + dx / SKY_R * 180.0f;
+    az = fmodf(az, 360.0f);
+    if (az < 0.0f) az += 360.0f;
+    st->view_az = az;
+
     float alt = st->view_alt + dy / SKY_R * 180.0f;
     if (alt > 90.0f) alt = 90.0f;
     if (alt < 5.0f) alt = 5.0f;     // the pitch clamp: no digging
     st->view_alt = alt;
+}
+
+// Scroll the loupe. Multiplicative so each notch feels the same at
+// both ends of the range, clamped to the two honest states: the whole
+// sphere, and the horizon circle out on the calendar wheel.
+static inline void sky_view_loupe(SkyViewState *st, float dy) {
+    if (st->blend < 0.5) return;      // CAELVM's gesture alone
+    float l = st->loupe * (1.0f + dy * 0.06f);
+    if (l < 1.0f) l = 1.0f;
+    if (l > SKY_LOUPE_MAX) l = SKY_LOUPE_MAX;
+    st->loupe = l;
 }
 
 #define SKY_HOR (SKY_R * 0.5f)   // the horizon circle
@@ -222,6 +283,17 @@ static void sky_init(void *buf, const Tempus *t, const RenderStyle *s) {
     st->view_alt = 45.0f;   // default LOOK: halfway to the north
                             // horizon (Seren) — the sky as a scene,
                             // not a map; drag restores the zenith
+    // Dev: TEMPUS_SKYZOOM pins the loupe until it has a gesture
+    st->loupe = 1.0f;
+    {
+        const char *z = getenv("TEMPUS_SKYZOOM");
+        if (z) {
+            float v = (float)atof(z);
+            if (v < 1.0f) v = 1.0f;
+            if (v > SKY_LOUPE_MAX) v = SKY_LOUPE_MAX;
+            st->loupe = v;
+        }
+    }
     (void)t; (void)s;
 }
 
@@ -280,7 +352,7 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->orbw = sc->orbis_wheel;
     st->astb = sc->astro_blend;
     if (st->blend < 0.001) return;
-    sky__set_center(st->view_az, st->view_alt);
+    sky__arm(st);
     st->rise_hr = (float)sc->solar_state.sunrise_hr;
     st->set_hr = (float)sc->solar_state.sunset_hr;
 
@@ -396,7 +468,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // counterpart fades in late.
     float mb = (float)st->blend;               // morph position
     float fb = ink_in(INK_CHART_LATE, st->blend);
-    sky__set_center(st->view_az, st->view_alt);
+    sky__arm(st);
     // Machine-counterpart weight: only MACHINA has zodiac/rings/beads
     // to hand off. Parked there (system stage 1) every element takes
     // the full ownership flight from its machine slot; parked anywhere

@@ -190,6 +190,20 @@ static int station_by_name(const char *name, size_t len) {
     return -1;
 }
 
+// A TOUR flight is the instrument showing itself, so it drives every
+// control including the wheel's zoom. A USER flight leaves the wheel
+// alone at the two-state stations — that zoom is the user's, and
+// walking between HOROLOGIVM / TELLVS / OFFICIVM must not reach in
+// and change it (Seren).
+static bool g_flight_is_tour = false;
+static void set_worldview(Worldview wv);
+
+static void set_worldview_tour(Worldview wv) {
+    g_flight_is_tour = true;
+    set_worldview(wv);
+    g_flight_is_tour = false;
+}
+
 static void set_worldview(Worldview wv) {
     if (wv == g_worldview) return;
     // Leaving the world chart commits the chosen location to disk
@@ -242,15 +256,24 @@ static void set_worldview(Worldview wv) {
     // CAELVM parks the machine WHEREVER IT WAS (park_machine): the
     // sky movers seam to live published positions, so no machine
     // flight happens under the rising sky.
+    // THE WHEEL'S ZOOM IS PERSISTENT USER STATE at the two-state
+    // stations (Seren): flying HOROLOGIVM <-> TELLVS <-> OFFICIVM must
+    // leave the band exactly as the wheel was left, so the declared
+    // fly_zoom applies only where the station has no such state of its
+    // own (MACHINA in particular still needs 0 — its wheel is already
+    // out at 762 and a zoomed band would run it off the frame).
     if (!station_table[wv].park_machine)
         fly_worldview(station_table[wv].fly_helio,
-                      station_table[wv].fly_zoom,
+                      (station_table[wv].band_zoom && !g_flight_is_tour)
+                          ? g_scene.calendar_state.zoom
+                          : station_table[wv].fly_zoom,
                       station_table[wv].fly_system, 3.5, fly_delay);
 }
 
 static void apply_view_mode(void) {
     g_scene.num_layers = 0;
-    scene_add_layer(&g_scene, VIEW_CALENDAR);
+    // The shared sky wash: the chart's ground, under everything
+    scene_add_layer(&g_scene, VIEW_CALBACK);
     // Solar is a pure data provider (renders nothing, opacity stays 0);
     // it precedes the orrery so the instrument reads fresh solar values.
     // The orrery renders the entire earth instrument at every morph
@@ -279,6 +302,11 @@ static void apply_view_mode(void) {
     scene_add_layer(&g_scene, VIEW_SAEC);
     scene_add_layer(&g_scene, VIEW_ORBIS);
     scene_add_layer(&g_scene, VIEW_OFFIC);
+    // THE WHEEL IS THE INSTRUMENT'S FRAME, so it rides above everything
+    // (Seren). It used to be the backmost layer, which only worked
+    // because nothing ever reached past it; the sky's loupe scale
+    // bleeds the bowl clear off the frame and would bury it.
+    scene_add_layer(&g_scene, VIEW_CALENDAR);
 }
 
 // (The staging pass lives in core/stage.h, shared with the saver.)
@@ -621,6 +649,7 @@ static void init(void) {
     scene_register_view(&g_scene, VIEW_ASTRO,     &astro_vtable);
     scene_register_view(&g_scene, VIEW_DRACO,     &draco_vtable);
     scene_register_view(&g_scene, VIEW_CLOCKBACK, &clockback_vtable);
+    scene_register_view(&g_scene, VIEW_CALBACK,   &calback_vtable);
     scene_init_views(&g_scene, &g_tempus);
 
     if (g_cfg_sweep_override >= 0)
@@ -709,6 +738,10 @@ static void init(void) {
 
     draw_init(&g_draw);
     tempus_gfx_init();
+    if (getenv("TEMPUS_CHARTTEST")) {
+        chart__selftest(52.52f); chart__selftest(0.0f);
+        chart__selftest(-33.9f); exit(0);
+    }
     g_shot_path = getenv("TEMPUS_SHOT");
     if (g_shot_path) {
         g_shot_countdown = 30;  // let animations settle
@@ -756,6 +789,8 @@ static void init(void) {
         g_scene.style.globe_overlay = atoi(overlay) % GLOBE_OVERLAY_COUNT;
 
     // Dev: pin the calendar zoom for screenshots
+    { const char *z = getenv("TEMPUS_ORBISZOOM");
+      if (z) g_scene.orrery_state.orbis_loupe = (float)atof(z); }
     const char *zoom = getenv("TEMPUS_ZOOM");
     if (zoom) {
         g_scene.calendar_state.zoom = atof(zoom);
@@ -800,7 +835,7 @@ static void frame(void) {
         int want = (int)(g_film_clock / leg);
         if (want != g_film_idx && want < film_n) {
             g_film_idx = want;
-            set_worldview(film_tour[want % film_n]);
+            set_worldview_tour(film_tour[want % film_n]);
         }
         char path[512];
         snprintf(path, sizeof path, "%s/f%05d.png", g_film_dir,
@@ -834,13 +869,13 @@ static void frame(void) {
         if (g_tour_timer >= TOUR_FLIGHT + TOUR_DWELL) {
             g_tour_timer = 0;
             g_tour_idx = (g_tour_idx + 1) % TOUR_LEN;
-            set_worldview(g_tour[g_tour_idx]);
+            set_worldview_tour(g_tour[g_tour_idx]);
         }
     } else if (g_idle_secs >= TOUR_RESUME) {
         g_tour_active = true;
         g_tour_idx = 0;
         g_tour_timer = 0;
-        set_worldview(g_tour[0]);
+        set_worldview_tour(g_tour[0]);
     }
 
     g_desired_fps = scene_desired_fps(&g_scene);
@@ -1082,6 +1117,18 @@ static void event(const sapp_event *e) {
         int phase = (e->type == SAPP_EVENTTYPE_MOUSE_DOWN) ? 0
                   : (e->type == SAPP_EVENTTYPE_MOUSE_MOVE) ? 1 : 2;
         scene_pointer(&g_scene, &g_tempus, phase, wx, wy);
+    }
+
+    // THE LOUPE: scroll is unclaimed everywhere else in the instrument,
+    // so it belongs to the only thing that wants a continuous scalar —
+    // CAELVM's sky scale. Inert at every other station.
+    if (e->type == SAPP_EVENTTYPE_MOUSE_SCROLL) {
+        // One gesture, whichever station owns the view: ORBIS zooms
+        // its globe, CAELVM its sky. Each gate is its own blend, so
+        // they can never both claim a notch.
+        scene_band_zoom(&g_scene, e->scroll_y);
+        orbis_view_loupe(&g_scene.orrery_state, e->scroll_y);
+        sky_view_loupe(&g_scene.sky_state, e->scroll_y);
     }
 
     if (e->type == SAPP_EVENTTYPE_KEY_DOWN) {

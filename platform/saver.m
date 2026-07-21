@@ -71,6 +71,9 @@ static void saver_set_station(Scene *sc, int st, double dur) {
     if (!station_table[st].park_machine) {
         saver__tween(&sc->helio_blend, station_table[st].fly_helio, dur);
         saver__tween(&sc->system_blend, station_table[st].fly_system, dur);
+        // The saver is ALL tour and has no user, so the wheel's zoom
+        // is the station's to drive — the persistent-user-state rule
+        // is the standalone's alone.
         sc->calendar_state.target_zoom = station_table[st].fly_zoom;
         saver__tween(&sc->calendar_state.zoom,
                      station_table[st].fly_zoom, dur);
@@ -254,9 +257,10 @@ static BOOL tempus_auto_place(double *lat, double *lon) {
     scene_register_view(&g_scene, VIEW_DRACO,     &draco_vtable);
     scene_register_view(&g_scene, VIEW_ASTRO,     &astro_vtable);
     scene_register_view(&g_scene, VIEW_CLOCKBACK, &clockback_vtable);
+    scene_register_view(&g_scene, VIEW_CALBACK,   &calback_vtable);
     scene_init_views(&g_scene, &g_tempus);
 
-    scene_add_layer(&g_scene, VIEW_CALENDAR);
+    scene_add_layer(&g_scene, VIEW_CALBACK);
     scene_add_layer(&g_scene, VIEW_SOLAR);
     scene_add_layer(&g_scene, VIEW_CLOCKBACK);
     scene_add_layer(&g_scene, VIEW_ORRERY);
@@ -270,6 +274,8 @@ static BOOL tempus_auto_place(double *lat, double *lon) {
     scene_add_layer(&g_scene, VIEW_SAEC);
     scene_add_layer(&g_scene, VIEW_ORBIS);
     scene_add_layer(&g_scene, VIEW_OFFIC);
+    // The wheel is the instrument's frame: above everything
+    scene_add_layer(&g_scene, VIEW_CALENDAR);
 
     draw_init(&g_draw);
     tempus_gfx_init();

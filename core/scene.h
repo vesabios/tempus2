@@ -244,6 +244,7 @@ static inline void scene_init(Scene *sc, const Tempus *t) {
     sc->views[VIEW_DRACO].state    = &sc->draco_state;
     sc->views[VIEW_ASTRO].state    = &sc->astro_state;
     sc->views[VIEW_CLOCKBACK].state = &sc->clock_state;   // shared
+    sc->views[VIEW_CALBACK].state  = &sc->calendar_state; // shared
 }
 
 static inline void scene_register_view(Scene *sc, ViewId id, const ViewVtable *vt) {
@@ -305,7 +306,13 @@ static inline void scene_update(Scene *sc, Tempus *t, double dt) {
                 scene__advance_override_days(t, c->fling_vel * dt,
                                              c->fling_keep_time);
             c->fling_vel *= exp2(-dt / 0.7);   // half-life ~0.7s
-            if (fabs(c->fling_vel) < 0.05) c->fling_vel = 0.0;
+            // NO SNAP TO ZERO (Seren): the flywheel coasts all the way
+            // down. The old floor was 0.05 DAYS/SECOND — nothing on
+            // the wheel (~0.4 px/s) but 1.2 HOURS of clock per second,
+            // so the hands were still sweeping at 36 deg/s when the
+            // spin was cut dead. The decay's tail is bounded anyway:
+            // the total travel still owed from velocity v is only
+            // v * 0.7/ln2 ~= v days, so letting it run costs nothing.
         } else {
             c->fling_vel = 0.0;
         }
@@ -616,7 +623,15 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 // whole weeks, or scrubs true fractional time.
                 {
                     Station ds = station_dominant(sc->stw);
-                    c->fling_keep_time = station_table[ds].band_keep_time;
+                    // Where the wheel has two states, the SCRUB MODE
+                    // IS THE ZOOM STATE (Seren): zoomed out the band
+                    // clicks whole days, zoomed in it scrubs true
+                    // fractional time. Elsewhere the station's own
+                    // declared policy still rules (HORAE's weeks,
+                    // the chart stations' day clicks).
+                    c->fling_keep_time = station_table[ds].band_zoom
+                        ? (c->zoom < 0.5)
+                        : station_table[ds].band_keep_time;
                     c->fling_week = station_table[ds].band_week_clicks;
                 }
                 c->week_accum = 0.0;
@@ -642,24 +657,20 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
             float tx = -py / rp, ty = px / rp;
             float dxf = wx - c->last_wx, dyf = wy - c->last_wy;
             float along = dxf * tx + dyf * ty;
-            double dv;
-            if (sys || sc->horae_blend > 0.5 || sc->rotae_blend > 0.5
-                || sc->saec_blend > 0.5 || sc->orbis_blend > 0.5
-                || sc->sky_blend > 0.5 || sc->helio_blend <= 0.5) {
-                // System view: the wheel is fixed and the EARTH is what
-                // moves — the pointer/planet follows the finger, arc
-                // length mapping 1:1 to angle at the band radius. (The
-                // film-strip rule below would read inverted here.)
-                dv = (double)along / (2.0 * M_PI * (double)rp)
-                   * t->total_days;
-            } else {
-                // Film strip: the band follows the finger, so time moves
-                // against the drag. Pan rate is 2*pi*(R - base) per year.
-                float denom = R - base_w;
-                if (denom < 120.0f) denom = 120.0f;   // low-zoom coarse rate
-                dv = -(double)along / (2.0 * M_PI * (double)denom)
-                   * t->total_days;
-            }
+            // ONE BAND LAW, EVERY STATION (Seren): HOROLOGIVM is the
+            // model — arc length maps 1:1 to angle at the radius the
+            // finger actually grabbed, so the date under the pointer
+            // follows the finger. TELLVS used to take a separate
+            // film-strip rule that both NEGATED the direction and
+            // substituted its own pan rate (2*pi*(R - base_w) per
+            // year, floored at 120). The floor was the whole of the
+            // difference: zoomed in the two agree anyway, since
+            // rp ~= R - base_w once the strip's offset dominates, but
+            // zoomed out it made the same drag scrub 3.75x faster at
+            // TELLVS than at the clock. Both rules are gone; rp alone
+            // sets the rate everywhere, at every zoom.
+            double dv = (double)along / (2.0 * M_PI * (double)rp)
+                      * t->total_days;
             if (c->fling_week)
                 scene__advance_override_weeks(c, t, dv);
             else
@@ -756,13 +767,36 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
     }
 }
 
+// ---- The band's zoom: a TWO-STATE toggle, not a scale ----
+// The wheel reads the year at rest and the day zoomed in, and the
+// scrub mode goes with it, so there is nothing useful between the
+// two. A notch either way asks for a state and the tween carries it
+// there; asking for the state you are already in is ignored, so
+// spinning the wheel cannot stack or stutter.
+static inline void scene_band_zoom(Scene *sc, float dy) {
+    if (dy == 0.0f) return;
+    Station ds = station_dominant(sc->stw);
+    if (!station_table[ds].band_zoom) return;
+    double target = (dy > 0.0f) ? 1.0 : 0.0;
+    if (sc->calendar_state.target_zoom == target) return;
+    sc->calendar_state.target_zoom = target;
+    tween_cancel_target(&sc->tweens, &sc->calendar_state.zoom);
+    tween_start(&sc->tweens, &sc->calendar_state.zoom,
+                sc->calendar_state.zoom, target, 1.0, EASE_IN_OUT_QUINT);
+}
+
 // ---- Pacing query ----
 // The frame rate the scene needs right now. Shells are free to render
 // faster (e.g. vsync-locked), but only need to *update* at this rate.
 
 static inline double scene_desired_fps(const Scene *sc) {
+    // The flywheel no longer snaps to zero, so PACING is what decides
+    // when a spin is over: below this the hands creep under a tenth of
+    // a degree per second — motion nobody can see, and no reason to
+    // hold the full frame rate for it. Purely a rate question; the
+    // velocity itself keeps decaying underneath.
     if (sc->transitioning || tween_any_active(&sc->tweens)
-        || sc->calendar_state.fling_vel != 0.0)
+        || fabs(sc->calendar_state.fling_vel) > 0.0002)
         return sc->pace.animate_fps;
 
     double fps = sc->pace.ambient_fps;

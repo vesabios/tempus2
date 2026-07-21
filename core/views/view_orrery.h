@@ -30,6 +30,12 @@ struct OrreryViewState {
     double sys;         // mirrored scene system_blend (full-system stage)
     double skyb;        // mirrored scene sky_blend (CAELVM handoff)
     double orbisb;      // mirrored scene orbis_blend (globe closeup)
+
+    // THE ORBIS LOUPE: the closeup globe's own zoom, a plain scale on
+    // ORBIS_GLOBE_R. 1 = the resting picker size; past ~1.4 the planet
+    // grows out under the calendar wheel, which is fine now that the
+    // wheel renders on top of everything (see tempus2 layer law).
+    float  orbis_loupe;
     double geo_azimuth; // live sun az/zen from the solar view, for the
     double geo_zenith;  // geocentric endpoint of the morph
     const SolarViewState *solar;  // solar data + sun-path caches
@@ -138,7 +144,25 @@ static inline float orr__orbit_r(int p, float wheel_R) {
     return wheel_R + outer_off[p - PL_MARS];
 }
 
-#define ORBIS_GLOBE_R   355.0f   // the location-picker closeup size
+// The picker globe takes the radius the calendar wheel used to hold
+// at this station (TEMPUS_ORBIS_WHEEL_R): with the wheel bowed out
+// there is nothing to clear, so the planet fills that space instead
+// (Seren). The moon ring still hangs at 1.22x = ~616, inside the
+// 640 half-height.
+#define ORBIS_GLOBE_R   ((float)TEMPUS_ORBIS_WHEEL_R)
+#define ORBIS_LOUPE_MAX 3.0f     // the planet well past the wheel
+
+// Scroll the closeup. Multiplicative, so a notch feels the same at
+// both ends — the same law as CAELVM's sky loupe, and the same
+// gesture, because at any moment only one of the two stations owns
+// the wheel. Zooming in is what makes a city pickable.
+static inline void orbis_view_loupe(OrreryViewState *st, float dy) {
+    if (st->orbisb < 0.5) return;      // ORBIS's gesture alone
+    float l = st->orbis_loupe * (1.0f + dy * 0.06f);
+    if (l < 1.0f) l = 1.0f;
+    if (l > ORBIS_LOUPE_MAX) l = ORBIS_LOUPE_MAX;
+    st->orbis_loupe = l;
+}
 
 #define ORR_WEB_R       930.0f   // aspect chords + geocentric markers
 #define ORR_ZODIAC_IN   946.0f
@@ -347,6 +371,7 @@ static void orrery_init(void *buf, const Tempus *t, const RenderStyle *s) {
     OrreryViewState *st = (OrreryViewState *)buf;
     st->opacity = 1.0;
     st->planets_jd = -1.0e9;
+    st->orbis_loupe = 1.0f;
     for (int i = 0; i < COAST_NUM_PTS; i++) {
         double lat = coast_pts[i][0] * 0.01 * M_PI / 180.0;
         double lon = coast_pts[i][1] * 0.01 * M_PI / 180.0;
@@ -373,6 +398,10 @@ static void orrery_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     st->sys = sc->system_blend;
     st->skyb = sc->sky_blend;
     st->orbisb = sc->orbis_blend;
+    // Once the station is fully behind us the zoom returns to rest, so
+    // the next arrival is always at 1x (the eased term above has
+    // already carried it there smoothly).
+    if (st->orbisb < 0.001) st->orbis_loupe = 1.0f;
     st->skyv = &sc->sky_state;
     st->drav = &sc->draco_state;
     st->drab = sc->draco_blend;
@@ -484,22 +513,35 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
 
     float rot[16], light[3];
     float ex, ey, earth_r;
+    // THE GLOBE'S ARRANGEMENT IS THE STATION'S, NOT THE WHEEL'S
+    // (Seren). z used to carry both, so zooming the band out at TELLVS
+    // also shrank the planet to a 42-unit bead and threw it out onto
+    // its orbit — but the wheel's zoom is a reading of the CALENDAR,
+    // and it has no business resizing the world. za says which
+    // arrangement the station wants: centered and full at TELLVS
+    // (system 0), a bead on its orbit ring at MACHINA (system 1).
+    // At every flight endpoint za and z agree, so the flights are
+    // unchanged; they part only when the wheel is zoomed by hand.
+    float za = 1.0f - (float)st->sys;
     if (m >= 0.999f) {
         memcpy(rot, helio_rot, sizeof(rot));
-        ex = sphi * base_w * (1.0f - z);
-        ey = -cphi * base_w * (1.0f - z);
-        earth_r = 42.0f + z * 198.0f;   // full-zoom helio size: 240
+        ex = sphi * base_w * (1.0f - za);
+        ey = -cphi * base_w * (1.0f - za);
+        earth_r = 42.0f + za * 198.0f;   // full-zoom helio size: 240
     } else {
         float geo_rot[16];
         globe_rotation(t->config.latitude, t->config.longitude, geo_rot);
 
-        // Mid-morph target: the helio arrangement AT THE CURRENT ZOOM
-        // (centered planet at z = 1, bead on the wheel at z = 0), so the
-        // flight lands wherever the zoom currently is — geo -> system
-        // flies directly onto the wheel without a detour through center.
-        float hx = sphi * base_w * (1.0f - z);
-        float hy = -cphi * base_w * (1.0f - z);
-        float hr = 42.0f + z * 198.0f;
+        // Mid-morph target: the helio arrangement THE STATION WANTS —
+        // za, the same value the settled branch above uses, never the
+        // wheel's zoom. It has to match, or the globe jumps the moment
+        // a flight begins: with the band zoomed out at TELLVS the
+        // settled branch holds the planet centered (za = 1) while this
+        // one would send it to the bead seat (z = 0), so leaving for
+        // HOROLOGIVM snapped it small and out before flying home.
+        float hx = sphi * base_w * (1.0f - za);
+        float hy = -cphi * base_w * (1.0f - za);
+        float hr = 42.0f + za * 198.0f;
         ex = hx * m;
         ey = dial_y * (1 - m) + hy * m;
         earth_r = dial_r * (1 - m) + hr * m;
@@ -557,7 +599,12 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // parked at the dial, bulging out of frame before it slid up.
         ex *= (1.0f - obf);
         ey *= (1.0f - obf);
-        earth_r += (ORBIS_GLOBE_R - earth_r) * obf;
+        // The loupe EASES HOME as the station is left (Seren): the
+        // zoom is weighted by the closeup's own blend, so flying out
+        // lerps the planet back to its resting size instead of
+        // snapping, and arriving always starts at 1x.
+        float lz = 1.0f + (st->orbis_loupe - 1.0f) * obf;
+        earth_r += (ORBIS_GLOBE_R * lz - earth_r) * obf;
         geo_a   *= (1.0f - ob);
         helio_a *= (1.0f - ob);
     }
@@ -1379,7 +1426,11 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         // At the closeup the sun floats a little off the surface —
         // the TELLVS gesture at a smaller reach — tethered straight
         // down to the subsolar point.
-        float lift = 1.0f + 0.9f * m * (1.0f - ob) + 0.22f * obf;
+        // The marker used to hang at 1.9x earth_r — 456 at TELLVS,
+        // sitting right on the 450 calendar wheel and reading as a
+        // rival to it. Pulled in to 1.3x (312) so the annulus out to
+        // the wheel is free for the 24-hour ring (Seren).
+        float lift = 1.0f + 0.3f * m * (1.0f - ob) + 0.22f * obf;
         float mx0 = ex + lx * earth_r * lift, my0 = ey + ly * earth_r * lift;
         float mag = sqrtf(lx * lx + ly * ly);
 
@@ -1401,6 +1452,18 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         sun_c.r = sun_c.r + (196.0f / 255.0f - sun_c.r) * ss;
         sun_c.g = sun_c.g + (126.0f / 255.0f - sun_c.g) * ss;
         sun_c.b = sun_c.b + (16.0f / 255.0f - sun_c.b) * ss;
+        // The CHART stations wear that same gold (Seren). They used to
+        // keep the sunrise handle's burnt orange, which read as a
+        // different body from the one at MACHINA MVNDI — and the sun
+        // is ONE OBJECT, so it must carry one colour across the
+        // stations that show it as a body.
+        {
+            float cg = skw + (float)st->astb;
+            if (cg > 1.0f) cg = 1.0f;
+            sun_c.r += (196.0f / 255.0f - sun_c.r) * cg;
+            sun_c.g += (126.0f / 255.0f - sun_c.g) * cg;
+            sun_c.b += ( 16.0f / 255.0f - sun_c.b) * cg;
+        }
 
         // Tether is globe furniture — gone as the sun departs, and
         // faded with the rising sky (its endpoint is the machine form,

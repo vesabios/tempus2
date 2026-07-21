@@ -48,8 +48,12 @@ static void tempus_stage_views(Scene *sc, int station) {
     // furniture has no business hanging over the growing planet.
     double orbis_fade = (double)ink_out(INK_ORBIS_CHROME, orbis);
     // The calendar wheel survives into the sky as its bezel — the time
-    // control rides along to every worldview
-    sc->views[VIEW_CALENDAR].opacity = 1.0;
+    // control rides along to every worldview EXCEPT ORBIS, where it
+    // bows out with the clock chrome (Seren) and hands its whole
+    // radius to the planet. NOTE: the band is also the day-scrub
+    // control, so ORBIS has no calendar scrub while it is hidden.
+    sc->views[VIEW_CALENDAR].opacity = orbis_fade;
+    sc->views[VIEW_CALBACK].opacity  = 1.0;
     sc->views[VIEW_SOLAR].opacity = 0.0;    // data only, never draws
     // The orrery must keep rendering even fully faded — it is the
     // COMPOSER of the luminaries (its render publishes their
