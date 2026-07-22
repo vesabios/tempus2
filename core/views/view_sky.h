@@ -1073,28 +1073,33 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             // worth seeing — where a body will be is as much the
             // chart's business as where it is.
             float a = ra * mw + (vis ? pa : pa * 0.78f) * sw;
+            // A WRAP BELONGS TO THE SKY, SO IT DIES WITH THE SKY.
+            // Whether these two samples straddle the antipode is a
+            // fact about THIS PROJECTION and nothing else: on the
+            // machine's orbit ring there is no antipode and no
+            // discontinuity, so the same segment is perfectly real
+            // there. Dropping it outright carried a caelum artifact
+            // all the way into mundi — at the end of the transition,
+            // with the ring fully machine-side, pieces stayed missing
+            // because the sky had objected to them (Seren). So the
+            // objection is WEIGHTED instead of obeyed: a wrapped
+            // segment keeps only its machine share. At full machine it
+            // draws in full, at full sky it is gone, and in between it
+            // fades exactly as fast as the false chord fades in — no
+            // threshold, which is the continuity law.
+            if (!sky__seg_ok(st->path[b][i][0], st->path[b][i][1],
+                             st->path[b][i+1][0], st->path[b][i+1][1],
+                             skx0, sky0, skx1, sky1))
+                a *= mw;
             if (a < 0.004f) continue;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, a));
-            // THE WRAP TEST JUDGES THE SKY, NOT THE MACHINE. It asks
-            // whether two samples that are close on the SPHERE landed
-            // absurdly far apart on screen — which only ever happens
-            // through the antipode of this projection. Feeding it the
-            // BLENDED points made it answer a question it was never
-            // asked: mid-morph those points are the machine's orbit
-            // ring, where consecutive samples are a whole 7 degrees of
-            // ORBIT apart. Pluto's ring puts them ~134 units apart
-            // against an allowance of ~66, so the segment was thrown
-            // away as a wrap. The big rings failed first and the small
-            // ones survived, so the orbit lines vanished and came back
-            // one at a time as the morph shrank them past the
-            // threshold (Seren, twice — and it is not the index cap,
-            // which this was mistaken for). The sky endpoints are the
-            // only ones the test means.
-            if (sky__seg_ok(st->path[b][i][0], st->path[b][i][1],
-                            st->path[b][i+1][0], st->path[b][i+1][1],
-                            skx0, sky0, skx1, sky1))
-                draw_line(d, mx0, my0, mx1, my1, 1.0f);
+            // (The wrap is weighted above, not rejected here: the
+            // endpoints it judges are the SKY's, because that is the
+            // only projection an antipode exists in — feeding it the
+            // blended points made it discard 60% of the machine's own
+            // ring geometry.)
+            draw_line(d, mx0, my0, mx1, my1, 1.0f);
         }
     }
 
