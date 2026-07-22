@@ -1027,9 +1027,19 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                     // itself mid-morph. Negating the offset costs
                     // nothing: an arc centred on the body is the same
                     // arc swept either way.
+                    // THE RING MUST CLOSE. There are SKY_PATH_N
+                    // samples but only SKY_PATH_N-1 intervals between
+                    // them, so a full turn is 360/(N-1) per step, not
+                    // 360/N. Stepping by 360/49 swept 48 intervals to
+                    // 352.65 degrees and left the ring 7.35 short of
+                    // its own start — every orbit path missing exactly
+                    // one segment, the loop-around (Seren). The sky
+                    // side has always closed: 49 samples at half-hour
+                    // steps span precisely 24 hours, so its last
+                    // sample lands back on its first.
                     double lon_s = st->now.helio_lon[pl]
                                  + wsgn * (ii - SKY_PATH_N / 2)
-                                   * (360.0f / SKY_PATH_N);
+                                   * (360.0f / (SKY_PATH_N - 1));
                     orr__ecl_dir(lon_s, &gx, &gy);
                     double jd_s = st->cache_jd;
                     float orbr = orr__ring_r_blend(pl, jd_s, lon_s,
@@ -1051,10 +1061,10 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                 int pl2 = planets_body_pl(b);
                 float g0x, g0y, g1x, g1y;
                 orr__ecl_dir(st->now.helio_lon[pl2]
-                             + wsgn * (i - SKY_PATH_N/2) * (360.0f/SKY_PATH_N),
+                             + wsgn * (i - SKY_PATH_N/2) * (360.0f/(SKY_PATH_N-1)),
                              &g0x, &g0y);
                 orr__ecl_dir(st->now.helio_lon[pl2]
-                             + wsgn * (i + 1 - SKY_PATH_N/2) * (360.0f/SKY_PATH_N),
+                             + wsgn * (i + 1 - SKY_PATH_N/2) * (360.0f/(SKY_PATH_N-1)),
                              &g1x, &g1y);
                 static float acc_s = 0, acc_m = 0; static int nn = 0;
                 acc_s += sxa * syb - sxb * sya;
