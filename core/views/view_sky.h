@@ -565,6 +565,18 @@ static inline bool sky__seg_ok(float az0, float alt0,
 // and negligibly off for the small circles at these step sizes.
 // Wrapping segments bail: the antipode is a genuine discontinuity and
 // no amount of subdivision converges across it.
+// WHICH LINE PRIMITIVE THE ARCS END IN. The chart's sparse furniture —
+// the graticule, the constellation figures — has nothing nearby to
+// alias against, so it draws as plain quads at a third the geometry
+// (see draw_line_flat). Set around those blocks and cleared after;
+// everything else keeps the antialiased ribbon.
+static bool sky__flat = false;
+static inline void sky__stroke(DrawCtx *d, float x0, float y0,
+                               float x1, float y1, float w) {
+    if (sky__flat) draw_line_flat(d, x0, y0, x1, y1, w);
+    else           draw_line(d, x0, y0, x1, y1, w);
+}
+
 static void sky__arc(DrawCtx *d, float az0, float alt0,
                      float az1, float alt1, float w, int depth) {
     float x0, y0, x1, y1;
@@ -594,8 +606,32 @@ static void sky__arc(DrawCtx *d, float az0, float alt0,
         if ((x0 < xlo && x1 < xlo) || (x0 > xhi && x1 > xhi)
          || (y0 < ylo && y1 < ylo) || (y0 > yhi && y1 > yhi)) return;
     }
-    float dx = x1 - x0, dy = y1 - y0;
-    if (depth > 0 && dx * dx + dy * dy > 14.0f * 14.0f) {
+    // SPLIT ON CURVATURE, NOT ON LENGTH. This used to subdivide any
+    // chord longer than 14px, which chops a line that is ALREADY
+    // STRAIGHT on screen into fourteen-pixel crumbs — the graticule
+    // alone was spending 50k indices that way, and at the machina
+    // morph (both worlds drawn at once) the sum of the two saturated
+    // the index buffer exactly, so whole layers were silently dropped
+    // and came back one at a time as the budget freed (Seren: "they
+    // literally disappear"). The honest question is not how long the
+    // chord is but how far the curve departs from it: project the true
+    // midpoint and measure its sagitta against the chord's midpoint.
+    // Under half a pixel, one line IS the curve, at any length.
+    //
+    // WHY THE OLD LENGTH RULE EXISTED, and what has to change if it is
+    // ever wanted back: the density was buying a crisp edge at the
+    // PLATE'S LIMB (Seren). That limb is not a clip but a radial CLAMP
+    // (view_astro.h: x *= clip/pr2) which slides stray vertices down
+    // onto the boundary circle — so the edge reads clean only when
+    // enough vertices land near it to trace the circle, and chopping
+    // every chord to 14px was how they got there. With the clamp
+    // currently disabled (clip = 1.0e6f, ASTROLABIVM out of the menu)
+    // that spend buys nothing at all. Should the limb return, DO NOT
+    // reach for density again: intersect the segment with the circle
+    // and emit the true crossing point. That is crisp by construction,
+    // costs nothing, and also fixes the deformation the clamp causes
+    // by sliding crossing vertices along the radius instead of cutting.
+    if (depth > 0) {
         float v0[3], v1[3];
         sky__vec(az0, alt0, v0);
         sky__vec(az1, alt1, v1);
@@ -605,12 +641,21 @@ static void sky__arc(DrawCtx *d, float az0, float alt0,
             mx /= n; my /= n; mz /= n;
             float altm = asinf(mz) * 180.0f / (float)M_PI;
             float azm = atan2f(mx, my) * 180.0f / (float)M_PI;
-            sky__arc(d, az0, alt0, azm, altm, w, depth - 1);
-            sky__arc(d, azm, altm, az1, alt1, w, depth - 1);
-            return;
+            float xm, ym;
+            sky__project(azm, altm, &xm, &ym);
+            float ex = xm - 0.5f * (x0 + x1);
+            float ey = ym - 0.5f * (y0 + y1);
+            static float tol = -1.0f;
+            if (tol < 0.0f) { const char *e = getenv("TEMPUS_ARCTOL");
+                              tol = e ? (float)atof(e) : 0.45f; }
+            if (ex * ex + ey * ey > tol * tol) {
+                sky__arc(d, az0, alt0, azm, altm, w, depth - 1);
+                sky__arc(d, azm, altm, az1, alt1, w, depth - 1);
+                return;
+            }
         }
     }
-    draw_line(d, x0, y0, x1, y1, w);
+    sky__stroke(d, x0, y0, x1, y1, w);
 }
 
 static inline void sky__project_clamped(float az, float alt,
@@ -644,7 +689,19 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     if (ms < 0) ms = 0;
     if (ms > 1) ms = 1;
     float fin = ink_in(INK_BORN, st->blend);
-    float mw = ms * (1.0f - mb);
+    // ms IS A PRESENCE, NOT A SECOND EASING. It answers "is there a
+    // machine counterpart to fly from at all" — parked at MACHINA yes,
+    // parked anywhere else no. Multiplying the raw value into the
+    // weight made mw the PRODUCT OF TWO EASED QUANTITIES, which is the
+    // one thing this instrument's continuity law forbids: flying
+    // CAELVM -> MACHINA both ms and (1-mb) travel 0->1 over the same
+    // flight, so their product double-eases. Measured, the rings stood
+    // 21% of the way to the machine when the flight was 58% done, then
+    // rushed the rest — Seren saw exactly that as "fading out and then
+    // snapping in at the very end". Saturating it early leaves the
+    // weight riding the sky's OWN departure, one ease, monotone.
+    float have = (float)tempus_smoothstep(0.0, 0.25, ms);
+    float mw = have * (1.0f - mb);
     float sw = ms * mb + (1.0f - ms) * fin;
     float wheel_R = s->calendar_base_radius
                   * (float)tempus_wheel_scale(1.0);   // Earth-orbit const
@@ -865,6 +922,10 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         float wsgn = (wind < 0.0f) ? -1.0f : 1.0f;
         for (int i = 0; i + 1 < SKY_PATH_N; i++) {
             float mx0, my0, mx1, my1;
+            // The SKY-side endpoints are kept alongside the blended
+            // ones: the wrap test below must judge the projection, not
+            // the machine (see the call site).
+            float skx0 = 0, sky0 = 0, skx1 = 0, sky1 = 0;
             for (int k = 0; k < 2; k++) {
                 int ii = i + k;
                 float *out_x = k ? &mx1 : &mx0;
@@ -872,22 +933,79 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                 float sx, sy;
                 sky__project_clamped(st->path[b][ii][0],
                                      st->path[b][ii][1], &sx, &sy);
+                if (k) { skx1 = sx; sky1 = sy; }
+                else   { skx0 = sx; sky0 = sy; }
                 // Machine endpoint for this sample
                 float rx = 0, ry = 0;
                 if (b == BODY_SUN) {
                     rx = 0; ry = 0;
                 } else if (b == BODY_MOON) {
                     // Its little machina orbit, sampled at the moon's
-                    // real angular rate (~13.2 deg/day)
+                    // real angular rate (~13.2 deg/day), SEATED ON THE
+                    // MACHINE'S OWN EARTH.
+                    //
+                    // This used to rebuild Earth's seat from the
+                    // calendar wheel — sin/cos of the year fraction
+                    // times wheel_R — which is only where Earth is at
+                    // tempo scale with no recentre. Measured: at tempo
+                    // the two agree to 0.00, which is exactly why it
+                    // went unseen; at true scale the machine has
+                    // recentred Earth onto the origin and the ring
+                    // still began 360px away, so the moon's orbit flew
+                    // in from empty space (Seren: "the orbital ring of
+                    // the moon starts from the wrong location").
+                    //
+                    // earth_mx/earth_my is the seat the orrery publishes
+                    // after both the scale morph and the recentre —
+                    // the same discipline the planets' rings above
+                    // already follow through g_ox/g_oy. NOT
+                    // pl_mx[PL_EARTH], which carries the same number
+                    // but only on frames where the machine layout runs:
+                    // reading that one made three CAELVM->MACHINA
+                    // frames move, because flying INTO the machine the
+                    // layout has not run yet and the seat is stale.
+                    // THE BEARING IS THE ORRERY'S OWN. It used to be
+                    // orr__ecl_dir(geo_lon), the ecliptic-longitude
+                    // direction — which the orrery computes and then
+                    // THROWS AWAY, overwriting it with the physical
+                    // celestial-frame bearing (the moon frame law).
+                    // Sweeping the ring from the abandoned convention
+                    // put its centre sample nearly opposite the moon:
+                    // measured gap 19.77 against a ring radius of
+                    // 10.38. Sweep the published bearing instead and
+                    // the ring's centre IS the moon, by construction.
                     float gx, gy;
-                    orr__ecl_dir(st->now.geo_lon[BODY_MOON]
-                                 + wsgn * (ii - SKY_PATH_N / 2) * 0.275f,
-                                 &gx, &gy);
-                    double yp = tempus_year_pct(t);
-                    float edx = sinf((float)(yp * 2.0 * M_PI)) * wheel_R;
-                    float edy = -cosf((float)(yp * 2.0 * M_PI)) * wheel_R;
-                    rx = edx + gx * 42.0f * 1.55f;
-                    ry = edy + gy * 42.0f * 1.55f;
+                    {
+                        float b0 = st->orr
+                                 ? atan2f(st->orr->moon_mdy, st->orr->moon_mdx)
+                                 : 0.0f;
+                        float sweep = wsgn * (ii - SKY_PATH_N / 2) * 0.275f
+                                    * (float)M_PI / 180.0f;
+                        gx = cosf(b0 + sweep);
+                        gy = sinf(b0 + sweep);
+                    }
+                    float edx, edy;
+                    if (st->orr) {
+                        edx = st->orr->earth_mx;
+                        edy = st->orr->earth_my;
+                    } else {
+                        double yp = tempus_year_pct(t);
+                        edx = sinf((float)(yp * 2.0 * M_PI)) * wheel_R;
+                        edy = -cosf((float)(yp * 2.0 * M_PI)) * wheel_R;
+                    }
+                    // AND ITS RADIUS IS earth_r * 1.55, the orrery's own
+                    // law for this ring — not a constant. It was written
+                    // 42.0f * 1.55f, which is that law evaluated at one
+                    // machine state and frozen; Earth's globe grows and
+                    // shrinks through the morph and the scale, so the
+                    // ring only landed correctly where earth_r happened
+                    // to be 42 (Seren guessed this exactly: "using the
+                    // unscaled orbital distance from earth"). Seating it
+                    // right while sizing it wrong still starts the ring
+                    // in the wrong place.
+                    float emr = st->orr ? st->orr->earth_mr : 42.0f;
+                    rx = edx + gx * emr * 1.55f;
+                    ry = edy + gy * emr * 1.55f;
                 } else {
                     int pl = planets_body_pl(b);
                     float gx, gy;
@@ -958,9 +1076,24 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             if (a < 0.004f) continue;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, a));
+            // THE WRAP TEST JUDGES THE SKY, NOT THE MACHINE. It asks
+            // whether two samples that are close on the SPHERE landed
+            // absurdly far apart on screen — which only ever happens
+            // through the antipode of this projection. Feeding it the
+            // BLENDED points made it answer a question it was never
+            // asked: mid-morph those points are the machine's orbit
+            // ring, where consecutive samples are a whole 7 degrees of
+            // ORBIT apart. Pluto's ring puts them ~134 units apart
+            // against an allowance of ~66, so the segment was thrown
+            // away as a wrap. The big rings failed first and the small
+            // ones survived, so the orbit lines vanished and came back
+            // one at a time as the morph shrank them past the
+            // threshold (Seren, twice — and it is not the index cap,
+            // which this was mistaken for). The sky endpoints are the
+            // only ones the test means.
             if (sky__seg_ok(st->path[b][i][0], st->path[b][i][1],
                             st->path[b][i+1][0], st->path[b][i+1][1],
-                            mx0, my0, mx1, my1))
+                            skx0, sky0, skx1, sky1))
                 draw_line(d, mx0, my0, mx1, my1, 1.0f);
         }
     }

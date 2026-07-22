@@ -44,6 +44,24 @@ struct OrreryViewState {
     // has silently missed it every time it was not to hand.
     float  g_ox, g_oy;
 
+    // Earth's LIVE seat on the machine, recentre and scale morph both
+    // applied — written every frame the orrery updates, unlike
+    // pl_mx[PL_EARTH] which is only stashed on frames where the
+    // machine layout actually runs. The sky's moon-orbit ring hangs
+    // off this; seating it on anything else put the moon's ring 360
+    // units from Earth at true scale (Seren).
+    float  earth_mx, earth_my;
+
+    // ...and Earth's LIVE globe radius, because the moon's orbit ring
+    // is sized off it (earth_r * 1.55) wherever the orrery draws it.
+    // The sky's copy of that ring used a hardcoded 42, which is
+    // earth_r's value at exactly one machine state.
+    float  earth_mr;
+
+    // The moon's machine bearing from Earth (unit, screen). PHYSICAL,
+    // not ecliptic-longitude — see the moon frame law.
+    float  moon_mdx, moon_mdy;
+
     // MACHINA's scale morph: 0 = the tempo scale, 1 = true AU
     // (Earth-anchored). See orr__true_mix.
     float  true_mix;
@@ -855,6 +873,17 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     ((OrreryViewState *)(uintptr_t)buf)->g_oy = goy;
     ex += gox;   // Earth to the middle; the globe, its moon, the
     ey += goy;   // tether and every sight-line origin follow from here
+    // ...AND SO DOES THE SKY'S MOON RING, which lives in another view
+    // and therefore needs this seat PUBLISHED. pl_mx[PL_EARTH] carries
+    // the same number but only on frames where the machine layout runs
+    // (ss > 0.001 && machine_vis), so a consumer reading it while
+    // flying INTO the machine gets a stale seat. This one is written
+    // every frame the orrery updates, like g_ox/g_oy above — a machine
+    // property that outside code depends on has to be published where
+    // it is computed, not where it happens to be convenient.
+    ((OrreryViewState *)(uintptr_t)buf)->earth_mx = ex;
+    ((OrreryViewState *)(uintptr_t)buf)->earth_my = ey;
+    ((OrreryViewState *)(uintptr_t)buf)->earth_mr = earth_r;
     // Declutter for the system stage: zoomed out, the emphasis is
     // celestial geometry — the globe keeps only its lit-ness (terminator).
     // Everything painted ON it (continents, latitude ring, city marker,
@@ -2067,6 +2096,16 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
         float sdy = mdy * (1.0f - obf) + mpy * obf;
         float seat_x = ex + sdx * earth_r * ring_fac;
         float seat_y = ey + sdy * earth_r * ring_fac;
+        // The moon's machine BEARING, published for the sky's orbit
+        // ring. It matters that this is sdx/sdy and not
+        // orr__ecl_dir(geo_lon): mdx above STARTS as the ecliptic-
+        // longitude direction and is then overwritten by the PHYSICAL
+        // one (the moon frame law — physical at every station, MACHINA
+        // included). The sky was still sweeping its ring from the
+        // abandoned convention, which put the ring's centre sample
+        // nearly opposite the moon itself.
+        ((OrreryViewState *)(uintptr_t)buf)->moon_mdx = sdx;
+        ((OrreryViewState *)(uintptr_t)buf)->moon_mdy = sdy;
         float mmx = seat_x * morb + gx2 * w_ap;
         float mmy = seat_y * morb + gy2 * w_ap;
         float mmr = gr2 * w_ap
