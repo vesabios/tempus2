@@ -24,3 +24,5 @@ tools/test_time
 *.o
 flightmatrix/
 Tempus.saver/
+glyph_sheet.png
+tools/glyph_sheet

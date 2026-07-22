@@ -125,3 +125,12 @@ saver-install: saver
 	@rm -rf ~/Library/Screen\ Savers/$(SAVER)
 	@cp -R $(SAVER) ~/Library/Screen\ Savers/
 	@echo "installed to ~/Library/Screen Savers/$(SAVER)"
+
+# Candidate glyph contact sheet (writes glyph_sheet.png)
+tools/glyph_sheet: tools/glyph_sheet.c assets/font_atlas.h
+	$(CC) -std=c11 -O2 -Wall -Wno-unused-function -I core -I lib -I assets \
+	    tools/glyph_sheet.c -o $@ -lm
+
+.PHONY: glyph_sheet
+glyph_sheet: tools/glyph_sheet
+	./tools/glyph_sheet
