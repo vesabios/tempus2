@@ -35,9 +35,18 @@ def main():
         results.append((rms(a, b), f))
     results.sort(reverse=True)
     bad = [(e, f) for e, f in results if e > thresh]
-    for e, f in results[:20]:
+    # EVERY drifting shot is printed. This used to show results[:20]
+    # flat, which quietly hid drift #21 onward — and the summary line
+    # still said "36 past threshold", so the list looked complete while
+    # being a third of the story. Reading which shots drifted is the
+    # whole point: that is how you tell a contained change from a leak.
+    shown = bad if bad else results[:20]
+    for e, f in shown:
         mark = "DRIFT" if e > thresh else "  ok "
         print(f"{mark}  rms={e:8.3f}  {f}")
+    if bad:
+        exact = sum(1 for e, _ in results if e == 0.0)
+        print(f"\n{exact} of {len(results)} shots bit-identical")
     if missing:
         print(f"missing from one side: {len(missing)}")
         for f in missing[:10]:
