@@ -563,7 +563,7 @@ static void horae_render(const void *buf, DrawCtx *d, const Tempus *t,
             float sux = sinf(sa), suy = -cosf(sa);
             draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
                                   curp ? 0.95f : 0.30f));
-            orr__strokes(d, horae__sigil[c], pcx2 + sux * 42.0f,
+            sigil_strokes(d, horae__sigil[c], pcx2 + sux * 42.0f,
                          pcy2 + suy * 42.0f, sux, suy, 24.0f, 1.0f);
         }
         // The magnifying glass: the plate occludes the dial's

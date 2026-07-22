@@ -18,6 +18,7 @@
 
 #include <stdio.h>
 #include "../view.h"
+#include "../eclipse.h"
 
 struct DracoViewState {
     TimeView tv;  // must be first field
@@ -36,6 +37,14 @@ struct DracoViewState {
     float lum_sun_x, lum_sun_y;
     float lum_moon_x, lum_moon_y;
     float lum_light[3];         // the canonical lune's phase light
+
+    // The next feeding. The dial says WHERE the jaws stand; the wheel
+    // marks the year's dates; this says how long you have to wait —
+    // the one question the station could not answer without scrubbing
+    // for it (Seren).
+    bool   next_ok;
+    bool   next_solar, next_certain;
+    int    next_days;           // whole days from now, 0 = today
 };
 
 #endif // VIEW_DRACO_H
@@ -47,27 +56,10 @@ struct DracoViewState {
 #define DRACO_R    330.0f   // the ecliptic circle
 #define DRACO_AMP   70.0f   // the wave's reach (5.145 deg, amplified)
 
-// The nodes' sigils: CAPVT (horseshoe opening down) and CAVDA
-// (opening up), each with its two feet — stroke tables in the
-// instrument's engraved idiom
-static const float draco__sg_caput[] = {
-    7, -0.20f,-0.14f, -0.24f,0.02f, -0.16f,0.18f, 0,0.26f,
-       0.16f,0.18f, 0.24f,0.02f, 0.20f,-0.14f,
-    9, -0.11f,-0.23f, -0.136f,-0.166f, -0.20f,-0.14f, -0.264f,-0.166f,
-       -0.29f,-0.23f, -0.264f,-0.294f, -0.20f,-0.32f, -0.136f,-0.294f,
-       -0.11f,-0.23f,
-    9, 0.29f,-0.23f, 0.264f,-0.166f, 0.20f,-0.14f, 0.136f,-0.166f,
-       0.11f,-0.23f, 0.136f,-0.294f, 0.20f,-0.32f, 0.264f,-0.294f,
-       0.29f,-0.23f, 0 };
-static const float draco__sg_cauda[] = {
-    7, -0.20f,0.14f, -0.24f,-0.02f, -0.16f,-0.18f, 0,-0.26f,
-       0.16f,-0.18f, 0.24f,-0.02f, 0.20f,0.14f,
-    9, -0.11f,0.23f, -0.136f,0.166f, -0.20f,0.14f, -0.264f,0.166f,
-       -0.29f,0.23f, -0.264f,0.294f, -0.20f,0.32f, -0.136f,0.294f,
-       -0.11f,0.23f,
-    9, 0.29f,0.23f, 0.264f,0.166f, 0.20f,0.14f, 0.136f,0.166f,
-       0.11f,0.23f, 0.136f,0.294f, 0.20f,0.32f, 0.264f,0.294f,
-       0.29f,0.23f, 0 };
+// The nodes' sigils now live in core/sigils.h as sigil_caput and
+// sigil_cauda — the calendar wheel marks the eclipse seasons with the
+// same two figures, and a symbol drawn by two views belongs to
+// neither.
 
 // The REAL dragon. The constellation Draco coils around the NORTH
 // ECLIPTIC POLE — and this dial's center IS the ecliptic pole (the
@@ -109,6 +101,20 @@ static const uint8_t draco__edges[15][2] = {
 // stands over the JULY band, the season where you feel it.
 static inline void draco__dir(double lon, float *dx, float *dy) {
     orr__ecl_dir(lon + 180.0, dx, dy);
+}
+
+// Additive numerals, the instrument's engraved idiom (IIII not IV,
+// XXXX not XL) — the same habit as the degree table below, extended to
+// carry a wait of up to a year.
+static void draco__roman(int n, char *out, size_t cap) {
+    static const struct { int v; const char *s; } R[] = {
+        { 100, "C" }, { 50, "L" }, { 10, "X" }, { 5, "V" }, { 1, "I" },
+    };
+    size_t k = 0;
+    if (n <= 0) { if (cap) out[0] = 0; return; }
+    for (int i = 0; i < 5 && k + 1 < cap; i++)
+        while (n >= R[i].v && k + 1 < cap) { out[k++] = R[i].s[0]; n -= R[i].v; }
+    out[k] = 0;
 }
 
 // Sign names in the ablative — "the head IN Leo" — dial order
@@ -181,6 +187,7 @@ static void draco_init(void *buf, const Tempus *t, const RenderStyle *s) {
     DracoViewState *st = (DracoViewState *)buf;
     st->opacity = 1.0;
     st->cache_jd = -1.0e9;
+    st->next_ok = false;
     (void)t; (void)s;
 }
 
@@ -210,6 +217,30 @@ static void draco_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         // Mean ascending node, regressing 18.6-year cycle (of-date)
         st->node_lon = planets__wrap360(
             125.04452 - 0.05295377 * (jd_ut - 2451545.0));
+    }
+
+    // The next feeding, hunted forward from now. A year and a half of
+    // lookahead always contains one — eclipse seasons come round twice
+    // a year — so this never comes back empty in practice.
+    {
+        static EclipseTable nx;
+        static double nx_from = 1.0, nx_to = 0.0;
+        double w0 = floor(jd_ut) - 2.0, w1 = w0 + 560.0;
+        // Re-scan only when the window has genuinely moved on; scrubbing
+        // a day at a time must not re-run the search every frame
+        if (w0 < nx_from || w0 > nx_from + 30.0) {
+            eclipse_find(&nx, w0, w1);
+            nx_from = w0; nx_to = w1;
+        }
+        (void)nx_to;
+        int i = eclipse_next(&nx, jd_ut);
+        st->next_ok = (i >= 0);
+        if (st->next_ok) {
+            st->next_solar   = nx.e[i].solar;
+            st->next_certain = nx.e[i].certain;
+            st->next_days    = (int)floor(nx.e[i].jd - jd_ut + 0.5);
+            if (st->next_days < 0) st->next_days = 0;
+        }
     }
 
     // Chart targets for the luminaire composition, every update the
@@ -366,10 +397,10 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         float ha = 0.55f + (head_near ? 0.40f * season : 0.0f);
         float ta = 0.55f + (!head_near ? 0.40f * season : 0.0f);
         draw_set_color(d, dca(0.72f, 0.70f, 0.64f, ha));
-        orr__strokes(d, draco__sg_caput, hx * DRACO_R, hy * DRACO_R,
+        sigil_strokes(d, sigil_caput, hx * DRACO_R, hy * DRACO_R,
                      hx, hy, 48.0f, 1.3f);
         draw_set_color(d, dca(0.72f, 0.70f, 0.64f, ta));
-        orr__strokes(d, draco__sg_cauda, tx * DRACO_R, ty * DRACO_R,
+        sigil_strokes(d, sigil_cauda, tx * DRACO_R, ty * DRACO_R,
                      tx, ty, 48.0f, 1.3f);
     }
 
@@ -530,6 +561,32 @@ static void draco_render(const void *buf, DrawCtx *d, const Tempus *t,
         snprintf(line, sizeof(line), "CAVDA IN %s %s",
                  draco__sign_abl[ts], draco__deg[dg]);
         draw_text_centered(d, FONT_date, 0, 18.0f, line);
+        // ---- The next feeding ----
+        // Under the node reading, and only once the station is really
+        // here (the wheel's marks carry the same news during flight).
+        // "TODAY" when it lands on the date; otherwise the wait in
+        // days. The uncertain ones say PERHAPS rather than promising —
+        // eclipse.h cannot be sure at the limit, so neither is this.
+        if (st->next_ok && stage > 0.01f) {
+            char num[16], line[64];
+            draco__roman(st->next_days, num, sizeof(num));
+            const char *what = st->next_solar ? "ECLIPSIS SOLIS"
+                                              : "ECLIPSIS LVNAE";
+            if (st->next_days == 0)
+                snprintf(line, sizeof(line), "%s HODIE", what);
+            else if (st->next_days == 1)
+                snprintf(line, sizeof(line), "%s CRAS", what);
+            else
+                snprintf(line, sizeof(line), "%s POST %s DIES", what, num);
+            float na = stage * (st->next_certain ? 0.72f : 0.42f);
+            draw_set_color(d, dca(0.74f, 0.71f, 0.64f, na));
+            draw_text_centered(d, FONT_date, 0, 78.0f, line);
+            if (!st->next_certain) {
+                draw_set_color(d, dca(0.55f, 0.53f, 0.48f, stage * 0.38f));
+                draw_text_centered(d, FONT_date, 0, 104.0f, "FORTASSE");
+            }
+        }
+
         if (season > 0.15f) {
             DrawColor g = dc_scale(s->sunrise_handle, 1.0f);
             g.a = 0.45f + 0.50f * season;

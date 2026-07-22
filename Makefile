@@ -67,6 +67,24 @@ tools/test_planets: tools/test_planets.c core/planets.h core/spa.c core/spa.h
 test_planets: tools/test_planets
 	./tools/test_planets
 
+# Eclipse prediction harness (checked against the published canon)
+tools/test_eclipse: tools/test_eclipse.c core/eclipse.h core/planets.h
+	$(CC) -std=c11 -O2 -Wall -Wno-unused-function -I core \
+	    tools/test_eclipse.c -o $@ -lm
+
+.PHONY: test_eclipse
+test_eclipse: tools/test_eclipse
+	./tools/test_eclipse
+
+# Override-clock arithmetic (the day round trip)
+tools/test_time: tools/test_time.c core/tempus.h
+	$(CC) -std=c11 -O2 -Wall -Wno-unused-function -I core \
+	    tools/test_time.c -o $@ -lm
+
+.PHONY: test_time
+test_time: tools/test_time
+	./tools/test_time
+
 # Font atlas generation
 tools/bake_font: tools/bake_font.c
 	$(CC) -std=c11 -O2 -I lib tools/bake_font.c -o $@ -lm

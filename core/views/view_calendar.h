@@ -4,6 +4,7 @@
 #define VIEW_CALENDAR_H
 
 #include "../view.h"
+#include "../eclipse.h"
 
 // ---- Cached tick data (rebuilt only on day/year change) ----
 
@@ -40,6 +41,19 @@ struct CalendarViewState {
     // the clock alone (Seren), and rides this so it eases with the
     // station instead of popping on arrival.
     float   horo;
+
+    // DRACO's weight, and the year's feedings. The dragon's dial shows
+    // WHY an eclipse can happen; the wheel is the only surface in the
+    // instrument that already means "a year of dates", so it is where
+    // WHEN belongs — the whole season's worth at a glance instead of
+    // scrubbed for one at a time. Marks ride this weight, so they
+    // belong to the station and do not litter the other six.
+    float   draco;
+    const EclipseTable *ecl;   // covers the wheel's year plus a lookahead
+    double  ecl_tz;            // hours to add to a UT instant for the wheel
+    EclipseSeason seasons[ECL_SEASON_MAX];
+    int     num_seasons;
+    double  seasons_epoch;     // the wheel year they were computed for
 
     // THE SKY CIRCLE — one shape, one drawer, every station. Seat
     // and radius blend between CAELVM's bowl (centered, growing off
@@ -167,6 +181,11 @@ static void calendar_init(void *buf, const Tempus *t, const RenderStyle *s) {
     st->target_zoom = 0.0;
     st->cached_day = -1;
     st->cached_year = -1;
+    st->draco = 0.0f;
+    st->ecl = NULL;
+    st->ecl_tz = 0.0;
+    st->num_seasons = 0;
+    st->seasons_epoch = -1.0e9;
     cal__rebuild_ticks(st, t, s);
 }
 
@@ -200,6 +219,26 @@ static void calendar_update(void *buf, const Tempus *t, double dt, Scene *sc) {
                    ? (float)(sc->sky_blend / fam) : 0.0f;
     }
     st->horo = (float)sc->stw[ST_HOROLOGIVM];
+
+    // The year's eclipses. The wheel counts in LOCAL noon-based JD
+    // (jd_current = cal_jd_noon) while the ephemeris answers in UT, so
+    // the whole window shifts by the zone and every instant shifts
+    // back — otherwise a mark can sit a day off its tick at the far
+    // zones. The scan runs a year PAST the wheel's end so the "next
+    // feeding" reading still has an answer on the last day of the year.
+    st->draco = (float)sc->stw[ST_DRACO];
+    st->ecl_tz = t->config.timezone / 24.0;
+    if (st->draco > 0.0005f) {
+        double w0 = t->jd_newyear - st->ecl_tz;
+        st->ecl = eclipse_table(w0, w0 + t->total_days + 400.0);
+        if (fabs(st->seasons_epoch - w0) > 0.5) {
+            st->num_seasons = eclipse_seasons(w0 - ECL_SEASON_HALF,
+                                              w0 + t->total_days
+                                                 + ECL_SEASON_HALF,
+                                              st->seasons, ECL_SEASON_MAX);
+            st->seasons_epoch = w0;
+        }
+    }
     {
         double a = 0, r = 0, w = 0;
         for (int i = 0; i < ST_COUNT; i++) {
@@ -232,6 +271,154 @@ static void calendar_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     }
     if (st->cached_day != st->tv.day || st->cached_year != st->tv.year)
         cal__rebuild_ticks(st, t, &sc->style);
+}
+
+// ---- The year's feedings, marked on the band ----
+//
+// DRACO's dial answers "why"; the wheel answers "when". Every eclipse
+// of the wheel's year gets a mark on the date it falls, in the free
+// band between the tick ring and the teal month block. They cluster in
+// pairs a fortnight apart — that clustering IS the eclipse season, and
+// scrubbing the years walks the pairs backwards around the wheel as
+// the nodes regress. Nothing else in the instrument shows that.
+//
+// A SOLAR mark is the thing itself: a dark disc with a bright ring of
+// light escaping around it. A LVNAR mark is the copper of a moon in
+// Earth's umbra — the same blood the dial uses when it feeds. Size and
+// ink ride `depth`, so a central eclipse marks harder than a graze,
+// and the merely-possible ones (see eclipse.h — near the limit our
+// ephemeris cannot be sure) draw faint and hollow rather than
+// asserting themselves.
+static void cal__eclipse_marks(const CalendarViewState *st, DrawCtx *d,
+                               const Tempus *t, float radius) {
+    if (st->draco <= 0.0005f || !st->ecl) return;
+    float k = st->draco;
+    // The table speaks UT; the wheel speaks local. Compare in the
+    // table's frame, not the wheel's — mixing them puts "is this one
+    // still ahead of us" out by the zone on the day itself.
+    double now_ut = st->tv.jd_current + st->tv.percent_of_day - 0.5
+                  - st->ecl_tz;
+    int next_i = eclipse_next(st->ecl, now_ut);
+    float mark_r = radius + 34.0f;      // clear of ticks (+20) and arc (+51)
+
+    // The seasons first, UNDER the marks: the five-week windows where
+    // the sun stands near enough a node for a shadow to land. They are
+    // the reason the marks come in pairs, and scrubbing the years
+    // walks them backwards round the wheel as the nodes regress.
+    for (int i = 0; i < st->num_seasons; i++) {
+        double c = st->seasons[i].mid + st->ecl_tz;
+        double p0 = tempus_jd_to_wheel_pct(t, c - ECL_SEASON_HALF);
+        double p1 = tempus_jd_to_wheel_pct(t, c + ECL_SEASON_HALF);
+        if (p1 <= 0.0 || p0 >= 1.0) continue;
+        if (p0 < 0.0) p0 = 0.0;
+        if (p1 > 1.0) p1 = 1.0;
+        float a0 = (float)(p0 * 2.0 * M_PI - M_PI * 0.5);
+        float a1 = (float)(p1 * 2.0 * M_PI - M_PI * 0.5);
+        // The head's season in the dragon's own warm ink, the tail's
+        // a shade cooler — the dial names which jaw is in play, and
+        // the wheel should not contradict it
+        bool head = st->seasons[i].head;
+        DrawColor ink = dca(head ? 0.42f : 0.34f,
+                            head ? 0.33f : 0.31f,
+                            head ? 0.22f : 0.28f, k * 0.30f);
+
+        // TAPERED, thickest at the crossing and thinning to nothing at
+        // the limits. This is not decoration: the sun's distance from
+        // the node is what decides whether a shadow lands at all, so
+        // the band is genuinely deepest in the middle and marginal at
+        // its ends. Drawn as a fan of slices rather than one arc so
+        // the width can vary along it. (Seren reads the two bands as
+        // dragons on the wheel — which is exactly what they are: the
+        // head's season and the tail's, the same two jaws the dial
+        // names, so a body that tapers is the honest shape.)
+        {
+            const int SL = 32;
+            for (int sgi = 0; sgi < SL; sgi++) {
+                float t0 = (float)sgi / SL, t1 = (float)(sgi + 1) / SL;
+                float b0 = a0 + (a1 - a0) * t0;
+                float b1 = a0 + (a1 - a0) * t1;
+                // Half-width follows a cosine hump across the window
+                float m0 = cosf(((float)t0 - 0.5f) * (float)M_PI);
+                float m1 = cosf(((float)t1 - 0.5f) * (float)M_PI);
+                float w0 = 3.0f + 12.0f * m0, w1 = 3.0f + 12.0f * m1;
+                draw_set_color(d, ink);
+                int vb = d->num_verts;
+                float c0 = cosf(b0), s0 = sinf(b0);
+                float c1 = cosf(b1), s1 = sinf(b1);
+                draw__push_vert(d, c0 * (mark_r - w0), s0 * (mark_r - w0),
+                                d->white_u, d->white_v);
+                draw__push_vert(d, c0 * (mark_r + w0), s0 * (mark_r + w0),
+                                d->white_u, d->white_v);
+                draw__push_vert(d, c1 * (mark_r + w1), s1 * (mark_r + w1),
+                                d->white_u, d->white_v);
+                draw__push_vert(d, c1 * (mark_r - w1), s1 * (mark_r - w1),
+                                d->white_u, d->white_v);
+                draw__tri(d, vb, vb + 1, vb + 2);
+                draw__tri(d, vb, vb + 2, vb + 3);
+            }
+        }
+
+        // The jaw itself, set at the middle of its own season — which
+        // is the instant the sun actually arrives at that crossing,
+        // not a label placed for looks. CAPVT on the ascending node,
+        // CAVDA on the descending, the same figures DRACO's dial wears.
+        {
+            double pm = tempus_jd_to_wheel_pct(t, c);
+            if (pm >= 0.0 && pm < 1.0) {
+                float gx, gy;
+                cal__fc(pm, mark_r, &gx, &gy);
+                float ux = gx / mark_r, uy = gy / mark_r;   // glyph-up
+                draw_set_color(d, dca(0.84f, 0.80f, 0.72f, k * 0.72f));
+                sigil_strokes(d, head ? sigil_caput : sigil_cauda,
+                              gx, gy, ux, uy, 34.0f, 1.3f);
+            }
+        }
+    }
+
+    for (int i = 0; i < st->ecl->n; i++) {
+        const Eclipse *e = &st->ecl->e[i];
+        double wjd = e->jd + st->ecl_tz;             // UT -> the wheel's clock
+        double pct = tempus_jd_to_wheel_pct(t, wjd);
+        if (pct < 0.0 || pct >= 1.0) continue;       // a lookahead year's
+
+        float mx, my;
+        cal__fc(pct, mark_r, &mx, &my);
+        float sure = e->certain ? 1.0f : 0.50f;
+        float a = k * sure * (0.62f + 0.38f * e->depth);
+        float rr = 9.0f + 5.0f * e->depth;
+
+        // The stem: without it the eye cannot tell which tick the mark
+        // belongs to, and the whole point is the date
+        float ix, iy, ox, oy;
+        cal__fc(pct, radius + 20.0f, &ix, &iy);
+        cal__fc(pct, mark_r - rr - 2.0f, &ox, &oy);
+        draw_set_color(d, dca(0.62f, 0.58f, 0.50f, a * 0.55f));
+        draw_line_thin(d, ix, iy, ox, oy);
+
+        if (e->solar) {
+            // The ring of light around the black disc
+            draw_set_color(d, dca(1.00f, 0.82f, 0.42f, a * 0.85f));
+            draw_circle_filled(d, mx, my, rr);
+            draw_set_color(d, dca(0.04f, 0.035f, 0.03f, a));
+            draw_circle_filled(d, mx, my, rr * 0.58f);
+            draw_set_color(d, dca(1.00f, 0.90f, 0.60f, a * 0.30f));
+            draw_circle_stroked(d, mx, my, rr + 2.5f, 1.0f);
+        } else {
+            // The umbral copper, refracted sunset light
+            draw_set_color(d, dca(0.72f, 0.26f, 0.13f, a * 0.90f));
+            draw_circle_filled(d, mx, my, rr * 0.86f);
+            draw_set_color(d, dca(0.90f, 0.45f, 0.28f, a * 0.35f));
+            draw_circle_stroked(d, mx, my, rr + 1.0f, 1.0f);
+        }
+
+        // THE NEXT ONE wears a halo. Seren's ask was partly "when is
+        // the next" — on a wheel of a dozen marks that has to be
+        // answerable without counting round from the pointer.
+        if (i == next_i) {
+            draw_set_color(d, dca(0.95f, 0.93f, 0.86f, k * 0.55f));
+            draw_circle_stroked(d, mx, my, rr + 7.0f, 1.2f);
+        }
+    }
 }
 
 static void cal__hour_ring(const CalendarViewState *st, DrawCtx *d,
@@ -348,6 +535,9 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
         else
             draw_line_thin(d, ix, iy, ox, oy);
     }
+
+    // The dragon's feedings, on the dates they fall
+    cal__eclipse_marks(st, d, t, radius);
 
     // Day-of-month numbers, radially set beside their ticks — fade in
     // once the zoom gives them room to breathe

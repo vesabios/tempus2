@@ -380,7 +380,7 @@ static void offic_render(const void *buf, DrawCtx *d, const Tempus *t,
             bool cur_m = (m == tv->month - 1);
             draw_set_color(d, dca(0.62f, 0.60f, 0.55f,
                                   cur_m ? 0.85f : 0.32f));
-            orr__strokes(d, offic__labors[m], ux * lr2, uy * lr2,
+            sigil_strokes(d, offic__labors[m], ux * lr2, uy * lr2,
                          ux, uy, cur_m ? 36.0f : 30.0f, 1.1f);
         }
     }

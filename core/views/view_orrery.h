@@ -455,31 +455,12 @@ static const float *orr__glyphs[12] = {
     orr__gl_pisces,
 };
 
-// Draw a stroke table at (cx,cy): (ux,uy) is glyph-up in screen
-// space — pointed radially outward, every glyph stands feet-to-center
-// like a clock face's engravings. Screen y runs down, so
-// right = (-uy, ux) keeps the figure unmirrored. Shared by the zodiac
-// sigils here and the labors of the months at OFFICIVM.
-static void orr__strokes(DrawCtx *d, const float *g, float cx, float cy,
-                         float ux, float uy, float sz, float w) {
-    float rx = -uy, ry = ux;
-    int i = 0;
-    while (g[i] > 0.5f) {
-        int n = (int)g[i++];
-        float lx = 0, ly = 0;
-        for (int k = 0; k < n; k++) {
-            float gx = g[i++], gy = g[i++];
-            float sx = cx + (rx * gx + ux * gy) * sz;
-            float sy = cy + (ry * gx + uy * gy) * sz;
-            if (k) draw_line(d, lx, ly, sx, sy, w);
-            lx = sx; ly = sy;
-        }
-    }
-}
+// The stroke engine moved to core/sigils.h once a fourth caller (the
+// calendar wheel's eclipse seasons) appeared — see the note there.
 
 static void orr__zodiac_glyph(DrawCtx *d, int sign, float cx, float cy,
                               float ux, float uy, float sz) {
-    orr__strokes(d, orr__glyphs[sign], cx, cy, ux, uy, sz, 1.1f);
+    sigil_strokes(d, orr__glyphs[sign], cx, cy, ux, uy, sz, 1.1f);
 }
 
 // Pip radius from apparent magnitude: how bright a body looks in the
@@ -1817,6 +1798,12 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                               + cy3 * (1.0f - pw3);
                 wpl->pl_cr[p] = msz3 * pw3
                               + sv->pl_r[b] * (1.0f - pw3);
+                // CAELVM's PLANETAE toggle. The bodies are VIEW_LVMEN's,
+                // so the chart cannot hide them itself — it publishes
+                // pl_show and the compose honours it, on the chart's
+                // share of the claim only.
+                if (sv->pl_show < 0.5f)
+                    wpl->pl_ca[p] *= pw3;
                 wpl->pl_ca[p] = sv->pl_ba[b]
                               * (ss + (1.0f - ss) * fin3);
                 wpl->pl_col[p][3] = 0.95f;

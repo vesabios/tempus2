@@ -16,6 +16,8 @@ test_*.png
 shot.png
 tools/test_glyphs
 tools/test_planets
+tools/test_eclipse
+tools/test_time
 
 # OS junk
 .DS_Store

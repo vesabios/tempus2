@@ -10,6 +10,7 @@
 #include "ink.h"
 #include "atmo.h"
 #include "draw.h"
+#include "sigils.h"
 #include "globe.h"
 #include "tween.h"
 #include "timewarp.h"
