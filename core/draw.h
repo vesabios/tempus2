@@ -261,6 +261,42 @@ static inline void draw_line_thin(DrawCtx *d, float x0, float y0, float x1, floa
     draw_line(d, x0, y0, x1, y1, 1.0f);
 }
 
+// A PLAIN line: one quad, no feather rows. 4 verts / 6 indices against
+// draw_line's 8 / 18 — a third of the cost.
+//
+// draw_line's three-quad ribbon exists because nothing here is
+// multisampled (sample_count = 1 everywhere), so it carries its own
+// antialiasing. That is worth paying for where strokes run CLOSE
+// TOGETHER and alias against each other — the calendar wheel's day
+// ticks, the dial's rings — because there the jaggies beat against
+// their neighbours and moire crawls across the whole band.
+//
+// It is NOT worth paying for sparse, one-off, stochastic linework
+// (Seren): a constellation's stick figure or a graticule crossing an
+// empty sky has nothing to beat against, and the ribbon is simply
+// three times the geometry for an edge nobody reads as an edge.
+// Sub-pixel widths still fade by alpha rather than vanishing, exactly
+// as the ribbon does.
+static inline void draw_line_flat(DrawCtx *d, float x0, float y0,
+                                  float x1, float y1, float width) {
+    float dx = x1 - x0, dy = y1 - y0;
+    float len = sqrtf(dx * dx + dy * dy);
+    if (len < 0.001f) return;
+    float px = draw__px(d);
+    float alpha = 1.0f;
+    if (width < px) { alpha = width / px; width = px; }
+    float hw = width * 0.5f;
+    float ux = -dy / len * hw, uy = dx / len * hw;
+    float u = d->white_u, v = d->white_v;
+    int base = d->num_verts;
+    draw__push_vert_a(d, x0 + ux, y0 + uy, u, v, alpha);
+    draw__push_vert_a(d, x1 + ux, y1 + uy, u, v, alpha);
+    draw__push_vert_a(d, x1 - ux, y1 - uy, u, v, alpha);
+    draw__push_vert_a(d, x0 - ux, y0 - uy, u, v, alpha);
+    draw__tri(d, base, base + 1, base + 2);
+    draw__tri(d, base, base + 2, base + 3);
+}
+
 static inline void draw_rect_filled(DrawCtx *d, float x0, float y0, float x1, float y1) {
     float u = d->white_u, v = d->white_v;
     int base = d->num_verts;
@@ -272,12 +308,37 @@ static inline void draw_rect_filled(DrawCtx *d, float x0, float y0, float x1, fl
     draw__tri(d, base, base+2, base+3);
 }
 
+// HOW MANY SIDES A CIRCLE ACTUALLY NEEDS, from how big it lands on
+// screen. Every circle here used to be a flat 48 segments — the same
+// geometry for a 355-unit globe and for the 1.8-unit dot marking a
+// star in a constellation figure, where 48 sides is 144 indices spent
+// on something two pixels across. The constellation layer alone was
+// 21,480 indices and essentially all of it was those dots.
+//
+// The bound is the same sagitta argument the sky's arcs use: a chord
+// departs its circle by about r*pi^2/(2N^2), so holding that under a
+// third of a pixel gives N = pi*sqrt(r_px/0.7). Clamped to [6,48], so
+// nothing larger than today's circles is ever coarser than it was.
+static inline int draw__circle_segs(DrawCtx *d, float radius) {
+    float px = draw__px(d);
+    float r_px = px > 0.0f ? radius / px : radius;
+    { static int force = -1;
+      if (force < 0) force = getenv("TEMPUS_CIRC48") ? 1 : 0;
+      if (force) return DRAW_CIRCLE_SEGS; }
+    if (r_px < 0.05f) return 6;
+    int n = (int)ceilf(3.14159265f * sqrtf(r_px / 0.7f));
+    if (n < 6) n = 6;
+    if (n > DRAW_CIRCLE_SEGS) n = DRAW_CIRCLE_SEGS;
+    return n;
+}
+
 static inline void draw_circle_filled(DrawCtx *d, float cx, float cy, float radius) {
     float u = d->white_u, v = d->white_v;
+    const int segs = draw__circle_segs(d, radius);
     int center = draw__push_vert(d, cx, cy, u, v);
     int first = -1;
-    for (int i = 0; i <= DRAW_CIRCLE_SEGS; i++) {
-        float a = (float)i / DRAW_CIRCLE_SEGS * (float)(M_PI * 2.0);
+    for (int i = 0; i <= segs; i++) {
+        float a = (float)i / segs * (float)(M_PI * 2.0);
         int vi = draw__push_vert(d, cx + cosf(a) * radius, cy + sinf(a) * radius, u, v);
         if (i > 0)
             draw__tri(d, center, vi - 1, vi);
@@ -302,9 +363,10 @@ static inline void draw_circle_stroked(DrawCtx *d, float cx, float cy, float rad
 
     float radii[4]  = { radius - edge, radius - core, radius + core, radius + edge };
     float alphas[4] = { 0.0f, alpha, alpha, 0.0f };
+    const int segs = draw__circle_segs(d, radius);
     int base = d->num_verts;
-    for (int i = 0; i <= DRAW_CIRCLE_SEGS; i++) {
-        float a = (float)i / DRAW_CIRCLE_SEGS * (float)(M_PI * 2.0);
+    for (int i = 0; i <= segs; i++) {
+        float a = (float)i / segs * (float)(M_PI * 2.0);
         float cs = cosf(a), sn = sinf(a);
         for (int r = 0; r < 4; r++)
             draw__push_vert_a(d, cx + cs * radii[r], cy + sn * radii[r], u, v, alphas[r]);
