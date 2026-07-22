@@ -816,7 +816,14 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
                 float chy = av->ecl_y[k] * (1.0f - wc) + cy3 * wc;
                 float x = mx3 * mw3 + chx * (1.0f - mw3);
                 float y = my3 * mw3 + chy * (1.0f - mw3);
-                if (i > 0)
+                // Drop the segment that WRAPS the projection's
+                // antipode — it maps to the whole rim, so the ecliptic
+                // leaves one edge and re-enters at another and the
+                // joining chord cuts across the chart (Seren).
+                int pk3 = (i - 1 + SKY_ECL_N) % SKY_ECL_N;
+                if (i > 0 && sky__seg_ok(sv->ecl_az[pk3], sv->ecl_alt[pk3],
+                                         sv->ecl_az[k], sv->ecl_alt[k],
+                                         px, py, x, y))
                     draw_line(d, px, py, x, y, 1.3f);
                 px = x; py = y;
             }

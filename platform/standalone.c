@@ -129,6 +129,24 @@ static double g_idle_secs = 0;
 // Annunciator hit rects (chrome space: 1280-tall world units, no camera
 // zoom), published by the frame that draws them
 static float g_wv_btn[WV_COUNT][4];   // x0, y0, x1, y1
+
+// CAELVM's layer toggles, lower right. Minimal by intent (Seren):
+// lit when on, dimmed when off, a click flips it. No boxes, no rule.
+#define SKY_TOG_N 5
+static float g_tog_btn[SKY_TOG_N][4];
+static const char *g_tog_name[SKY_TOG_N] = {
+    "PLANETAE", "FIGVRAE", "STELLAE", "CANCELLI", "ANALEMMA",
+};
+static bool *sky_tog_flag(int i) {
+    SkyViewState *k = &g_scene.sky_state;
+    switch (i) {
+        case 0: return &k->show_planets;
+        case 1: return &k->show_figures;
+        case 2: return &k->show_stars;
+        case 3: return &k->show_cage;
+        default: return &k->show_analemma;
+    }
+}
 // Time controls: NVNC (return to the living present) and the two
 // fast-forward rates, in minutes of instrument time per real second
 static double g_ffwd = 0.0;
@@ -915,6 +933,13 @@ static void frame(void) {
         g_draw.sx = scale;
         g_draw.sy = scale;
         scene_render(&g_scene, &g_draw, &g_tempus);
+        if (getenv("TEMPUS_VERTTEST"))
+            fprintf(stderr, "VERTS %6d / %d   IDX %7d / %d%s\n",
+                    g_draw.num_verts, DRAW_MAX_VERTS,
+                    g_draw.num_indices, DRAW_MAX_INDICES,
+                    (g_draw.num_verts >= DRAW_MAX_VERTS
+                     || g_draw.num_indices >= DRAW_MAX_INDICES)
+                    ? "   *** CAPPED — DROPPING ***" : "");
 
         // Worldview annunciator: the station names engraved upper-right,
         // active one lit. Chrome space — plain 1280-tall units, no
@@ -970,6 +995,33 @@ static void frame(void) {
                     draw_line(&g_draw, x_r - 96.0f, y + 2.0f,
                               x_r, y + 2.0f, 1.0f);
                     y += 18.0f;
+                }
+            }
+
+            // ---- CAELVM's layer toggles, lower right ----
+            {
+                float sky_a = (float)g_scene.sky_blend;
+                for (int i = 0; i < SKY_TOG_N; i++) {
+                    g_tog_btn[i][0] = 1.0f; g_tog_btn[i][2] = -1.0f;
+                    g_tog_btn[i][1] = 1.0f; g_tog_btn[i][3] = -1.0f;
+                }
+                if (sky_a > 0.02f) {
+                    float ty = 640.0f - 40.0f - SKY_TOG_N * 30.0f;
+                    for (int i = 0; i < SKY_TOG_N; i++) {
+                        bool on = *sky_tog_flag(i);
+                        float tw2 = sdf_measure_width(wv_w,
+                                        g_tog_name[i]) * 17.0f;
+                        draw_set_color(&g_draw, on
+                            ? dca(0.92f, 0.90f, 0.86f, 0.95f * sky_a)
+                            : dca(0.42f, 0.41f, 0.39f, 0.55f * sky_a));
+                        draw_text_ex(&g_draw, wv_w, 17.0f,
+                                     x_r - tw2, ty, g_tog_name[i]);
+                        g_tog_btn[i][0] = x_r - tw2 - 10.0f;
+                        g_tog_btn[i][1] = ty - 5.0f;
+                        g_tog_btn[i][2] = x_r + 10.0f;
+                        g_tog_btn[i][3] = ty + 22.0f;
+                        ty += 30.0f;
+                    }
                 }
             }
         }
@@ -1102,6 +1154,14 @@ static void event(const sapp_event *e) {
             if (cx >= g_wv_btn[i][0] && cx <= g_wv_btn[i][2]
                 && cy >= g_wv_btn[i][1] && cy <= g_wv_btn[i][3]) {
                 set_worldview((Worldview)i);
+                return;
+            }
+        }
+        for (int i = 0; i < SKY_TOG_N; i++) {
+            if (cx >= g_tog_btn[i][0] && cx <= g_tog_btn[i][2]
+                && cy >= g_tog_btn[i][1] && cy <= g_tog_btn[i][3]) {
+                bool *f = sky_tog_flag(i);
+                *f = !*f;
                 return;
             }
         }

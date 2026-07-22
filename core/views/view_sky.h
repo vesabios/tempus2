@@ -50,6 +50,15 @@ struct SkyViewState {
     float view_az, view_alt;
     bool  chart_dragging;
 
+    // CAELVM'S LAYER TOGGLES. The chart carries a great deal now, so
+    // each family can be put away. Read by the shell's toggle list
+    // (lower right) and by the draws below; pl_show is PUBLISHED
+    // because the planets themselves are VIEW_LVMEN's, not this
+    // view's — only their paths and labels are drawn here.
+    bool  show_planets, show_figures, show_stars;
+    bool  show_cage, show_analemma;
+    float pl_show;          // 1/0, mirrored for the orrery's compose
+
     // THE CHART'S FLYWHEEL: let go mid-turn and the sky keeps
     // swinging, decaying like the band's and the globe's. Held in
     // SCREEN units/sec so the coast runs back through sky_view_pan and
@@ -321,6 +330,12 @@ static void sky_init(void *buf, const Tempus *t, const RenderStyle *s) {
     st->opacity = 1.0;
     st->cache_jd = -1.0e9;
     st->view_az = 0.0f;
+    st->show_planets = true;
+    st->show_figures = true;
+    st->show_stars = true;
+    st->show_cage = true;
+    st->show_analemma = true;
+    st->pl_show = 1.0f;
     st->view_alt = 45.0f;   // default LOOK: halfway to the north
                             // horizon (Seren) — the sky as a scene,
                             // not a map; drag restores the zenith
@@ -388,6 +403,7 @@ static void sky__lum_targets(SkyViewState *st) {
 static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
     SkyViewState *st = (SkyViewState *)buf;
     st->orr = &sc->orrery_state;
+    st->pl_show = st->show_planets ? 1.0f : 0.0f;
     (void)dt;
     st->blend = sc->sky_blend;
     st->orbw = sc->orbis_wheel;
@@ -509,6 +525,94 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
 
 // Alias kept for the morph call sites: the full-sphere projection
 // already accepts any altitude
+// SHOULD THIS SEGMENT BE DRAWN? The antipode of the look maps to the
+// WHOLE RIM, so any polyline passing near it leaves one edge and
+// re-enters at another — and joining those two samples draws a chord
+// clean across the chart (Seren caught the ecliptic doing it). The
+// projection is equidistant, so honest motion between two samples is
+// bounded by their true angular separation; only the antipode's
+// blow-up beats that bound. Segments that do are dropped, leaving a
+// small gap at the rim instead of a false line through the middle.
+//
+// Applies to EVERY polyline through this projection — ecliptic,
+// diurnal paths, graticule, analemma, constellation figures.
+static inline bool sky__seg_ok(float az0, float alt0,
+                               float az1, float alt1,
+                               float x0, float y0, float x1, float y1) {
+    float v0[3], v1[3];
+    sky__vec(az0, alt0, v0);
+    sky__vec(az1, alt1, v1);
+    float dp = v0[0]*v1[0] + v0[1]*v1[1] + v0[2]*v1[2];
+    if (dp > 1.0f) dp = 1.0f;
+    if (dp < -1.0f) dp = -1.0f;
+    float sep = acosf(dp) * 180.0f / (float)M_PI;
+    float R = SKY_R * sky__loupe;
+    float allow = (sep / 180.0f) * R * 2.5f + 8.0f;
+    float dx = x1 - x0, dy = y1 - y0;
+    return (dx * dx + dy * dy) <= allow * allow;
+}
+
+// ADAPTIVE ARC. Draws a curve segment between two sky directions,
+// subdividing until each piece is short ON SCREEN. The projection
+// stretches without bound toward the antipode, so a fixed angular
+// step gives long faceted chords out at the rim and wastes samples
+// near the centre where everything is compressed (Seren). Splitting
+// on the SCREEN gap spends samples exactly where the projection is
+// stretching them apart.
+//
+// The midpoint is found by SLERP in direction space, not by averaging
+// angles — exact for great circles (the ecliptic, the hour circles),
+// and negligibly off for the small circles at these step sizes.
+// Wrapping segments bail: the antipode is a genuine discontinuity and
+// no amount of subdivision converges across it.
+static void sky__arc(DrawCtx *d, float az0, float alt0,
+                     float az1, float alt1, float w, int depth) {
+    float x0, y0, x1, y1;
+    sky__project(az0, alt0, &x0, &y0);
+    sky__project(az1, alt1, &x1, &y1);
+    // TEMPUS_NOWRAPCUT=1 keeps the wrapping segments, to see what the
+    // subdivision alone does with them (Seren). Off by default: the
+    // antipode is a real discontinuity and no depth converges across
+    // it, so the chord survives however finely it is split.
+    static int wrapcut = -1;
+    if (wrapcut < 0) wrapcut = getenv("TEMPUS_NOWRAPCUT") ? 0 : 1;
+    if (wrapcut && !sky__seg_ok(az0, alt0, az1, alt1, x0, y0, x1, y1))
+        return;
+    // OFF-SCREEN SEGMENTS COST NOTHING. At full loupe the sphere maps
+    // to a radius five times the frame's half-height, so most of any
+    // curve is outside it — and subdividing that was more than half
+    // the whole index budget (Seren hit the cap and layers began
+    // dropping). A bounding-box reject is conservative and exact: a
+    // segment whose box misses the frame cannot cross it.
+    {
+        float sx = d->sx != 0.0f ? d->sx : 1.0f;
+        float sy = d->sy != 0.0f ? d->sy : 1.0f;
+        float xlo = (-d->screen_w * 0.5f - d->tx) / sx - 40.0f;
+        float xhi = ( d->screen_w * 0.5f - d->tx) / sx + 40.0f;
+        float ylo = (-d->screen_h * 0.5f - d->ty) / sy - 40.0f;
+        float yhi = ( d->screen_h * 0.5f - d->ty) / sy + 40.0f;
+        if ((x0 < xlo && x1 < xlo) || (x0 > xhi && x1 > xhi)
+         || (y0 < ylo && y1 < ylo) || (y0 > yhi && y1 > yhi)) return;
+    }
+    float dx = x1 - x0, dy = y1 - y0;
+    if (depth > 0 && dx * dx + dy * dy > 14.0f * 14.0f) {
+        float v0[3], v1[3];
+        sky__vec(az0, alt0, v0);
+        sky__vec(az1, alt1, v1);
+        float mx = v0[0] + v1[0], my = v0[1] + v1[1], mz = v0[2] + v1[2];
+        float n = sqrtf(mx * mx + my * my + mz * mz);
+        if (n > 1.0e-5f) {
+            mx /= n; my /= n; mz /= n;
+            float altm = asinf(mz) * 180.0f / (float)M_PI;
+            float azm = atan2f(mx, my) * 180.0f / (float)M_PI;
+            sky__arc(d, az0, alt0, azm, altm, w, depth - 1);
+            sky__arc(d, azm, altm, az1, alt1, w, depth - 1);
+            return;
+        }
+    }
+    draw_line(d, x0, y0, x1, y1, w);
+}
+
 static inline void sky__project_clamped(float az, float alt,
                                         float *x, float *y) {
     sky__project(az, alt, x, y);
@@ -574,14 +678,10 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         for (int ci = 0; ci < 4; ci++) {
             draw_set_color(d, dca(0.55f, 0.53f, 0.49f,
                                   ci < 2 ? 0.10f : 0.06f));
-            float px2 = 0, py2 = 0;
-            for (int i = 0; i <= 96; i++) {
-                float az = (float)i / 96.0f * 360.0f;
-                float cx2, cy2;
-                sky__project(az, circ_alt[ci], &cx2, &cy2);
-                if (i > 0)
-                    draw_line(d, px2, py2, cx2, cy2, 1.0f);
-                px2 = cx2; py2 = cy2;
+            for (int i = 0; i < 24; i++) {
+                float a0 = (float)i / 24.0f * 360.0f;
+                float a1 = (float)(i + 1) / 24.0f * 360.0f;
+                sky__arc(d, a0, circ_alt[ci], a1, circ_alt[ci], 1.0f, 5);
             }
         }
         // ---- The graticule: RIGHT ASCENSION + DECLINATION ----
@@ -597,8 +697,9 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         // maximum zoom, where the horizon and the cardinals have left
         // the frame and this is all that says where you are looking.
         {
-            float grat = (float)tempus_smoothstep(1.15, SKY_LOUPE_MAX,
-                                                  sky__loupe);
+            float grat = st->show_cage
+                       ? (float)tempus_smoothstep(1.15, SKY_LOUPE_MAX,
+                                                  sky__loupe) : 0.0f;
             if (grat > 0.004f) {
                 const TimeView *gtv = &st->tv;
                 double jd_g = gtv->jd_current + gtv->percent_of_day
@@ -613,16 +714,15 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                     bool major = (m % 3) == 0;
                     draw_set_color(d, dca(0.55f, 0.58f, 0.62f,
                                           major ? 0.22f : 0.13f));
-                    float lx = 0, ly = 0;
-                    for (int k = 0; k <= 48; k++) {
-                        float dec = -90.0f + (float)k / 48.0f * 180.0f;
+                    float paz = 0, palt = 0;
+                    for (int k = 0; k <= 12; k++) {
+                        float dec = -90.0f + (float)k / 12.0f * 180.0f;
                         float az, alt;
                         planets_star_azalt(ra, dec, lst_g, (float)glat,
                                            &az, &alt);
-                        float cx3, cy3;
-                        sky__project(az, alt, &cx3, &cy3);
-                        if (k > 0) draw_line(d, lx, ly, cx3, cy3, 1.0f);
-                        lx = cx3; ly = cy3;
+                        if (k > 0)
+                            sky__arc(d, paz, palt, az, alt, 1.0f, 5);
+                        paz = az; palt = alt;
                     }
                 }
                 // Declination rings every 15 deg; the equator leads.
@@ -632,16 +732,15 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                                           eq ? 0.30f
                                              : ((dd % 45) == 0 ? 0.18f
                                                                : 0.11f)));
-                    float lx = 0, ly = 0;
-                    for (int k = 0; k <= 72; k++) {
-                        float ra = (float)k / 72.0f * 360.0f;
+                    float paz = 0, palt = 0;
+                    for (int k = 0; k <= 18; k++) {
+                        float ra = (float)k / 18.0f * 360.0f;
                         float az, alt;
                         planets_star_azalt(ra, (float)dd, lst_g,
                                            (float)glat, &az, &alt);
-                        float cx3, cy3;
-                        sky__project(az, alt, &cx3, &cy3);
-                        if (k > 0) draw_line(d, lx, ly, cx3, cy3, 1.0f);
-                        lx = cx3; ly = cy3;
+                        if (k > 0)
+                            sky__arc(d, paz, palt, az, alt, 1.0f, 5);
+                        paz = az; palt = alt;
                     }
                 }
                 d->alpha = base_alpha * fb;
@@ -656,23 +755,49 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
         // current hour. Drawn in the sun's own gold; the stretch that
         // falls below the horizon is dimmed, not hidden, on the same
         // terms as the diurnal arcs.
-        {
-            float lx = 0, ly = 0;
-            for (int k = 0; k <= SKY_ANA_N; k++) {
-                int kk = k % SKY_ANA_N;
-                float cx3, cy3;
-                sky__project(st->ana_az[kk], st->ana_alt[kk],
-                             &cx3, &cy3);
-                if (k > 0) {
-                    int pk = (k - 1) % SKY_ANA_N;
-                    bool up = st->ana_alt[pk] > 0.0f
-                           && st->ana_alt[kk] > 0.0f;
-                    d->alpha = base_alpha * fb * (up ? 0.55f : 0.30f);
-                    draw_set_color(d, dca(196 / 255.0f, 126 / 255.0f,
-                                          16 / 255.0f, 1.0f));
-                    draw_line(d, lx, ly, cx3, cy3, 1.0f);
-                }
-                lx = cx3; ly = cy3;
+        if (st->show_analemma) {
+            draw_set_color(d, dca(196 / 255.0f, 126 / 255.0f,
+                                  16 / 255.0f, 1.0f));
+            for (int k = 1; k <= SKY_ANA_N; k++) {
+                int kk = k % SKY_ANA_N, pk = k - 1;
+                bool up = st->ana_alt[pk] > 0.0f
+                       && st->ana_alt[kk] > 0.0f;
+                d->alpha = base_alpha * fb * (up ? 0.55f : 0.30f);
+                sky__arc(d, st->ana_az[pk], st->ana_alt[pk],
+                         st->ana_az[kk], st->ana_alt[kk], 1.0f, 5);
+            }
+            d->alpha = base_alpha * fb;
+        }
+
+        // ---- The NAMED STARS ----
+        // The astrolabe's rete carried these and the bowl did not;
+        // they belong to both (Seren). Same table, planets_stars —
+        // one catalogue, so a star cannot sit in two places. Risen
+        // ones burn with their names, set ones are ghosts, exactly
+        // the plate's own grammar.
+        if (st->show_stars) {
+            const TimeView *stv = &st->tv;
+            double jd_s2 = stv->jd_current + stv->percent_of_day - 0.5
+                         - t->config.timezone / 24.0;
+            float lst_s = (float)fmod(planets__gmst(jd_s2)
+                                      + t->config.longitude, 360.0);
+            int sfw = _font_compat[FONT_date].weight;
+            for (int i = 0; i < PLANETS_NSTARS; i++) {
+                float saz, salt;
+                planets_star_azalt(planets_stars[i].ra,
+                                   planets_stars[i].dec, lst_s,
+                                   (float)t->config.latitude,
+                                   &saz, &salt);
+                float sx2, sy2;
+                sky__project(saz, salt, &sx2, &sy2);
+                bool up = salt > 0.0f;
+                d->alpha = base_alpha * fb * (up ? 1.0f : 0.32f);
+                draw_set_color(d, dca(0.92f, 0.88f, 0.76f, 1.0f));
+                if (up) draw_circle_filled(d, sx2, sy2, 2.6f);
+                else    draw_circle_stroked(d, sx2, sy2, 2.0f, 1.0f);
+                d->alpha = base_alpha * fb * (up ? 0.85f : 0.28f);
+                draw_text_ex(d, sfw, 12.0f, sx2 + 6.0f, sy2 + 4.0f,
+                             planets_stars[i].name);
             }
             d->alpha = base_alpha * fb;
         }
@@ -703,7 +828,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // where the body is now; sample i lerps to the matching moment of
     // its day across the bowl. The year becomes the day. The sun has
     // no ring — its path unfolds out of the sun itself.
-    for (int b = 0; b < BODY_COUNT; b++) {
+    for (int b = 0; st->show_planets && b < BODY_COUNT; b++) {
         float pa = (b == BODY_SUN) ? 0.30f
                  : (b == BODY_MOON) ? 0.25f : 0.18f;
         // MACHINE-END ALPHA MUST MATCH THE ORRERY'S OWN RINGS. The
@@ -833,7 +958,10 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
             if (a < 0.004f) continue;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, a));
-            draw_line(d, mx0, my0, mx1, my1, 1.0f);
+            if (sky__seg_ok(st->path[b][i][0], st->path[b][i][1],
+                            st->path[b][i+1][0], st->path[b][i+1][1],
+                            mx0, my0, mx1, my1))
+                draw_line(d, mx0, my0, mx1, my1, 1.0f);
         }
     }
 
@@ -845,7 +973,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     // set edges whisper, each name at the center of its risen stars.
     // They bow out under the astrolabe's plate (whose rete carries
     // pointer stars instead — the period instrument's own idiom).
-    if (fb > 0.001f) {
+    if (fb > 0.001f && st->show_figures) {
         float csup = 1.0f - (float)tempus_smoothstep(0.0, 0.15,
                                                      st->astb);
         if (csup > 0.004f) {
