@@ -116,6 +116,27 @@ static inline double tempus_jd_to_wheel_pct(const Tempus *t, double jd) {
     return (jd - t->jd_newyear) / t->total_days;
 }
 
+// Day-of-year back out of a normalized year position.
+//
+// THE DAY MUST SURVIVE THE ROUND TRIP. scene__begin_override stores the
+// current date as the ratio doy/days_total, and for 19 of the 365 days
+// in a year that division does not divide back exactly: doy 202 of 365
+// returns 201.99999999999997, and a bare truncation reads it as day
+// 201. Seren caught it as "the first click on the 24-hour ring takes me
+// back a day" — FIRST because begin_override only runs once, and BACK A
+// DAY only on the dates where the representation happens to fall short,
+// which is why it looked intermittent rather than arithmetic.
+//
+// The nudge is a tenth of a second of a day: far below anything the
+// instrument resolves, and far above the ~1e-14 error it absorbs. It
+// must never round a genuine fractional position up to the next day,
+// which is what the harness checks.
+#define TEMPUS_DAY_EPS 1.0e-6
+
+static inline int tempus_doy_from_pct(double ypct, int days_total) {
+    return (int)(ypct * days_total + TEMPUS_DAY_EPS);
+}
+
 // ---- Easing ----
 
 static inline double tempus_ease_in_out_quad(double t) {
@@ -273,7 +294,7 @@ static inline void tempus_update(Tempus *t, double now_secs) {
         double ypct = t->override_year_pct;
         if (ypct < 0) ypct = 0;
         if (ypct > 0.9999) ypct = 0.9999;
-        int day_of_year = (int)(ypct * days_total);
+        int day_of_year = tempus_doy_from_pct(ypct, days_total);
         int accum = 0;
         t->month = 1;
         t->day = 1;

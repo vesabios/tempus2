@@ -481,9 +481,13 @@ static inline void scene_event(Scene *sc, const Tempus *t, int key) {
 static inline void scene__advance_override_days(Tempus *t, double dv,
                                                 bool keep_time) {
     double diy = (double)cal_days_in_year(t->override_year);
+    // Same round-trip guard as the date derivation (see
+    // tempus_doy_from_pct): the stored ratio doy/diy does not always
+    // divide back exactly, and a bare floor() here would shed a day at
+    // the start of a drag on the dates where it falls short.
     double v = keep_time
              ? t->override_year_pct * diy + dv
-             : floor(t->override_year_pct * diy)
+             : floor(t->override_year_pct * diy + TEMPUS_DAY_EPS)
                + t->override_day_pct + dv;
     while (v >= diy) {
         v -= diy;
