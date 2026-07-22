@@ -20,6 +20,7 @@
 #define SKY_R          560.0f   // horizon rim, world units
 #define SKY_PATH_N     49       // diurnal path samples (30-min steps)
 #define SKY_ECL_N      90       // ecliptic samples (4-deg steps)
+#define SKY_ANA_N      74       // analemma samples (~5-day steps)
 
 struct SkyViewState {
     TimeView tv;  // must be first field
@@ -48,6 +49,14 @@ struct SkyViewState {
     // your gaze but not bury it.
     float view_az, view_alt;
     bool  chart_dragging;
+
+    // THE CHART'S FLYWHEEL: let go mid-turn and the sky keeps
+    // swinging, decaying like the band's and the globe's. Held in
+    // SCREEN units/sec so the coast runs back through sky_view_pan and
+    // inherits its loupe scaling live — store degrees and a coast
+    // begun at one zoom would carry the wrong rate into another.
+    float pan_ax, pan_ay;   // drag delta since the last update tick
+    float pan_vx, pan_vy;   // units/sec; nonzero = coasting
 
     // The LOUPE: 1 = whole sphere, SKY_LOUPE_MAX = horizon circle on
     // the calendar wheel. Station-local; see sky__loupe.
@@ -81,6 +90,12 @@ struct SkyViewState {
     // Everything projected, refreshed when the clock minute moves
     float body_az[BODY_COUNT], body_alt[BODY_COUNT];
     float path[BODY_COUNT][SKY_PATH_N][2];   // az, alt over +/-12h
+    // THE ANALEMMA: where the sun stands at THIS clock time on every
+    // day of the year — the figure of eight. Held in az/alt, this
+    // view's own frame; ORBIS keeps its own copy in dial coords and
+    // the two cannot be shared.
+    float ana_az[SKY_ANA_N], ana_alt[SKY_ANA_N];
+
     float ecl_az[SKY_ECL_N], ecl_alt[SKY_ECL_N];
     float sign_az[12], sign_alt[12];         // cusp positions (0 Aries...)
     float sign_maz[12], sign_malt[12];       // sign MIDDLES (the sigils)
@@ -212,15 +227,24 @@ static inline void sky__project(float az_deg, float alt_deg,
 // wraps freely — at the zenith it simply turns the chart, which is
 // well-defined, so there is still no pole to mishandle.
 static inline void sky_view_pan(SkyViewState *st, float dx, float dy) {
+    // DIVIDED BY THE LOUPE (Seren): the sky is magnified L times, so
+    // a pixel of drag must buy 1/L of the angle or the chart runs away
+    // from the finger — it was ~6x too fast at full zoom, which is
+    // exactly where the fine control is wanted. Uses the EFFECTIVE
+    // loupe (the same relaxation sky__arm applies), so a drag caught
+    // mid-flight scales by what is actually on screen.
+    float lp = 1.0f + (st->loupe - 1.0f) * (float)st->blend;
+    if (lp < 1.0f) lp = 1.0f;
+    float k = 180.0f / (SKY_R * lp);
     // NEGATED against dx: the chart handedness flip mirrored screen-x
     // (see sky__set_center), so the drag had to mirror with it or the
     // sky swings away from the finger.
-    float az = st->view_az - dx / SKY_R * 180.0f;
+    float az = st->view_az - dx * k;
     az = fmodf(az, 360.0f);
     if (az < 0.0f) az += 360.0f;
     st->view_az = az;
 
-    float alt = st->view_alt + dy / SKY_R * 180.0f;
+    float alt = st->view_alt + dy * k;
     if (alt > 90.0f) alt = 90.0f;
     if (alt < 5.0f) alt = 5.0f;     // the pitch clamp: no digging
     st->view_alt = alt;
@@ -439,6 +463,25 @@ static void sky_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         }
     }
 
+    // The analemma at the CURRENT clock time, so the figure passes
+    // through the live sun. Minute-cached with everything else here —
+    // it is 74 SPA solves, too heavy for a frame.
+    {
+        const TempusConfig *cfg = &t->config;
+        int ay = st->tv.year;
+        int adays = cal_days_in_year(ay);
+        double apct = st->tv.percent_of_day;
+        for (int k = 0; k < SKY_ANA_N; k++) {
+            int doy = (int)((double)k / SKY_ANA_N * adays);
+            int am, ad;
+            solar__doy_to_date(ay, doy, &am, &ad);
+            spa_data aspa;
+            solar__spa_at(cfg, ay, am, ad, apct, cfg->timezone, &aspa);
+            st->ana_az[k] = (float)aspa.azimuth;
+            st->ana_alt[k] = (float)(90.0 - aspa.zenith);
+        }
+    }
+
     // The ecliptic's current lie across the sky + the sign cusps
     for (int i = 0; i < SKY_ECL_N; i++) {
         double az, alt;
@@ -541,6 +584,99 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                 px2 = cx2; py2 = cy2;
             }
         }
+        // ---- The graticule: RIGHT ASCENSION + DECLINATION ----
+        // Centred on the CELESTIAL POLE, because that is the point the
+        // sky turns about: scrub the 24-hour ring and the whole lattice
+        // spins in place around its own centre rather than wobbling
+        // (Seren's test, and the thing that settles which frame this
+        // is). An ecliptic grid centres on the ecliptic pole, which
+        // itself circles the celestial one — so it drifts under
+        // exactly that gesture.
+        //
+        // Present ONLY under the loupe: nothing at rest, full ink at
+        // maximum zoom, where the horizon and the cardinals have left
+        // the frame and this is all that says where you are looking.
+        {
+            float grat = (float)tempus_smoothstep(1.15, SKY_LOUPE_MAX,
+                                                  sky__loupe);
+            if (grat > 0.004f) {
+                const TimeView *gtv = &st->tv;
+                double jd_g = gtv->jd_current + gtv->percent_of_day
+                            - 0.5 - t->config.timezone / 24.0;
+                double glat = t->config.latitude;
+                float lst_g = (float)fmod(planets__gmst(jd_g)
+                                          + t->config.longitude, 360.0);
+                d->alpha = base_alpha * fb * grat;
+                // Hour circles every 30 deg (2h of RA), pole to pole.
+                for (int m = 0; m < 12; m++) {
+                    float ra = m * 30.0f;
+                    bool major = (m % 3) == 0;
+                    draw_set_color(d, dca(0.55f, 0.58f, 0.62f,
+                                          major ? 0.22f : 0.13f));
+                    float lx = 0, ly = 0;
+                    for (int k = 0; k <= 48; k++) {
+                        float dec = -90.0f + (float)k / 48.0f * 180.0f;
+                        float az, alt;
+                        planets_star_azalt(ra, dec, lst_g, (float)glat,
+                                           &az, &alt);
+                        float cx3, cy3;
+                        sky__project(az, alt, &cx3, &cy3);
+                        if (k > 0) draw_line(d, lx, ly, cx3, cy3, 1.0f);
+                        lx = cx3; ly = cy3;
+                    }
+                }
+                // Declination rings every 15 deg; the equator leads.
+                for (int dd = -75; dd <= 75; dd += 15) {
+                    bool eq = (dd == 0);
+                    draw_set_color(d, dca(0.55f, 0.58f, 0.62f,
+                                          eq ? 0.30f
+                                             : ((dd % 45) == 0 ? 0.18f
+                                                               : 0.11f)));
+                    float lx = 0, ly = 0;
+                    for (int k = 0; k <= 72; k++) {
+                        float ra = (float)k / 72.0f * 360.0f;
+                        float az, alt;
+                        planets_star_azalt(ra, (float)dd, lst_g,
+                                           (float)glat, &az, &alt);
+                        float cx3, cy3;
+                        sky__project(az, alt, &cx3, &cy3);
+                        if (k > 0) draw_line(d, lx, ly, cx3, cy3, 1.0f);
+                        lx = cx3; ly = cy3;
+                    }
+                }
+                d->alpha = base_alpha * fb;
+            }
+        }
+
+        // ---- The ANALEMMA ----
+        // The sun's place at this same clock time on every day of the
+        // year: the figure of eight, whose fatness is the equation of
+        // time and whose height is the seasons. Closed, and it passes
+        // through the live sun by construction — it is computed at the
+        // current hour. Drawn in the sun's own gold; the stretch that
+        // falls below the horizon is dimmed, not hidden, on the same
+        // terms as the diurnal arcs.
+        {
+            float lx = 0, ly = 0;
+            for (int k = 0; k <= SKY_ANA_N; k++) {
+                int kk = k % SKY_ANA_N;
+                float cx3, cy3;
+                sky__project(st->ana_az[kk], st->ana_alt[kk],
+                             &cx3, &cy3);
+                if (k > 0) {
+                    int pk = (k - 1) % SKY_ANA_N;
+                    bool up = st->ana_alt[pk] > 0.0f
+                           && st->ana_alt[kk] > 0.0f;
+                    d->alpha = base_alpha * fb * (up ? 0.55f : 0.30f);
+                    draw_set_color(d, dca(196 / 255.0f, 126 / 255.0f,
+                                          16 / 255.0f, 1.0f));
+                    draw_line(d, lx, ly, cx3, cy3, 1.0f);
+                }
+                lx = cx3; ly = cy3;
+            }
+            d->alpha = base_alpha * fb;
+        }
+
         // The chart's edge: the point opposite the look, stretched
         // into the outermost rim
         draw_set_color(d, dca(0.55f, 0.53f, 0.49f, 0.20f));
@@ -570,9 +706,38 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
     for (int b = 0; b < BODY_COUNT; b++) {
         float pa = (b == BODY_SUN) ? 0.30f
                  : (b == BODY_MOON) ? 0.25f : 0.18f;
+        // MACHINE-END ALPHA MUST MATCH THE ORRERY'S OWN RINGS. The
+        // orrery stops drawing them the instant sky_owns goes true
+        // (skyb > 0.001) and this view picks them up in the same
+        // frame — so any difference here is a visible step at the
+        // handoff, in both directions. It read as the rings fading to
+        // nothing on the way out and popping in hard on the way back
+        // (Seren). 0.44 / 0.62 are the orrery's ring inks; drifting
+        // them apart again will reopen exactly this seam.
         float ra = (b == BODY_SUN) ? 0.0f
-                 : (b == BODY_MOON) ? 0.20f : 0.13f;
+                 : (b == BODY_MOON) ? 0.30f : 0.44f;
         const uint8_t *c = sky__body_col[b];
+        // WHICH WAY DOES THIS BODY'S DIURNAL PATH WIND ON SCREEN? It
+        // depends on the LOOK — swing the azimuth to 180 and it
+        // reverses — so the ring's sweep cannot be fixed at compile
+        // time (a constant sign fixed az 0 and broke az 180, Seren).
+        // Measure the signed area of the projected path and sweep the
+        // machine ring the same way, so the two parametrisations agree
+        // whatever the view is doing. Stable within a flight: the
+        // azimuth does not move during one, and while the chart owns
+        // the paths outright the machine term is zero anyway.
+        float wind = 0.0f;
+        {
+            float wx0 = 0, wy0 = 0;
+            for (int i = 0; i < SKY_PATH_N; i++) {
+                float sx, sy;
+                sky__project(st->path[b][i][0], st->path[b][i][1],
+                             &sx, &sy);
+                if (i > 0) wind += wx0 * sy - sx * wy0;
+                wx0 = sx; wy0 = sy;
+            }
+        }
+        float wsgn = (wind < 0.0f) ? -1.0f : 1.0f;
         for (int i = 0; i + 1 < SKY_PATH_N; i++) {
             float mx0, my0, mx1, my1;
             for (int k = 0; k < 2; k++) {
@@ -591,7 +756,7 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                     // real angular rate (~13.2 deg/day)
                     float gx, gy;
                     orr__ecl_dir(st->now.geo_lon[BODY_MOON]
-                                 + (ii - SKY_PATH_N / 2) * 0.275f,
+                                 + wsgn * (ii - SKY_PATH_N / 2) * 0.275f,
                                  &gx, &gy);
                     double yp = tempus_year_pct(t);
                     float edx = sinf((float)(yp * 2.0 * M_PI)) * wheel_R;
@@ -601,20 +766,70 @@ static void sky_render(const void *buf, DrawCtx *d, const Tempus *t,
                 } else {
                     int pl = planets_body_pl(b);
                     float gx, gy;
-                    // A slice of the orbit ring, centered on the body
-                    orr__ecl_dir(st->now.helio_lon[pl]
-                                 + (ii - SKY_PATH_N / 2) * (360.0f / SKY_PATH_N),
-                                 &gx, &gy);
-                    float orbr = orr__orbit_r(pl, wheel_R);
-                    rx = gx * orbr;
-                    ry = gy * orbr;
+                    // A slice of the orbit ring, centered on the body.
+                    // The radius is the RING's at this sample's own
+                    // longitude (orr__ring_r_blend), not the planet's
+                    // own distance — they differ once the orbits are
+                    // ellipses — and the slice is seated on the
+                    // machine's live recentre, without which the rings
+                    // unfurl from heliocentric positions the dial has
+                    // already left.
+                    // SWEPT BACKWARDS so the two ends WIND THE SAME
+                    // WAY (Seren). Sample ii runs ecliptic longitude on
+                    // the machine and TIME on the chart, and those turn
+                    // opposite ways on screen — measured, sky winds
+                    // negative and the ring positive. With the
+                    // parametrisations opposed, every sample lerped
+                    // clean across the ring and the path folded through
+                    // itself mid-morph. Negating the offset costs
+                    // nothing: an arc centred on the body is the same
+                    // arc swept either way.
+                    double lon_s = st->now.helio_lon[pl]
+                                 + wsgn * (ii - SKY_PATH_N / 2)
+                                   * (360.0f / SKY_PATH_N);
+                    orr__ecl_dir(lon_s, &gx, &gy);
+                    double jd_s = st->cache_jd;
+                    float orbr = orr__ring_r_blend(pl, jd_s, lon_s,
+                                                   wheel_R);
+                    rx = (st->orr ? st->orr->g_ox : 0.0f) + gx * orbr;
+                    ry = (st->orr ? st->orr->g_oy : 0.0f) + gy * orbr;
                 }
                 *out_x = rx * mw + sx * (1 - mw);
                 *out_y = ry * mw + sy * (1 - mw);
             }
+            if (getenv("TEMPUS_WINDTEST") && i == 0) {
+                // signed area contribution of this segment, machine
+                // end vs sky end, about each end's own centre
+                float sxa, sya, sxb, syb;
+                sky__project(st->path[b][i][0], st->path[b][i][1],
+                             &sxa, &sya);
+                sky__project(st->path[b][i+1][0], st->path[b][i+1][1],
+                             &sxb, &syb);
+                int pl2 = planets_body_pl(b);
+                float g0x, g0y, g1x, g1y;
+                orr__ecl_dir(st->now.helio_lon[pl2]
+                             + wsgn * (i - SKY_PATH_N/2) * (360.0f/SKY_PATH_N),
+                             &g0x, &g0y);
+                orr__ecl_dir(st->now.helio_lon[pl2]
+                             + wsgn * (i + 1 - SKY_PATH_N/2) * (360.0f/SKY_PATH_N),
+                             &g1x, &g1y);
+                static float acc_s = 0, acc_m = 0; static int nn = 0;
+                acc_s += sxa * syb - sxb * sya;
+                acc_m += g0x * g1y - g1x * g0y;
+                (void)acc_s; (void)acc_m; (void)nn;
+                fprintf(stderr, "WIND %-8s wind=%+12.1f  sweep=%+.0f\n",
+                        b < 2 ? (b ? "MOON" : "SUN")
+                              : orr__planet[planets_body_pl(b)].name,
+                        wind, wsgn);
+            }
             bool vis = st->path[b][i][1] > 0.0f
                     && st->path[b][i + 1][1] > 0.0f;
-            float a = ra * mw + (vis ? pa : pa * 0.45f) * sw;
+            // The below-horizon stretch is DIMMER, not hidden (Seren):
+            // it was 0.45x, which put a planet's night arc at alpha
+            // 0.08 and read as absent. The whole diurnal circle is
+            // worth seeing — where a body will be is as much the
+            // chart's business as where it is.
+            float a = ra * mw + (vis ? pa : pa * 0.78f) * sw;
             if (a < 0.004f) continue;
             draw_set_color(d, dca(c[0] / 255.0f, c[1] / 255.0f,
                                   c[2] / 255.0f, a));

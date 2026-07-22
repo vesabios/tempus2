@@ -713,7 +713,14 @@ static void cal__sky_circle(const CalendarViewState *st, DrawCtx *d,
     // top as the frame, so the clip has to open with it or the wash
     // and the cardinals stay pinned to the rim while the stars fly out
     // beyond them.
+    // CLIPPING DISABLED (Seren, temporary). The clamp exists for the
+    // PLATE's limb — it is the astrolabe eating the wash at 400 — and
+    // with ASTROLABIVM out of the menu there is nothing routinely
+    // asking for it. Note it was never a clip: it PULLS vertices onto
+    // a circle rather than cutting them, so anything crossing it
+    // deformed. Restore by dropping the override below.
     float clip = 400.0f + (bez * sky__loupe - 400.0f) * wc;
+    clip = 1.0e6f;
     // The dark earth under CAELVM's whole chart — retired for now
     // (Seren), kept for one relaunch if the void feels too empty
     // if (wc > 0.004f) {

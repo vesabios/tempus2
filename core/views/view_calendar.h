@@ -205,6 +205,15 @@ static void calendar_update(void *buf, const Tempus *t, double dt, Scene *sc) {
         for (int i = 0; i < ST_COUNT; i++) {
             if (station_table[i].hour_r <= 0) continue;
             double sw = sc->stw[i];
+            // THE CHART STATIONS PARK THE MACHINE, so MACHINA keeps
+            // weight in the normalised vector and halves theirs: at
+            // full CAELVM hr_a came out at exactly 0.500, which drew
+            // the ring at half ink AND failed the drag test's
+            // hr_a > 0.5 by a hair — dim and dead (Seren). Their own
+            // blend is the honest measure of how far up they are; the
+            // parked machine is not a station you are partly at.
+            if (i == ST_CAELVM)        sw = sc->sky_blend;
+            else if (i == ST_ASTROLAB) sw = sc->astro_blend;
             // Where the wheel has two states, the hour ring belongs to
             // the ZOOMED-OUT one (Seren): zoomed out the band clicks
             // whole days and the ring carries the hour; zoomed in the
@@ -217,7 +226,7 @@ static void calendar_update(void *buf, const Tempus *t, double dt, Scene *sc) {
             r += sw * station_table[i].hour_r;
             w += sw * station_table[i].hour_w;
         }
-        st->hr_a = (float)a;
+        st->hr_a = (float)(a > 1.0 ? 1.0 : a);
         st->hr_r = a > 1.0e-6 ? (float)(r / a) : 0.0f;
         st->hr_w = a > 1.0e-6 ? (float)(w / a) : 0.0f;
     }
@@ -309,7 +318,18 @@ static void calendar_render(const void *buf, DrawCtx *d, const Tempus *t,
         bool bar = true;
         switch (st->ticks[i].kind) {
             case TICK_LEAP:           draw_set_color(d, s->leap_year); break;
-            case TICK_MONTH_BOUNDARY: draw_set_color(d, s->month_color); break;
+            // MONTH BOUNDARIES ARE ORDINARY DAYS (Seren): identical
+            // ink, opacity, width and length — the tick band no longer
+            // marks them at all. The teal block above already names
+            // the month and shows its extent, so a second mark in the
+            // band was restating it. Colour alone was not enough: the
+            // 4-wide BAR kept them legible, so the bar goes too. (This
+            // departs from the original tempus, where month boundaries
+            // are 4-wide bars in month_color.)
+            case TICK_MONTH_BOUNDARY:
+                draw_set_color(d, s->day_marks);
+                bar = false;
+                break;
             case TICK_TODAY_MONTH:    draw_set_color(d, s->month_text_color); break;
             case TICK_TODAY:
                 draw_set_color(d, s->month_color);

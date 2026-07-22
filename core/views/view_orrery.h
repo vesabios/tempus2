@@ -37,6 +37,13 @@ struct OrreryViewState {
     // wheel renders on top of everything (see tempus2 layer law).
     float  orbis_loupe;
 
+    // The geocentric recentre this frame (gox/goy). PUBLISHED because
+    // it is a property of the machine that lives outside every
+    // function computing machine geometry — any view seating something
+    // on the machine (CAELVM's unfurling orbit rings) needs it, and
+    // has silently missed it every time it was not to hand.
+    float  g_ox, g_oy;
+
     // MACHINA's scale morph: 0 = the tempo scale, 1 = true AU
     // (Earth-anchored). See orr__true_mix.
     float  true_mix;
@@ -231,6 +238,22 @@ static inline float orr__ring_r_at(int pl, double jd_ut, double lon_deg) {
     return sqrtf(bx * bx + by * by);
 }
 
+// The ring's radius at a longitude, with the tempo<->true blend
+// applied — what the rings draw and what any sampled slice of a ring
+// must use. orr__orbit_r gives the PLANET's radius, which is only the
+// same thing on a circle.
+static inline float orr__ring_r_blend(int pl, double jd_ut,
+                                      double lon_deg, float wheel_R) {
+    static const float off6[6] = {150.0f, 207.0f, 235.0f,
+                                  267.0f, 287.0f, 300.0f};
+    float tempo = (pl < PL_EARTH) ? wheel_R * orr__inner_frac[pl]
+                : (pl == PL_EARTH) ? wheel_R
+                : wheel_R + off6[pl - PL_MARS];
+    if (orr__true_mix <= 0.0f) return tempo;
+    float truth = orr__true_k(wheel_R) * orr__ring_r_at(pl, jd_ut, lon_deg);
+    return tempo + (truth - tempo) * orr__true_mix;
+}
+
 static inline float orr__orbit_r(int p, float wheel_R) {
     static const float outer_off[6] = {
         150.0f, 207.0f, 235.0f, 267.0f, 287.0f, 300.0f };
@@ -307,6 +330,7 @@ orr__planet[PL_COUNT] = {
 // The bead size at full true-scale: cube-root of the real radius ratio
 // times this. Jupiter lands ~3.5, Earth ~1.6, Mercury ~1.2 — small,
 // ordered, and all still on screen.
+#define ORR_EARTH_BEAD 6.7f   /* the bead table's own law, at rel 1.0 */
 #define ORR_TRUE_BEAD 1.6f
 #define ORR_SUN_REL   109.2f   /* the sun, in Earth radii */
 
@@ -703,7 +727,16 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     // The mid-morph path lerps this same seat toward the dial.
     float ehx = sphi * base_w * (1.0f - za) * esc;
     float ehy = -cphi * base_w * (1.0f - za) * esc;
-    float ehr = 42.0f + za * 198.0f;     // full-zoom helio size: 240
+    // EARTH IN PROPORTION AT THE TEMPO SCALE TOO (Seren). Its bead
+    // was 42 against Jupiter's 15 — nearly three times the largest
+    // planet, the one body in the dial exempt from its own size
+    // ordering, because it is drawn as the GLOBE rather than from the
+    // bead table. The table follows size = k * cbrt(true radius) with
+    // k ~ 6.7 (fitted across all eight), so Earth at rel 1.0 belongs
+    // at 6.7 — between Venus's 8 and Mars's 6.5, which is where it
+    // truly sits. TELLVS's full globe (240) is untouched: za carries
+    // it there, and that view is about the world, not the ordering.
+    float ehr = ORR_EARTH_BEAD + za * (240.0f - ORR_EARTH_BEAD);
     if (orr__true_mix > 0.0f) {
         ehr += (ORR_TRUE_BEAD - ehr) * orr__true_mix;
         // BEARING ONLY — esc already carries the radius (it IS
@@ -837,6 +870,8 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
     float d_sun = r_fin * orr__true_mix;
     float gox = er_now > 1.0e-4f ? -ex / er_now * d_sun : 0.0f;
     float goy = er_now > 1.0e-4f ? -ey / er_now * d_sun : 0.0f;
+    ((OrreryViewState *)(uintptr_t)buf)->g_ox = gox;
+    ((OrreryViewState *)(uintptr_t)buf)->g_oy = goy;
     ex += gox;   // Earth to the middle; the globe, its moon, the
     ey += goy;   // tether and every sight-line origin follow from here
     // Declutter for the system stage: zoomed out, the emphasis is
@@ -908,9 +943,19 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                            - t->config.timezone / 24.0;
             float k_au = orr__true_k(wheel_R);
             for (int p = 0; p < PL_COUNT; p++) {
+                // EACH RING WEARS ITS PLANET'S OWN INK (Seren) — the
+                // same palette the sky's diurnal arcs use, so a ring
+                // unfurling into an arc never changes colour. They were
+                // one uniform grey here and per-body there, which made
+                // the handoff pop even once the alphas agreed. Earth is
+                // the exception: the globe is its own body, so the home
+                // ring keeps the neutral warm grey.
                 bool home = (p == PL_EARTH);
-                draw_set_color(d, dca(0.60f, 0.58f, 0.54f,
-                                      home ? 0.62f : 0.44f));
+                draw_set_color(d, home
+                    ? dca(0.60f, 0.58f, 0.54f, 0.62f)
+                    : dca(orr__planet[p].r / 255.0f,
+                          orr__planet[p].g / 255.0f,
+                          orr__planet[p].b / 255.0f, 0.44f));
                 float lw = home ? 1.5f : 1.15f;
                 if (orr__true_mix <= 0.0f) {
                     draw_circle_stroked(d, gox, goy,

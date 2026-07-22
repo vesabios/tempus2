@@ -931,13 +931,14 @@ static void frame(void) {
             // Display order (Seren): the physical instruments first —
             // clock, globe, sun, system, plate, sky, dragon — then a
             // rule, then the cycle dials.
-            // ROTAE, SAECVLVM and OFFICIVM are BUILT BUT UNLISTED
+            // ROTAE, SAECVLVM, OFFICIVM and now ASTROLABIVM are
+            // BUILT BUT UNLISTED
             // (Seren): the stations live on and still fly, they simply
             // have no door in the annunciator. Reachable by the debug
             // combo and the TEMPUS_* pins.
             static const int wv_order[] = {
                 WV_HOROLOGIVM, WV_ORBIS, WV_TELLVS, WV_MACHINA,
-                WV_ASTROLAB, WV_CAELVM, WV_DRACO,
+                WV_CAELVM, WV_DRACO,
                 WV_HORAE,
             };
             const int wv_shown = (int)(sizeof wv_order / sizeof *wv_order);
@@ -963,7 +964,7 @@ static void frame(void) {
                 g_wv_btn[i][2] = x_r + 10.0f;
                 g_wv_btn[i][3] = y + wv_sz + 6.0f;
                 y += 34.0f;
-                if (k == 6) {   // the rule between worlds and wheels
+                if (k == 5) {   // the rule between worlds and wheels
                     draw_set_color(&g_draw,
                                    dca(0.50f, 0.49f, 0.46f, 0.30f));
                     draw_line(&g_draw, x_r - 96.0f, y + 2.0f,

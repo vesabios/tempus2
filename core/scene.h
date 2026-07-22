@@ -338,6 +338,31 @@ static inline void scene_update(Scene *sc, Tempus *t, double dt) {
             c->fling_vel = 0.0;
         }
 
+        // THE CHART'S FLYWHEEL — the same law again, on CAELVM's look.
+        // Dead away from the chart, so a spin cannot outlive the
+        // station and swing a sky nobody is looking at.
+        {
+            SkyViewState *kv = &sc->sky_state;
+            if (sc->sky_blend <= 0.5) {
+                kv->pan_vx = kv->pan_vy = 0.0f;
+                kv->pan_ax = kv->pan_ay = 0.0f;
+            } else if (kv->chart_dragging) {
+                if (dt > 1e-4) {
+                    float ix = kv->pan_ax / (float)dt;
+                    float iy = kv->pan_ay / (float)dt;
+                    kv->pan_vx = kv->pan_vx * 0.65f + ix * 0.35f;
+                    kv->pan_vy = kv->pan_vy * 0.65f + iy * 0.35f;
+                }
+                kv->pan_ax = kv->pan_ay = 0.0f;
+            } else if (kv->pan_vx != 0.0f || kv->pan_vy != 0.0f) {
+                sky_view_pan(kv, kv->pan_vx * (float)dt,
+                                 kv->pan_vy * (float)dt);
+                float dec = (float)exp2(-dt / 0.7);   // the band's
+                kv->pan_vx *= dec;                    // half-life
+                kv->pan_vy *= dec;
+            }
+        }
+
         // THE GLOBE'S FLYWHEEL, the band's law applied to the trackball:
         // a smoothed rate while the finger is down, a free coast after
         // it lifts, and NO SNAP TO ZERO — pacing decides when the spin
@@ -652,6 +677,17 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
                 // whole weeks, or scrubs true fractional time.
                 {
                     Station ds = station_dominant(sc->stw);
+                    // THE CHART OWNS THE BAND WHEN THE CHART IS UP.
+                    // CAELVM and the astrolabe PARK the machine rather
+                    // than flying it home, so MACHINA's weight survives
+                    // at full chart and WINS the dominance vote — the
+                    // band then inherited MACHINA's fractional policy
+                    // instead of the chart's whole-day clicks (Seren:
+                    // at CAELVM the wheel must always step days). From
+                    // HOROLOGIVM it only ever looked right because that
+                    // station declares day clicks too.
+                    if (sc->sky_blend > 0.5)        ds = ST_CAELVM;
+                    else if (sc->astro_blend > 0.5) ds = ST_ASTROLAB;
                     // Where the wheel has two states, the SCRUB MODE
                     // IS THE ZOOM STATE (Seren): zoomed out the band
                     // clicks whole days, zoomed in it scrubs true
@@ -719,7 +755,10 @@ static inline void scene_pointer(Scene *sc, Tempus *t, int phase,
         ob->last_wx = wx;
         ob->last_wy = wy;
     } else if (phase == 1 && sk->chart_dragging) {
-        sky_view_pan(sk, wx - sk->last_wx, wy - sk->last_wy);
+        float ddx = wx - sk->last_wx, ddy = wy - sk->last_wy;
+        sky_view_pan(sk, ddx, ddy);
+        sk->pan_ax += ddx;   // the update tick turns this into a rate
+        sk->pan_ay += ddy;
         sk->last_wx = wx;
         sk->last_wy = wy;
     } else if (phase == 1 && sk->hour_dragging) {
@@ -819,7 +858,9 @@ static inline double scene_desired_fps(const Scene *sc) {
     if (sc->transitioning || tween_any_active(&sc->tweens)
         || fabs(sc->calendar_state.fling_vel) > 0.0002
         || fabsf(sc->orbis_state.vel_x) > 0.4f
-        || fabsf(sc->orbis_state.vel_y) > 0.4f)
+        || fabsf(sc->orbis_state.vel_y) > 0.4f
+        || fabsf(sc->sky_state.pan_vx) > 0.4f
+        || fabsf(sc->sky_state.pan_vy) > 0.4f)
         return sc->pace.animate_fps;
 
     double fps = sc->pace.ambient_fps;
