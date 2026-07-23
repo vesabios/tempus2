@@ -937,10 +937,21 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
             mpy[b] = dy * ORR_WEB_R;
         }
 
-        // Orbit rings (Earth's is the calendar wheel itself); the sky
-        // view owns them during the CAELVM morph
-        if (a_ring > 0.001f && !sky_owns) {
-            d->alpha = base_alpha * a_ring;
+        // Orbit rings; the sky view owns them during the CAELVM morph
+        // — EXCEPT EARTH'S. The sky unfurls a counterpart for every
+        // planet's ring, but its "Earth orbit" is the calendar wheel
+        // becoming the horizon, so the home ring drawn here has no
+        // twin over there. Gating it on sky_owns like the rest made it
+        // binary: invisible for the whole flight into the machine,
+        // then snapping on when sky_blend crossed 0.001 at the very
+        // end (Seren) — and vanishing on the first frame of every
+        // departure. Same law as the ring names below: an element
+        // with NO counterpart keeps its own weight and eases over the
+        // tail of the sky's descent, never popping at the handoff.
+        float a_home = a_ring
+                     * (st->skyb > 0.25 ? 0.0f
+                                        : 1.0f - (float)st->skyb / 0.25f);
+        if (a_ring > 0.001f && (!sky_owns || a_home > 0.001f)) {
             // Earth's ring draws too now — the calendar wheel has
             // moved out to the moat and no longer marks the orbit.
             // The HOME orbit reads a clear step above the others: this
@@ -961,6 +972,10 @@ static void orrery_render(const void *buf, DrawCtx *d, const Tempus *t,
                 // the exception: the globe is its own body, so the home
                 // ring keeps the neutral warm grey.
                 bool home = (p == PL_EARTH);
+                // The sky still owns the PLANETS' rings mid-morph;
+                // only the counterpart-less home ring draws through
+                if (sky_owns && !home) continue;
+                d->alpha = base_alpha * (home ? a_home : a_ring);
                 draw_set_color(d, home
                     ? dca(0.60f, 0.58f, 0.54f, 0.62f)
                     : dca(orr__planet[p].r / 255.0f,
